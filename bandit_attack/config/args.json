@@ -20,7 +20,7 @@
       "max_queries": 201,
       "image_lr": 0.01,
       "mode": "linf",
-      "online_lr": 100,
+      "online_lr": 1.0,
       "exploration": 0.01,
       "epsilon": 0.05,
       "batch_size": 500,

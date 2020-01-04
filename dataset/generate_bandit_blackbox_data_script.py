@@ -157,8 +157,10 @@ class DatasetModelConstructor(object):
             train_dataset = TinyImageNet(IMAGE_DATA_ROOT[args.dataset], preprocessor, is_train=True)
         elif datasetname == "ImageNet":
             train_dataset = ImageFolder(IMAGE_DATA_ROOT[args.dataset] + "/validation", preprocessor)
-
-        data_loader = torch.utils.data.DataLoader(train_dataset, batch_size=batch_size, shuffle=True, num_workers=0)
+        workers = 0
+        if datasetname == "ImageNet" or datasetname == "TinyImageNet":
+            workers = 4
+        data_loader = torch.utils.data.DataLoader(train_dataset, batch_size=batch_size, shuffle=True, num_workers=workers)
         return data_loader
 
 class BanditAttack(object):
@@ -471,6 +473,8 @@ if __name__ == "__main__":
 
     for attack_type, attack_conf in attack_json.items():
         if "nes" in attack_type:
+            continue
+        if attack_type!='linf':
             continue
         attack_conf.update(vars(args))
         params = SimpleNamespace(**attack_conf)

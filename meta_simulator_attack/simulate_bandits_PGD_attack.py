@@ -1,4 +1,7 @@
 import sys
+
+from torch import nn
+
 sys.path.append("/home1/machen/meta_perturbations_black_box_attack")
 import argparse
 import json
@@ -94,6 +97,33 @@ class BanditsAttack(object):
         else:
             return F.cross_entropy(logit, label, reduction='none')
 
+
+
+    def pgd_attack(self, meta_finetuner, orig_images, images, true_labels, target_labels, project_mode, epsilon, alpha=3.0 / 255, iters=20):
+        generated_adv_images = []
+        for image_idx, image in enumerate(images):
+            proj_maker = self.l2_proj if project_mode == 'l2' else self.linf_proj  # 调用proj_maker返回的是一个函数
+            proj_step = proj_maker(orig_images[image_idx].unsqueeze(0), epsilon)
+            meta_network = meta_finetuner.meta_model_pool[image_idx]
+            meta_network.eval()
+            meta_network.cuda()
+            image = torch.unsqueeze(image, 0)
+            for i in range(iters):
+                image.requires_grad = True
+                outputs = meta_network(image)
+                meta_network.zero_grad()
+                if target_labels is None:
+                    target_label = None
+                else:
+                    target_label = target_labels[image_idx].unsqueeze(0)
+                cost = self.xent_loss(outputs, true_labels[image_idx].unsqueeze(0), target_label)
+                cost.backward()
+                adv_images = image + alpha * image.grad.sign()
+                image = proj_step(adv_images).detach_()
+            generated_adv_images.append(image)
+        generated_adv_images = torch.cat(generated_adv_images, 0)
+        return generated_adv_images
+
     ##
     # Main functions
     ##
@@ -166,25 +196,29 @@ class BanditsAttack(object):
                 q2_images_for_finetune.append(q2_images.detach())
                 q1_logits_for_finetune.append(q1_logits.detach())
                 q2_logits_for_finetune.append(q2_logits.detach())
+                l1 = self.xent_loss(q1_logits, true_labels, target_labels)
+                l2 = self.xent_loss(q2_logits, true_labels, target_labels)
+                # Finite differences estimate of directional derivative
+                est_deriv = (l1 - l2) / (args.fd_eta * args.exploration)  # 方向导数 , l1和l2是loss
+                # 2-query gradient estimate
+                est_grad = est_deriv.view(-1, 1, 1, 1) * exp_noise  # B, C, H, W,
+                # Update the prior with the estimated gradient
+                prior = prior_step(prior, est_grad, args.online_lr)  # 注意，修正的是prior,这就是bandit算法的精髓
+                grad = upsampler(prior)  # prior相当于梯度
+                ## Update the image:
+                # take a pgd step using the prior
+                # image_lr = args.image_lr
+                # if step_index % 500 == 0 and step_index > 0:
+                #     image_lr = args.image_lr * 0.1
+                adv_images = image_step(adv_images, grad * correct.view(-1, 1, 1, 1),
+                                        args.image_lr)  # prior放大后相当于累积的更新量，可以用来更新
+                adv_images = proj_step(adv_images)
+                adv_images = torch.clamp(adv_images, 0, 1)
             else:
-                with torch.no_grad():
-                    q1_logits, q2_logits = meta_finetuner.predict(q1_images, q2_images)
+                # FIXME 效果有限，速度还很慢
+                adv_images = self.pgd_attack(meta_finetuner, images, adv_images,
+                                             true_labels, target_labels, args.mode, args.epsilon, args.image_lr)
 
-
-            l1 = self.xent_loss(q1_logits, true_labels, target_labels)
-            l2 = self.xent_loss(q2_logits, true_labels, target_labels)
-            # Finite differences estimate of directional derivative
-            est_deriv = (l1 - l2) / (args.fd_eta * args.exploration)  # 方向导数 , l1和l2是loss
-            # 2-query gradient estimate
-            est_grad = est_deriv.view(-1, 1, 1, 1) * exp_noise  # B, C, H, W,
-            # Update the prior with the estimated gradient
-            prior = prior_step(prior, est_grad, args.online_lr)  # 注意，修正的是prior,这就是bandit算法的精髓
-            grad = upsampler(prior)  # prior相当于梯度
-            ## Update the image:
-            # take a pgd step using the prior
-            adv_images = image_step(adv_images, grad * correct.view(-1, 1, 1, 1), args.image_lr)  # prior放大后相当于累积的更新量，可以用来更新
-            adv_images = proj_step(adv_images)
-            adv_images = torch.clamp(adv_images, 0, 1)
             # stats
             with torch.no_grad():
                 adv_logit = target_model(adv_images)

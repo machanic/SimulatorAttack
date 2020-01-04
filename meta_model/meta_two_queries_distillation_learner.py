@@ -1,4 +1,7 @@
 import sys
+
+from optimizer.radam import RAdam
+
 sys.path.append("/home1/machen/meta_perturbations_black_box_attack")
 from dataset.meta_two_queries_dataset import TwoQueriesMetaTaskDataset
 import glob
@@ -49,7 +52,7 @@ class MetaTwoQueriesLearner(object):
         self.fast_net = InnerLoopPairLoss(self.network, self.num_inner_updates,
                                   self.inner_step_size, self.meta_batch_size)  # 并行执行每个task
         self.fast_net.cuda()
-        self.opt = Adam(self.network.parameters(), lr=meta_step_size)
+        self.opt = RAdam(self.network.parameters(), lr=meta_step_size)
         self.arch_pool = {}
 
 

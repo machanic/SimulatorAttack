@@ -5,13 +5,14 @@ import re
 import glog as log
 import torch
 from torch import nn
-from torch.optim import SGD
+from torch.optim import SGD, Adam
 from torchvision import models as torch_models
 
 from cifar_models import ResNet34
 from config import PY_ROOT, IN_CHANNELS, CLASS_NUM
 from constant_enum import SPLIT_DATA_PROTOCOL
 from meta_model.meta_network import MetaNetwork
+from optimizer.radam import RAdam
 
 
 class MetaModelFinetune(object):
@@ -30,8 +31,8 @@ class MetaModelFinetune(object):
         self.inner_lr = float(ma.group(2))
         self.arch = arch
         self.dataset = dataset
-        self.need_pair_distance = (meta_train_type == "2q_distillation") #FIXME
-        # self.need_pair_distance = False
+        # self.need_pair_distance = (meta_train_type == "2q_distillation") #FIXME
+        self.need_pair_distance = False
         meta_backbone = self.construct_model(arch, dataset)
         self.softmax = nn.Softmax(dim=1)
         self.mse_loss = nn.MSELoss(reduction="mean")
@@ -78,7 +79,7 @@ class MetaModelFinetune(object):
             meta_network.cuda()
             meta_network.copy_weights(self.master_network)
             meta_network.train()
-            optimizer = SGD(meta_network.parameters(), lr=self.inner_lr, momentum=0.95)
+            optimizer = RAdam(meta_network.parameters(), lr=self.inner_lr)
             for _ in range(self.finetune_times):
                 q1_output = meta_network.forward(q1_images_tensor)
                 q2_output = meta_network.forward(q2_images_tensor)
