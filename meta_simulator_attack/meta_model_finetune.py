@@ -16,7 +16,7 @@ from optimizer.radam import RAdam
 
 
 class MetaModelFinetune(object):
-    def __init__(self, dataset, batch_size, meta_train_type, meta_train_data, distillation_loss, finetune_times):
+    def __init__(self, dataset, batch_size, meta_train_type, meta_train_data, distillation_loss):
         self.meta_model_path = "{}/train_pytorch_model/cross_arch_attack_2q/{}@{}@{}*data_{}@distill_loss_{}*".format(
             PY_ROOT,
             meta_train_type.upper(), dataset, SPLIT_DATA_PROTOCOL.TRAIN_I_TEST_II,
@@ -31,8 +31,8 @@ class MetaModelFinetune(object):
         self.inner_lr = float(ma.group(2))
         self.arch = arch
         self.dataset = dataset
-        # self.need_pair_distance = (meta_train_type == "2q_distillation") #FIXME
-        self.need_pair_distance = False
+        self.need_pair_distance = (meta_train_type == "2q_distillation") #FIXME
+        # self.need_pair_distance = False
         meta_backbone = self.construct_model(arch, dataset)
         self.softmax = nn.Softmax(dim=1)
         self.mse_loss = nn.MSELoss(reduction="mean")
@@ -42,7 +42,6 @@ class MetaModelFinetune(object):
             torch.load(self.meta_model_path, map_location=lambda storage, location: storage)["state_dict"])
         self.master_network.eval()
         self.master_network.cuda()
-        self.finetune_times = finetune_times
         self.meta_model_pool = {}
         for img_idx in range(batch_size):
             meta_backbone = self.construct_model(arch, dataset)
@@ -64,7 +63,7 @@ class MetaModelFinetune(object):
                 network.fc = nn.Linear(num_ftrs, num_classes)
         return network
 
-    def finetune(self, q1_images, q2_images, q1_gt_logits, q2_gt_logits):
+    def finetune(self, q1_images, q2_images, q1_gt_logits, q2_gt_logits, finetune_times):
         '''
         :param q1_images: shape of (B,T,C,H,W) where T is sequence length
         :param q2_images: shape of (B,T,C,H,W)
@@ -77,10 +76,10 @@ class MetaModelFinetune(object):
                                                                                 q2_images,q1_gt_logits,q2_gt_logits)):
             meta_network = self.meta_model_pool[img_idx]
             meta_network.cuda()
-            meta_network.copy_weights(self.master_network)
+            # meta_network.copy_weights(self.master_network) # delete this line, only fine-tune 1 time for later iterations
             meta_network.train()
             optimizer = RAdam(meta_network.parameters(), lr=self.inner_lr)
-            for _ in range(self.finetune_times):
+            for _ in range(finetune_times):
                 q1_output = meta_network.forward(q1_images_tensor)
                 q2_output = meta_network.forward(q2_images_tensor)
                 q1_output, q2_output = self.softmax(q1_output), self.softmax(q2_output)

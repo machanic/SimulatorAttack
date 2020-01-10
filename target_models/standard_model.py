@@ -1,6 +1,7 @@
 import glob
 import os.path as osp
 
+import h5py
 import torch
 from torch import nn
 
@@ -10,7 +11,8 @@ from config import IN_CHANNELS, IMAGE_SIZE, PY_ROOT, CLASS_NUM
 from tiny_imagenet_models.densenet import densenet121, densenet161, densenet169, densenet201
 from tiny_imagenet_models.inception import inception_v3
 from tiny_imagenet_models.resnext import resnext101_32x4d, resnext101_64x4d
-
+import numpy as np
+from target_models.cifar.carlinet import carlinet
 
 class StandardModel(nn.Module):
     """
@@ -64,6 +66,24 @@ class StandardModel(nn.Module):
 
         model.load_state_dict(state_dict)
 
+    def load_weight_from_h5_checkpoint(self, model, fname):
+        assert 'carlinet' in model.__class__.__name__.lower()
+        with h5py.File(fname, 'r') as f:
+            for key in ['conv2d_1', 'conv2d_2', 'conv2d_3', 'conv2d_4', 'dense_1', 'dense_2', 'dense_3']:
+                m = model.__getattr__(key)
+                # weight
+                if 'conv' in key:
+                    w = np.array(f['model_weights'][key][key]['kernel:0']).transpose(3, 2, 0, 1)
+                if 'dense' in key:
+                    w = np.array(f['model_weights'][key][key]['kernel:0']).transpose(1, 0)
+                assert m.weight.shape == w.shape
+                m.weight.data[:] = torch.FloatTensor(w)
+                # bias
+                b = np.array(f['model_weights'][key][key]['bias:0'])
+                assert m.bias.shape == b.shape
+                m.bias.data[:] = torch.FloatTensor(b)
+
+
     def make_model(self, dataset, arch, **kwargs):
         """
         Make model, and load pre-trained weights.
@@ -74,7 +94,7 @@ class StandardModel(nn.Module):
         if dataset in ['CIFAR-10',"MNIST","FashionMNIST"]:
             if arch == 'gdas':
                 assert kwargs['train_data'] == 'full'
-                model = target_models.cifar.gdas('{}/subspace_attack/data/cifar10-target_models/gdas/seed-6293/checkpoint-cifar10-model.pth'.format(PY_ROOT))
+                model = target_models.cifar.gdas('{}/subspace_attack/data/cifar10-models/gdas/seed-6293/checkpoint-cifar10-model.pth'.format(PY_ROOT))
                 model.mean = [125.3 / 255, 123.0 / 255, 113.9 / 255]
                 model.std = [63.0 / 255, 62.1 / 255, 66.7 / 255]
                 model.input_space = 'RGB'
@@ -83,12 +103,22 @@ class StandardModel(nn.Module):
             elif arch == 'pyramidnet272':
                 assert kwargs['train_data'] == 'full'
                 model = target_models.cifar.pyramidnet272(num_classes=10)
-                self.load_weight_from_pth_checkpoint(model, '{}/subspace_attack/data/cifar10-target_models/pyramidnet272/checkpoint.pth'.format(PY_ROOT))
+                self.load_weight_from_pth_checkpoint(model, '{}/subspace_attack/data/cifar10-models/pyramidnet272/checkpoint.pth'.format(PY_ROOT))
                 model.mean = [0.49139968, 0.48215841, 0.44653091]
                 model.std = [0.24703223, 0.24348513, 0.26158784]
                 model.input_space = 'RGB'
                 model.input_range = [0, 1]
                 model.input_size = [IN_CHANNELS[dataset], IMAGE_SIZE[dataset][0], IMAGE_SIZE[dataset][1]]
+            elif arch == "carlinet":
+                assert kwargs['train_data'] == 'full'
+                model = carlinet()
+                self.load_weight_from_h5_checkpoint(model, '{}/subspace_attack/data/cifar10-models/carlinet'.format(PY_ROOT))
+                model.mean = [0.5, 0.5, 0.5]
+                model.std = [1, 1, 1]
+                model.input_space = 'RGB'
+                model.input_range = [0, 1]
+                model.input_size =  [IN_CHANNELS[dataset], IMAGE_SIZE[dataset][0], IMAGE_SIZE[dataset][1]]
+
             else:
                 # decide weight filename prefix, suffix
                 if kwargs['train_data'] in ['cifar10.1']:

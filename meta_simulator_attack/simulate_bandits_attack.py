@@ -137,7 +137,7 @@ class BanditsAttack(object):
         # Loss function
         adv_images = images.clone()
         # for step_index in range(args.max_queries // 2):  # FIXME 需要改，但如果真按照10000次实际黑盒模型去查询，则变得非常慢
-        for step_index in range(2100):
+        for step_index in range(2000):
             # Create noise for exporation, estimate the gradient, and take a PGD step
             exp_noise = args.exploration * torch.randn_like(prior) / (dim ** 0.5)  # parameterizes the exploration to be done around the prior
             # Query deltas for finite difference estimator
@@ -148,14 +148,14 @@ class BanditsAttack(object):
             q1_images = adv_images + args.fd_eta * q1 / self.norm(q1)
             q2_images = adv_images + args.fd_eta * q2 / self.norm(q2)
 
-            use_meta_model = arange_sequence_to_meta_model(step_index, args.warm_up_steps, args.meta_predict_steps)
-            is_finetune = check_if_finetune(step_index,  args.warm_up_steps, args.meta_predict_steps)
+            use_meta_model = arange_sequence_to_meta_model(step_index, args.warm_up_steps, args.meta_predict_steps, not_done.mean().item())
+            is_finetune, finetune_times = check_if_finetune(step_index,  args.warm_up_steps, args.meta_predict_steps, args.finetune_times,not_done.mean().item())
             if is_finetune:
                 q1_images_seq = torch.stack(list(q1_images_for_finetune)).permute(1, 0, 2, 3, 4).contiguous()  # B,T,C,H,W
                 q2_images_seq = torch.stack(list(q2_images_for_finetune)).permute(1, 0, 2, 3, 4).contiguous()  # B,T,C,H,W
                 q1_logits_seq = torch.stack(list(q1_logits_for_finetune)).permute(1, 0, 2).contiguous()  # B,T,#class
                 q2_logits_seq = torch.stack(list(q2_logits_for_finetune)).permute(1, 0, 2).contiguous()  # B,T,#class
-                meta_finetuner.finetune(q1_images_seq, q2_images_seq, q1_logits_seq, q2_logits_seq)
+                meta_finetuner.finetune(q1_images_seq, q2_images_seq, q1_logits_seq, q2_logits_seq, finetune_times)
 
             if not use_meta_model:
                 log.info("predict from target model")
@@ -182,7 +182,10 @@ class BanditsAttack(object):
             grad = upsampler(prior)  # prior相当于梯度
             ## Update the image:
             # take a pgd step using the prior
-            adv_images = image_step(adv_images, grad * correct.view(-1, 1, 1, 1), args.image_lr)  # prior放大后相当于累积的更新量，可以用来更新
+            image_lr = args.image_lr
+            if not_done.mean().item() <= 0.1:
+                image_lr = 0.1  # < 0.15就很难了
+            adv_images = image_step(adv_images, grad * correct.view(-1, 1, 1, 1), image_lr)  # prior放大后相当于累积的更新量，可以用来更新
             adv_images = proj_step(adv_images)
             adv_images = torch.clamp(adv_images, 0, 1)
             # stats
@@ -292,24 +295,30 @@ def set_log_file(fname):
     os.dup2(tee.stdin.fileno(), sys.stdout.fileno())
     os.dup2(tee.stdin.fileno(), sys.stderr.fileno())
 
-def arange_sequence_to_meta_model(seq_id,warm_up_steps,meta_predict_steps):
+def arange_sequence_to_meta_model(seq_id, warm_up_steps, meta_predict_steps, not_done_value):
     # 步骤的序列安排:
     # 0,1,...,19 target model; 然后finetune,之后meta model:20,21,22,23 target_model24, meta_model25,...,28,target_model 29
     if seq_id in list(range(warm_up_steps)):
        return False
     else:
+        if not_done_value <= 0.16:
+            return False  # 用target model
         if (seq_id - warm_up_steps + 1) % meta_predict_steps == 0:
             return False
         return True
 
-def check_if_finetune(seq_id, warm_up_steps, meta_predict_steps):
+def check_if_finetune(seq_id, warm_up_steps, meta_predict_steps, finetune_times, not_done_value):
     # finetune步骤:20, 25,30
     seq_id = seq_id - warm_up_steps
     if seq_id < 0:
-        return False
-    if seq_id % meta_predict_steps == 0:
-        return True
-    return False
+        return False, 0
+    if not_done_value <= 0.16:
+        return False, 0
+    if seq_id == 0:
+        return True, finetune_times
+    elif seq_id % meta_predict_steps == 0:
+        return True, random.randint(1,3)
+    return False, 0
 
 
 if __name__ == "__main__":
@@ -378,7 +387,7 @@ if __name__ == "__main__":
     torch.manual_seed(args.seed)
 
     meta_finetuner = MetaModelFinetune(args.dataset, args.batch_size, args.meta_train_type, args.mode,
-                                       args.distillation_loss, args.finetune_times)
+                                       args.distillation_loss)
     args.meta_model_path = meta_finetuner.meta_model_path
     log.info('Command line is: {}'.format(' '.join(sys.argv)))
     log.info('Called with args:')
