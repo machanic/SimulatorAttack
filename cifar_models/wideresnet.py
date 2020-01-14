@@ -4,6 +4,19 @@ import torch.nn as nn
 import torch.nn.functional as F
 
 
+
+class DropoutConv2d(nn.Conv2d):
+    def __init__(self, in_channels, out_channels, kernel_size, stride=1,
+                 padding=0, dilation=1, groups=1, bias=True, drop=0):
+        super(DropoutConv2d, self).__init__(
+            in_channels, out_channels, kernel_size, stride, padding, dilation, groups, bias)
+        self.drop = drop
+
+    def forward(self, x):
+        x = super(DropoutConv2d, self).forward(x)
+        x = F.dropout(x, p=self.drop, training=True)
+        return x
+
 class BasicBlock(nn.Module):
     def __init__(self, in_planes, out_planes, stride, dropRate=0.0):
         super(BasicBlock, self).__init__()
@@ -31,7 +44,6 @@ class BasicBlock(nn.Module):
         out = self.conv2(out)
         return torch.add(x if self.equalInOut else self.convShortcut(x), out)
 
-
 class NetworkBlock(nn.Module):
     def __init__(self, nb_layers, in_planes, out_planes, block, stride, dropRate=0.0):
         super(NetworkBlock, self).__init__()
@@ -51,8 +63,8 @@ class WideResNet(nn.Module):
     def __init__(self, depth, in_channels, num_classes, widen_factor=10, dropRate=0.0):
         super(WideResNet, self).__init__()
         nChannels = [16, 16 * widen_factor, 32 * widen_factor, 64 * widen_factor]
-        assert ((depth - 4) % 6 == 0)
-        n = (depth - 4) / 6
+        assert (depth - 4) % 6 == 0, 'depth should be 6n+4'
+        n = (depth - 4) // 6
         block = BasicBlock
         # 1st conv before any network block
         self.conv1 = nn.Conv2d(in_channels, nChannels[0], kernel_size=3, stride=1,
@@ -68,7 +80,7 @@ class WideResNet(nn.Module):
         self.relu = nn.ReLU(inplace=True)
         self.fc = nn.Linear(nChannels[3], num_classes)
         self.nChannels = nChannels[3]
-
+        self.drop = 0
         for m in self.modules():
             if isinstance(m, nn.Conv2d):
                 nn.init.kaiming_normal_(m.weight, mode='fan_out', nonlinearity='relu')
@@ -79,12 +91,16 @@ class WideResNet(nn.Module):
                 m.bias.data.zero_()
 
     def forward(self, x):
+        for m in self.modules():
+            if isinstance(m, (DropoutConv2d, BasicBlock)):
+                m.drop = self.drop
         out = self.conv1(x)
         out = self.block1(out)
         out = self.block2(out)
         out = self.block3(out)
         out = self.relu(self.bn1(out))
-        out = F.avg_pool2d(out, 8)
+        # out = F.avg_pool2d(out, 8)  # FIXME 有的机器不适用
+        out = F.adaptive_max_pool2d(out, 1)
         out = out.view(-1, self.nChannels)
         return self.fc(out)
 
@@ -96,3 +112,12 @@ def wideresnet34(in_channels, num_classes):
 
 def wideresnet40(in_channels, num_classes):
     return WideResNet(40,in_channels, num_classes)
+
+def wideresnet28drop(in_channels, num_classes):
+    return WideResNet(28, in_channels, num_classes, widen_factor=10, dropRate=0.3)
+
+def wideresnet34drop(in_channels, num_classes):
+    return WideResNet(34, in_channels, num_classes, widen_factor=10, dropRate=0.3)
+
+def wideresnet40drop(in_channels, num_classes):
+    return WideResNet(40, in_channels, num_classes, widen_factor=10, dropRate=0.3)

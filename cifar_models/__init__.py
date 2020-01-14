@@ -15,3 +15,6 @@ from .mobilenetv2 import *
 from .efficientnet import *
 from .conv3 import *
 from .wideresnet import *
+from .gdas import gdas
+from .pyramidnet import pyramidnet272
+from .carlinet import *

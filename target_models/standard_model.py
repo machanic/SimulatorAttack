@@ -1,18 +1,17 @@
 import glob
 import os.path as osp
-
 import h5py
-import torch
-from torch import nn
-
 import target_models.cifar
 import target_models.imagenet
 from config import IN_CHANNELS, IMAGE_SIZE, PY_ROOT, CLASS_NUM
-from tiny_imagenet_models.densenet import densenet121, densenet161, densenet169, densenet201
 from tiny_imagenet_models.inception import inception_v3
-from tiny_imagenet_models.resnext import resnext101_32x4d, resnext101_64x4d
-import numpy as np
+from torchvision import models as torch_models
 from target_models.cifar.carlinet import carlinet
+import numpy as np
+from cifar_models import *
+from tiny_imagenet_models.densenet import densenet121, densenet161, densenet169, densenet201
+from tiny_imagenet_models.resnext import resnext101_32x4d, resnext101_64x4d
+
 
 class StandardModel(nn.Module):
     """
@@ -38,7 +37,6 @@ class StandardModel(nn.Module):
         # assign dropout probability
         if hasattr(self, 'drop'):
             self.cnn.drop = self.drop
-
         # channel order
         if self.input_space == 'BGR':
             x = x[:, [2, 1, 0], :, :]  # pytorch does not support negative stride index (::-1) yet
@@ -82,7 +80,6 @@ class StandardModel(nn.Module):
                 b = np.array(f['model_weights'][key][key]['bias:0'])
                 assert m.bias.shape == b.shape
                 m.bias.data[:] = torch.FloatTensor(b)
-
 
     def make_model(self, dataset, arch, **kwargs):
         """

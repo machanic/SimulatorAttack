@@ -11,7 +11,7 @@ from torchvision import models as torch_models
 from cifar_models import ResNet34
 from config import PY_ROOT, IN_CHANNELS, CLASS_NUM
 from constant_enum import SPLIT_DATA_PROTOCOL
-from meta_model.meta_network import MetaNetwork
+from meta_simulator_model.meta_network import MetaNetwork
 from optimizer.radam import RAdam
 
 
@@ -37,11 +37,11 @@ class MetaModelFinetune(object):
         self.softmax = nn.Softmax(dim=1)
         self.mse_loss = nn.MSELoss(reduction="mean")
         self.pair_wise_distance = nn.PairwiseDistance(p=2)
-        self.master_network = MetaNetwork(meta_backbone)
-        self.master_network.load_state_dict(
-            torch.load(self.meta_model_path, map_location=lambda storage, location: storage)["state_dict"])
-        self.master_network.eval()
-        self.master_network.cuda()
+        # self.master_network = MetaNetwork(meta_backbone)
+        # self.master_network.load_state_dict(
+        #     torch.load(self.meta_model_path, map_location=lambda storage, location: storage)["state_dict"])
+        # self.master_network.eval()
+        # self.master_network.cuda()
         self.meta_model_pool = {}
         for img_idx in range(batch_size):
             meta_backbone = self.construct_model(arch, dataset)

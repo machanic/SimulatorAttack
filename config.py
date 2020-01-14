@@ -15,5 +15,8 @@ MODELS_I = ['conv3', 'densenet121', 'densenet161', 'densenet169', 'densenet201',
             'preactresnet34', 'preactresnet50', 'resnext29_2', 'resnext29_32', 'resnext29_4', 'resnext29_8', 'resnext32_4',
             'resnext64_4', 'senet18',
             'shufflenet_G2', 'shufflenet_G3', 'vgg11', 'vgg13', 'vgg16', 'vgg19','vgg11_bn', 'vgg13_bn', 'vgg16_bn', 'vgg19_bn']
-MODELS_II = ["resnet18", "resnet34", "resnet50", "resnet101","resnet152","wideresnet28","wideresnet34", "wideresnet40"]
+MODELS_II = ["resnet18", "resnet34", "resnet50", "resnet101","resnet152","wideresnet28","wideresnet34", "wideresnet40",
+             "gdas", "pyramidnet272", "carlinet"]
 ALL_MODELS= MODELS_I + MODELS_II
+
+MAX_QUERIES_GENERATE_TRAIN_DATA = {"MNIST": 200, "CIFAR-10":2000, "FashionMNIST":200}

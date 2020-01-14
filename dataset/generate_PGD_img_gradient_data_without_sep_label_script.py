@@ -7,7 +7,7 @@ from tiny_imagenet import TinyImageNet
 sys.path.append("/home1/machen/meta_perturbations_black_box_attack")
 import os
 from torchvision.datasets import CIFAR10, CIFAR100, MNIST, FashionMNIST
-from clean_image_classifier.train import get_preprocessor
+from benign_image_classifier.train import get_preprocessor
 from config import IN_CHANNELS, CLASS_NUM, IMAGE_SIZE, IMAGE_DATA_ROOT, PY_ROOT
 from cifar_models import *
 import numpy as np
@@ -120,7 +120,7 @@ def construct_model(arch, dataset):
 
 # 一个way是一个分类下以及一种arch下的数据
 def get_data_loader(datasetname, batch_size):
-    preprocessor = get_preprocessor(IN_CHANNELS[datasetname], IMAGE_SIZE[datasetname], use_flip=False)
+    preprocessor = get_preprocessor(IMAGE_SIZE[datasetname], use_flip=False)
     if datasetname == "CIFAR-10":
         train_dataset = CIFAR10(IMAGE_DATA_ROOT[datasetname], train=True, transform=preprocessor)
         # val_dataset = CIFAR10(IMAGE_DATA_ROOT[datasetname], train_simulate_grad_mode=False, transform=preprocessor)
