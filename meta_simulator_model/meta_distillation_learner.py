@@ -2,7 +2,7 @@ import glob
 import random
 import sys
 sys.path.append("/home1/machen/meta_perturbations_black_box_attack")
-from model_constructor import ModelConstructor
+from cifar_models.model_constructor import ModelConstructor
 import os
 from config import PY_ROOT, ALL_MODELS
 from torch.optim import Adam

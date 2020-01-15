@@ -9,7 +9,7 @@ import torch
 from torch.nn import functional as F
 
 from config import CLASS_NUM
-from dataset.data_loader_maker import make_loader
+from dataset.dataset_loader_maker import DataLoaderMaker
 
 
 class Attacker(metaclass=ABCMeta):
@@ -19,7 +19,7 @@ class Attacker(metaclass=ABCMeta):
         self.target_type = target_type
         assert self.target_type in ["least_likely", "random"]
         self.dataset_name = dataset
-        self.dataset_loader = make_loader(dataset, "test", batch_size, int(time.time()))
+        self.dataset_loader = DataLoaderMaker.get_img_label_data_loader(dataset, batch_size, False)
         self.total_images = len(self.dataset_loader.dataset)
         self.query_all = torch.zeros(self.total_images)
         self.correct_all = torch.zeros_like(self.query_all)  # number of images
@@ -95,8 +95,8 @@ class Attacker(metaclass=ABCMeta):
         all_notdone_adv_images = []
         all_notdone_real_images = []
         all_notdone_true_labels = []
-        all_notdone_imageid = []
-        for batch_idx, (image_id,  images, true_labels) in enumerate(self.dataset_loader):
+        # all_notdone_imageid = []
+        for batch_idx, (images, true_labels) in enumerate(self.dataset_loader):
             images, true_labels = images.cuda(), true_labels.cuda()
             batch_size = images.size(0)
             if batch_idx * batch_size >= self.total_images:
@@ -119,11 +119,11 @@ class Attacker(metaclass=ABCMeta):
                 all_notdone_adv_images.append(adv_images)
                 all_notdone_real_images.append(images)
                 all_notdone_true_labels.append(true_labels)
-                all_notdone_imageid.append(image_id[not_done_indexes])
+                # all_notdone_imageid.append(image_id[not_done_indexes])
         all_notdone_adv_images = torch.cat(all_notdone_adv_images, 0)
         all_notdone_real_images = torch.cat(all_notdone_real_images, 0)
         all_notdone_true_labels = torch.cat(all_notdone_true_labels, 0)
-        all_notdone_imageid = torch.cat(all_notdone_imageid, 0)
+        # all_notdone_imageid = torch.cat(all_notdone_imageid, 0)
 
         log.info('Attack finished ({} images)'.format(self.total_images))
         log.info('        avg correct: {:.4f}'.format(self.correct_all.mean().item()))
@@ -140,8 +140,7 @@ class Attacker(metaclass=ABCMeta):
                 '  avg not_done_prob: {:.4f}'.format(self.not_done_prob_all[self.not_done_all.byte()].mean().item()))
         log.info('Saving results to {}'.format(result_dump_path))
         result_dict = {"notdone_adv_images": all_notdone_adv_images.detach().numpy(),
-                       "notdone_real_images": all_notdone_real_images.detach().numpy(), "notdone_true_labels": all_notdone_true_labels,
-                       "notdone_image_id": all_notdone_imageid}
+                       "notdone_real_images": all_notdone_real_images.detach().numpy(), "notdone_true_labels": all_notdone_true_labels}
         meta_info_dict = {}
         for key in ['query', 'correct', 'not_done',
                     'success', 'success_query', 'not_done_loss', 'not_done_prob']:

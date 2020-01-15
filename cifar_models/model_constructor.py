@@ -1,7 +1,6 @@
-import torch
+import pretrainedmodels
 from torch import nn
 from torchvision import models as torch_models
-from torchvision.datasets import CIFAR10, CIFAR100, MNIST, FashionMNIST, ImageFolder
 from cifar_models import Conv3, DenseNet121, DenseNet169, DenseNet201, GoogLeNet, MobileNet, MobileNetV2, ResNet18, \
     ResNet34, ResNet50, ResNet101, ResNet152, PNASNetA, PNASNetB, EfficientNetB0, DPN26, DPN92, ResNeXt29_2x64d, \
     ResNeXt29_4x64d, ResNeXt29_8x64d, ResNeXt29_32x4d, SENet18, ShuffleNetG2, ShuffleNetG3, vgg11, vgg13, vgg16, vgg19, \
@@ -9,9 +8,8 @@ from cifar_models import Conv3, DenseNet121, DenseNet169, DenseNet201, GoogLeNet
     wideresnet40, gdas, pyramidnet272, carlinet, wideresnet28drop, wideresnet34drop, wideresnet40drop
 from config import IN_CHANNELS, IMAGE_SIZE, CLASS_NUM, IMAGE_DATA_ROOT
 from tiny_imagenet_models.densenet import densenet161, densenet121, densenet169, densenet201
-from miscellaneous import Identity
+from cifar_models.miscellaneous import Identity
 from tiny_imagenet_models.resnext import resnext101_32x4d, resnext101_64x4d
-from tiny_imagenet import TinyImageNet
 
 
 class ModelConstructor(object):
@@ -105,7 +103,10 @@ class ModelConstructor(object):
 
     @staticmethod
     def construct_imagenet_model(arch):
-        network = torch_models.__dict__[arch](pretrained=True)
+        if arch in torch_models.__dict__:
+            network = torch_models.__dict__[arch](pretrained=True)
+        elif arch in pretrainedmodels.model_names:
+            network = pretrainedmodels.__dict__[arch](num_classes=1000, pretrained="imagenet")
         return network
 
     @staticmethod
@@ -137,23 +138,3 @@ class ModelConstructor(object):
 
 
 
-    @staticmethod
-    def get_data_loader(datasetname, batch_size):
-        preprocessor = ModelConstructor.get_preprocessor(IMAGE_SIZE[datasetname])
-        if datasetname == "CIFAR-10":
-            train_dataset = CIFAR10(IMAGE_DATA_ROOT[datasetname], train=True, transform=preprocessor)
-        elif datasetname == "CIFAR-100":
-            train_dataset = CIFAR100(IMAGE_DATA_ROOT[datasetname], train=True, transform=preprocessor)
-        elif datasetname == "MNIST":
-            train_dataset = MNIST(IMAGE_DATA_ROOT[datasetname], train=True, transform=preprocessor)
-        elif datasetname == "FashionMNIST":
-            train_dataset = FashionMNIST(IMAGE_DATA_ROOT[datasetname], train=True, transform=preprocessor)
-        elif datasetname == "TinyImageNet":
-            train_dataset = TinyImageNet(IMAGE_DATA_ROOT[datasetname], preprocessor, is_train=True)
-        elif datasetname == "ImageNet":
-            train_dataset = ImageFolder(IMAGE_DATA_ROOT[datasetname] + "/train", preprocessor)
-        workers = 0
-        if datasetname == "ImageNet" or datasetname == "TinyImageNet":
-            workers = 4
-        data_loader = torch.utils.data.DataLoader(train_dataset, batch_size=batch_size, shuffle=True, num_workers=workers)
-        return data_loader

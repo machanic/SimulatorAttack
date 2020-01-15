@@ -1,9 +1,6 @@
 import argparse
 import random
 import sys
-from collections import defaultdict
-
-
 sys.path.append("/home1/machen/meta_perturbations_black_box_attack")
 import glob
 import json
@@ -17,8 +14,9 @@ from torchvision import transforms
 from cifar_models import *
 from config import IN_CHANNELS, IMAGE_SIZE, CLASS_NUM, PY_ROOT
 import glog as log
-from model_constructor import ModelConstructor
-
+from cifar_models.model_constructor import ModelConstructor
+from collections import defaultdict
+from dataset.dataset_loader_maker import DataLoaderMaker
 
 class BanditAttack(object):
     @staticmethod
@@ -67,23 +65,19 @@ class BanditAttack(object):
     @staticmethod
     def l2_proj(image, eps):
         orig = image.clone()
-
         def proj(new_x):
             delta = new_x - orig
             out_of_bounds_mask = (BanditAttack.norm(delta) > eps).float()
             x = (orig + eps * delta / BanditAttack.norm(delta)) * out_of_bounds_mask
             x += new_x * (1 - out_of_bounds_mask)
             return x
-
         return proj
 
     @staticmethod
     def linf_proj(image, eps):
         orig = image.clone()
-
         def proj(new_x):
             return orig + torch.clamp(new_x - orig, -eps, eps)
-
         return proj
 
     @staticmethod
@@ -91,7 +85,7 @@ class BanditAttack(object):
         if target is not None:
             # targeted cw loss: logit_t - max_{i\neq t}logit_i
             _, argsort = logit.sort(dim=1, descending=True)
-            target_is_max = argsort[:, 0].eq(target)
+            target_is_max = argsort[:, 0].eq(target).long()
             second_max_index = target_is_max.long() * argsort[:, 1] + (1 - target_is_max).long() * argsort[:, 0]
             target_logit = logit[torch.arange(logit.shape[0]), target]
             second_max_logit = logit[torch.arange(logit.shape[0]), second_max_index]
@@ -99,7 +93,7 @@ class BanditAttack(object):
         else:
             # untargeted cw loss: max_{i\neq y}logit_i - logit_y
             _, argsort = logit.sort(dim=1, descending=True)
-            gt_is_max = argsort[:, 0].eq(label)
+            gt_is_max = argsort[:, 0].eq(label).long()
             second_max_index = gt_is_max.long() * argsort[:, 1] + (1 - gt_is_max).long() * argsort[:, 0]
             gt_logit = logit[torch.arange(logit.shape[0]), label]
             second_max_logit = logit[torch.arange(logit.shape[0]), second_max_index]
@@ -127,22 +121,31 @@ class BanditAttack(object):
         The attack process for generating adversarial examples with priors.
         '''
         # Initial setup
+        orig_images = image.clone()
         prior_size = IMAGE_SIZE[args.dataset][0] if not args.tiling else args.tile_size
-        upsampler = Upsample(size=(IMAGE_SIZE[args.dataset][0], IMAGE_SIZE[args.dataset][1]))
+        assert args.tiling == (args.dataset == "ImageNet")
+        if args.tiling:
+            upsampler = Upsample(size=(IMAGE_SIZE[args.dataset][0], IMAGE_SIZE[args.dataset][1]))
+        else:
+            upsampler = lambda x: x
         total_queries = torch.zeros(args.batch_size).cuda()
         prior = torch.zeros(args.batch_size, IN_CHANNELS[args.dataset], prior_size, prior_size).cuda()
         dim = prior.nelement() / args.batch_size  # nelement() --> total number of elements
         prior_step = BanditAttack.gd_prior_step if mode == 'l2' else BanditAttack.eg_step
         image_step = BanditAttack.l2_image_step if mode == 'l2' else BanditAttack.linf_step
         proj_maker = BanditAttack.l2_proj if mode == 'l2' else BanditAttack.linf_proj  # 调用proj_maker返回的是一个函数
-        proj_step = proj_maker(image, args.epsilon)
+        proj_step = proj_maker(orig_images, args.epsilon)
         # Loss function
         criterion = BanditAttack.cw_loss if args.loss == "cw" else BanditAttack.xent_loss
         # Original classifications
-        orig_images = image.clone()
-        orig_classes = model_to_fool(image).argmax(1).cuda()
+
+        if args.dataset == "ImageNet":
+            orig_classes = model_to_fool(BanditAttack.normalized_image(image)).argmax(1).cuda()
+        else:
+            orig_classes = model_to_fool(image).argmax(1).cuda()
         correct_classified_mask = (orig_classes == true_label).float()
         not_dones_mask = correct_classified_mask.clone()  # 分类分对的mask
+        log.info("correct ratio : {:.3f}".format(correct_classified_mask.mean()))
         normalized_q1 = []
         normalized_q2 = []
         images = []
@@ -224,10 +227,14 @@ class BanditAttack(object):
             success_mask = (1 - not_dones_mask) * correct_classified_mask
             num_success = success_mask.sum()
             current_success_rate = (num_success / correct_classified_mask.detach().cpu().sum()).cpu().item()
-            success_queries = ((success_mask * total_queries).sum() / num_success).cpu().item()
+            if num_success == 0:
+                success_queries = 0
+            else:
+                success_queries = ((success_mask * total_queries).sum() / num_success).cpu().item()
             max_curr_queries = total_queries.max().cpu().item()
-            # log.info("Queries: %d | Success rate: %f | Average queries: %f" % (max_curr_queries, current_success_rate, success_queries))
-
+            log.info("%d-th: Queries: %d | Success rate: %f | Average queries: %f" % (i, max_curr_queries, current_success_rate, success_queries))
+            if current_success_rate == 1.0:
+                break
         normalized_q1 = np.ascontiguousarray(np.transpose(np.stack(normalized_q1), axes=(1,0,2,3,4)))
         normalized_q2 = np.ascontiguousarray(np.transpose(np.stack(normalized_q2), axes=(1,0,2,3,4)))
         images = np.ascontiguousarray(np.transpose(np.stack(images), axes=(1,0,2,3,4)))
@@ -268,9 +275,9 @@ class BanditAttack(object):
             targeted_str = "untargeted" if not args.targeted else "targeted_{}".format(args.target_type)
             save_path_prefix = "{}/dataset_{}@attack_{}@arch_{}@loss_{}@{}".format(save_dir, args.dataset, attack_type,
                                                                            arch_name, args.loss, targeted_str)
-            if len(glob.glob(save_path_prefix + "*")) > 0:
-                print("skip {}".format(save_path_prefix))
-                continue
+            # if len(glob.glob(save_path_prefix + "*")) > 0:
+            #     print("skip {}".format(save_path_prefix))
+            #     continue
             normalized_q1_list = []
             normalized_q2_list = []
             images_list = []
@@ -293,7 +300,7 @@ class BanditAttack(object):
                                 logits = model_to_fool(images)
                         target = logits.argmin(dim=1)
                     # make sure target is not equal to label for any example
-                    invalid_target_index = target.eq(labels)
+                    invalid_target_index = target.eq(labels).long()
                     while invalid_target_index.sum().item() > 0:
                         target[invalid_target_index] = torch.randint(low=0, high=CLASS_NUM[args.dataset],
                                                                      size=target[invalid_target_index].shape).long().cuda()
@@ -303,8 +310,11 @@ class BanditAttack(object):
                     target = None
                 res = BanditAttack.make_adversarial_examples(images, labels, target, args, attack_type,
                                                              model_to_fool)
-                data_info["images"].cpu()
+                data_info["images"].cpu()   # save GPU memory
                 data_info["targets"].cpu()
+                del data_info["images"]  # save the memory
+                del data_info["targets"]
+
                 normalized_q1 = res["q1"]
                 normalized_q2 = res["q2"]
                 images = res["images"]
@@ -353,35 +363,36 @@ class BanditAttack(object):
             gt_labels_path = "{}@gt_labels.npy".format(save_path_prefix)
             targets_path = "{}@targets.npy".format(save_path_prefix)
             count_path = "{}@shape.txt".format(save_path_prefix)
-            fp = np.memmap(q1_path, dtype='float32', mode='w+', shape=normalized_q1_list.shape)
-            fp[:, :, :, :, :] = normalized_q1_list[:, :, :, :, :]
-            del fp
-            del normalized_q1_list
-            fp = np.memmap(q2_path, dtype='float32', mode='w+', shape=normalized_q2_list.shape)
-            fp[:, :, :, :, :] = normalized_q2_list[:, :, :, :, :]
-            del fp
-            del normalized_q2_list
-            fp = np.memmap(img_path, dtype='float32', mode='w+', shape=images_list.shape)
-            fp[:, :, :, :, :] = images_list[:, :, :, :, :]
-            del fp
-            del images_list
-            fp = np.memmap(logits_q1_path, dtype='float32', mode='w+', shape=logits_q1_list.shape)
-            fp[:, :, :] = logits_q1_list[:, :, :]
-            del fp
-            del logits_q1_list
-            fp = np.memmap(logits_q2_path, dtype='float32', mode='w+', shape=logits_q2_list.shape)
-            fp[:, :, :] = logits_q2_list[:, :, :]
-            del fp
-            del logits_q2_list
 
-            np.save(gt_labels_path, gt_labels)
-            if args.targeted:
-                np.save(targets_path, all_targets)
-
-            with open(count_path, "w") as file_count:
-                file_count.write(store_shape)
-                file_count.flush()
-            log.info("write {} done".format(save_path_prefix))
+            # fp = np.memmap(q1_path, dtype='float32', mode='w+', shape=normalized_q1_list.shape)
+            # fp[:, :, :, :, :] = normalized_q1_list[:, :, :, :, :]
+            # del fp
+            # del normalized_q1_list
+            # fp = np.memmap(q2_path, dtype='float32', mode='w+', shape=normalized_q2_list.shape)
+            # fp[:, :, :, :, :] = normalized_q2_list[:, :, :, :, :]
+            # del fp
+            # del normalized_q2_list
+            # fp = np.memmap(img_path, dtype='float32', mode='w+', shape=images_list.shape)
+            # fp[:, :, :, :, :] = images_list[:, :, :, :, :]
+            # del fp
+            # del images_list
+            # fp = np.memmap(logits_q1_path, dtype='float32', mode='w+', shape=logits_q1_list.shape)
+            # fp[:, :, :] = logits_q1_list[:, :, :]
+            # del fp
+            # del logits_q1_list
+            # fp = np.memmap(logits_q2_path, dtype='float32', mode='w+', shape=logits_q2_list.shape)
+            # fp[:, :, :] = logits_q2_list[:, :, :]
+            # del fp
+            # del logits_q2_list
+            #
+            # np.save(gt_labels_path, gt_labels)
+            # if args.targeted:
+            #     np.save(targets_path, all_targets)
+            #
+            # with open(count_path, "w") as file_count:
+            #     file_count.write(store_shape)
+            #     file_count.flush()
+            # log.info("write {} done".format(save_path_prefix))
             model_to_fool.cpu()
 
 def get_random_path(dataset, targeted):
@@ -414,19 +425,21 @@ if __name__ == "__main__":
     parser.add_argument('--json-config-file', type=str, help='a config file to be passed in instead of arguments')
     parser.add_argument("--dataset", type=str, choices=["CIFAR-10","CIFAR-100","MNIST","FashionMNIST","TinyImageNet","ImageNet"])
     parser.add_argument("--batch-size", type=int,default=200)
-    parser.add_argument("--total_images",type=int,default=1000000)
+    parser.add_argument("--total-images",type=int,default=1000000)
     parser.add_argument('--targeted', action="store_true", help="the targeted attack data")
     parser.add_argument("--target_type",type=str, default="random", choices=["least_likely","random"])
     parser.add_argument("--loss",type=str, default="xent", choices=["xent", "cw"])
-    parser.add_argument("--max_queries", type=int,default=2000)
+    parser.add_argument("--max-queries", type=int,default=2000)
     parser.add_argument("--norm",type=str, choices=['linf','l2',"all"], required=True)
+    parser.add_argument("--epsilon", type=float)
+    parser.add_argument("--image_lr",type=float)
     parser.add_argument('--tiling', action='store_true')
     args = parser.parse_args()
     if args.dataset == "ImageNet":
         args.tiling = True
     os.environ["CUDA_DEVICE_ORDER"] = "PCI_BUS_ID"
     os.environ['CUDA_VISIBLE_DEVICES'] = str(args.gpu)
-    os.environ['CUDA_VISIBLE_DEVICE'] = str(args.gpu)
+    # os.environ['CUDA_VISIBLE_DEVICE'] = str(args.gpu)
     save_dir_path = "{}/data_bandit_attack/{}/{}".format(PY_ROOT, args.dataset, "targeted_attack" if args.targeted else "untargeted_attack")
     os.makedirs(save_dir_path, exist_ok=True)
     log_path = osp.join(save_dir_path, get_random_path(args.dataset, args.targeted))  # 随机产生一个目录用于实验
@@ -448,9 +461,7 @@ if __name__ == "__main__":
         attack_conf.update(vars(args))
         params = SimpleNamespace(**attack_conf)
         attack_type_params.append((attack_type, params))
-
-    trn_data_loader = ModelConstructor.get_data_loader(args.dataset, args.batch_size)
-
+    trn_data_loader = DataLoaderMaker.get_img_label_data_loader(args.dataset, args.batch_size, True)
     model_dir_path = "{}/train_pytorch_model/real_image_model/{}*.pth.tar".format(PY_ROOT, args.dataset)
     all_model_path_list = glob.glob(model_dir_path)
     model_names = dict()
@@ -469,8 +480,10 @@ if __name__ == "__main__":
             model.eval()
             models.append({"arch_name":arch, "model":model})
     elif args.dataset == "ImageNet":
-        for arch, model_path in model_names.items():
-            model = ModelConstructor.construct_imagenet_model(arch)
+        for arch, _ in model_names.items():
+            if arch != "resnet152":
+                continue    # FIXME
+            model = ModelConstructor.construct_imagenet_model(arch)  # it has already load pre-trained model
             model.eval()
             models.append({"arch_name": arch, "model": model})
     else:
@@ -483,13 +496,7 @@ if __name__ == "__main__":
             models.append({"arch_name":arch, "model":model})
 
     with torch.no_grad():
-        # 双重循环，不同的arch,不同的attack_type :NES, linf等的组合，每个组合中一个label的数据出一个文件
         for attack_type, args_item in attack_type_params:
             log.info('Called with args:')
-            # if attack_type == "l2":  # FIXME
-            #     args_item.max_queries = 300
-            # elif attack_type == "linf":  # FIXME
-            #     args_item.max_queries =2000
             print_args(args_item)
-
             BanditAttack.attack(args_item, trn_data_loader, models, attack_type, save_dir_path)

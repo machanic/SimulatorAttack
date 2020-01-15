@@ -25,7 +25,7 @@ class NesAttacker(Attacker):
 
     def get_label_dataset(self, dataset):
         label_index = defaultdict(list)
-        for index, label in enumerate(dataset.labels):
+        for index, label in enumerate(dataset.labels):  # 保证这个data_loader没有shuffle过
             label_index[label].append(index)
 
     def get_image_of_class(self, target_labels, dataset):
@@ -93,21 +93,17 @@ class NesAttacker(Attacker):
         final_loss = (loss_1 + loss_2) / 2.0  #  shape = (batch_size,)
         return grad_estimate, final_loss
 
-    def untargeted_attack_iteration(self, step_index, adv_images, true_labels, target_labels, args):
+    def untargeted_attack_iteration(self, step_index, adv_images, true_labels, target_labels, args):  # like PGD
         if step_index == 0:
             initial_img = adv_images.clone()
-            clip_min = args.clip_min
-            clip_max = args.clip_max
             g = torch.zeros_like(initial_img).cuda()  # 梯度，(B,C,H,W)
-            epsilon = args.epsilon
-            lower = torch.clamp(initial_img - epsilon, clip_min, clip_max)
-            upper = torch.clamp(initial_img + epsilon, clip_min, clip_max)
-        prev_g = g
+        prev_g = g.clone()
         g, _ = self.get_grad(adv_images, true_labels, target_labels)
         # SIMPLE MOMENTUM
         g = args.momentum * prev_g + (1.0 - args.momentum) * g
-        proposed_adv = adv_images + args.lr * torch.sign(g)
-        proposed_adv = torch.min(torch.max(proposed_adv, lower), upper)
+        adv_images = adv_images + args.lr * torch.sign(g)
+        eta = torch.clamp(adv_images - initial_img, min=-args.epsilon, max=args.epsilon)
+        proposed_adv = torch.clamp(initial_img + eta, min=args.clip_min, max=args.clip_max).detach_()
         return proposed_adv
 
 
@@ -127,7 +123,7 @@ class NesAttacker(Attacker):
             lower = torch.clamp(initial_img - epsilon, clip_min, clip_max)
             upper = torch.clamp(initial_img + epsilon, clip_min, clip_max)
             adv_images = torch.min(torch.max(adv_images, lower), upper)
-        prev_g = g
+        prev_g = g.clone()
         g, l = self.get_grad(adv_images, true_labels, target_labels)
         # SIMPLE MOMENTUM
         g = args.momentum * prev_g + (1.0 - args.momentum) * g

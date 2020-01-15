@@ -17,6 +17,7 @@ from optimizer.radam import RAdam
 
 class MetaModelFinetune(object):
     def __init__(self, dataset, batch_size, meta_train_type, meta_train_data, distillation_loss):
+        # FIXME 修改
         self.meta_model_path = "{}/train_pytorch_model/cross_arch_attack_2q/{}@{}@{}*data_{}@distill_loss_{}*".format(
             PY_ROOT,
             meta_train_type.upper(), dataset, SPLIT_DATA_PROTOCOL.TRAIN_I_TEST_II,

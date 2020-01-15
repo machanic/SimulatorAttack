@@ -13,7 +13,7 @@ import torch
 import torch.nn.functional as F
 import numpy as np
 from target_models.standard_model import StandardModel
-from dataset.data_loader_maker import make_loader
+from dataset.dataset_loader_maker import DataLoaderMaker
 
 
 def parse_args():
@@ -190,10 +190,7 @@ def main():
     log.info('All target_models have been initialized, including 1 target model and {} ref target_models'.format(len(args.ref_arch)))
 
     # make loader
-    kwargs = dict()
-    if args.dataset == 'imagenet':
-        kwargs['size'] = model.input_size[-1]
-    loader = make_loader(args.dataset, args.phase, args.batch_size, args.seed, **kwargs)
+    loader = DataLoaderMaker.get_imgid_img_label_data_loader(args.dataset, args.batch_size, False, args.seed)
 
     # make operators
 

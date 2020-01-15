@@ -12,12 +12,12 @@ from meta_simulator_model.meta_network import MetaNetwork
 import numpy as np
 from inner_loop_pair_loss import InnerLoopPairLoss
 from optimizer.radam import RAdam
-from model_constructor import ModelConstructor
+from cifar_models.model_constructor import ModelConstructor
 
 class MetaTwoQueriesLearner(object):
     def __init__(self, dataset, arch, meta_batch_size, meta_step_size,
                  inner_step_size, lr_decay_itr, epoch, num_inner_updates, load_task_mode, protocol,
-                 tot_num_tasks, num_support, data_attack_type, tensorboard_data_prefix):
+                 tot_num_tasks, num_support, data_loss_type, adv_norm, targeted, target_type, tensorboard_data_prefix):
         super(self.__class__, self).__init__()
         self.dataset = dataset
         self.meta_batch_size = meta_batch_size
@@ -36,7 +36,7 @@ class MetaTwoQueriesLearner(object):
         self.network = MetaNetwork(backbone)
         self.network.cuda()
         self.num_support = num_support
-        trn_dataset = TwoQueriesMetaTaskDataset(data_attack_type, tot_num_tasks, dataset, load_mode=load_task_mode, protocol=protocol)
+        trn_dataset = TwoQueriesMetaTaskDataset(dataset, adv_norm, data_loss_type, tot_num_tasks, load_task_mode, protocol, targeted, target_type)
         self.train_loader = DataLoader(trn_dataset, batch_size=meta_batch_size, shuffle=True, num_workers=0, pin_memory=True)
         self.tensorboard = TensorBoardWriter("{0}/tensorboard/2q_distillation".format(PY_ROOT),
                                              tensorboard_data_prefix)
@@ -89,7 +89,7 @@ class MetaTwoQueriesLearner(object):
 
     def train(self, model_path, resume_epoch=0):
         for epoch in range(resume_epoch, self.epoch):
-            for i, (q1_images, q2_images, q1_logits, q2_logits, gt_label, _, _) in enumerate(self.train_loader):
+            for i, (q1_images, q2_images, q1_logits, q2_logits, *_) in enumerate(self.train_loader):
                 # q1_images shape = (Task_num, T, C, H, W)  q2_images shape = (Task_num, T, C, H, W)
                 # q1_logits shape = (Task_num, T, #class), q2_logits shape = (Task_num, T, #class)
                 itr = epoch * len(self.train_loader) + i

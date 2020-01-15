@@ -15,11 +15,11 @@ import numpy as np
 from torchvision import transforms
 
 from config import IN_CHANNELS
-from meta_grad_attack.models import make_model
-from meta_grad_attack.loaders import make_loader
-from meta_model.meta_network import MetaNetwork
-from meta_model.network.autoencoder import AutoEncoder
-from meta_model.network.video_pred_network import VideoPredNetwork
+from meta_attack_by_gradient.models import make_model
+from meta_attack_by_gradient.loaders import make_loader
+from meta_simulator_model.meta_network import MetaNetwork
+from meta_simulator_model.network.autoencoder import AutoEncoder
+from meta_simulator_model.network.video_pred_network import VideoPredNetwork
 from torch.optim import SGD
 
 def parse_args():
@@ -106,48 +106,6 @@ def parse_args():
     return args
 
 
-class StandardModel(nn.Module):
-    """
-    A StandardModel object wraps a cnn model.
-    This model always accept standard image: in [0, 1] range, RGB order, un-normalized, NCHW format
-    """
-    def __init__(self, dataset, arch, no_grad=True, **kwargs):
-        super(StandardModel, self).__init__()
-        # init cnn model
-        self.cnn = make_model(dataset, arch, **kwargs)
-        self.cnn.to(device)
-
-        # init cnn model meta-information
-        self.mean = torch.FloatTensor(self.cnn.mean).view(1, 3, 1, 1).to(device)
-        self.std = torch.FloatTensor(self.cnn.std).view(1, 3, 1, 1).to(device)
-        self.input_space = self.cnn.input_space  # 'RGB' or 'GBR'
-        self.input_range = self.cnn.input_range  # [0, 1] or [0, 255]
-        self.input_size = self.cnn.input_size
-
-        self.no_grad = no_grad
-
-    def forward(self, x):
-        # assign dropout probability
-        if hasattr(self, 'drop'):
-            self.cnn.drop = self.drop
-
-        # channel order
-        if self.input_space == 'BGR':
-            x = x[:, [2, 1, 0], :, :]  # pytorch does not support negative stride index (::-1) yet
-
-        # input range
-        if max(self.input_range) == 255:
-            x = x * 255
-
-        # normalization
-        x = (x - self.mean) / self.std
-
-        if self.no_grad:
-            with torch.no_grad():
-                x = self.cnn(x)
-        else:
-            x = self.cnn(x)
-        return x
 
 
 def norm(t, p=2):

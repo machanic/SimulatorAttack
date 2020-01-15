@@ -88,9 +88,9 @@ class BanditsAttack(Attacker):
                 upsampler = lambda x: x
             else:
                 upsampler = Upsample(size=(IMAGE_SIZE[self.dataset_name][0], IMAGE_SIZE[self.dataset_name][1]))
-            prior_step = self.gd_prior_step if args.mode == 'l2' else self.eg_step
-            image_step = self.l2_image_step if args.mode == 'l2' else self.linf_step
-            proj_maker = self.l2_proj if args.mode == 'l2' else self.linf_proj  # 调用proj_maker返回的是一个函数
+            prior_step = self.gd_prior_step if args.norm == 'l2' else self.eg_step
+            image_step = self.l2_image_step if args.norm == 'l2' else self.linf_step
+            proj_maker = self.l2_proj if args.norm == 'l2' else self.linf_proj  # 调用proj_maker返回的是一个函数
             proj_step = proj_maker(adv_images.clone(), args.epsilon)
             prior = torch.zeros(args.batch_size, IN_CHANNELS[args.dataset], IMAGE_SIZE[args.dataset][0],
                                 IMAGE_SIZE[args.dataset][1]).cuda()
@@ -161,7 +161,7 @@ if __name__ == "__main__":
     parser.add_argument('--fd-eta', type=float, help='\eta, used to estimate the derivative via finite differences')
     parser.add_argument('--image-lr', type=float, help='Learning rate for the image (iterative attack)')
     parser.add_argument('--online-lr', type=float, help='Learning rate for the prior')
-    parser.add_argument('--mode', type=str, help='Which lp constraint to run bandits [linf|l2]')
+    parser.add_argument('--norm', type=str, help='Which lp constraint to run bandits [linf|l2]')
     parser.add_argument('--exploration', type=float,
                         help='\delta, parameterizes the exploration to be done around the prior')
     parser.add_argument('--tile-size', type=int, help='the side length of each tile (for the tiling prior)')
@@ -193,14 +193,14 @@ if __name__ == "__main__":
         args_dict = vars(args)
     else:
         # If a json file is given, use the JSON file as the base, and then update it with args
-        defaults = json.load(open(args.json_config))[args.mode]
+        defaults = json.load(open(args.json_config))[args.norm]
         arg_vars = vars(args)
         arg_vars = {k: arg_vars[k] for k in arg_vars if arg_vars[k] is not None}
         defaults.update(arg_vars)
         args = SimpleNamespace(**defaults)
         args_dict = defaults
 
-    args.exp_dir = osp.join(args.exp_dir, get_random_dir_name(args.mode))  # 随机产生一个目录用于实验
+    args.exp_dir = osp.join(args.exp_dir, get_random_dir_name(args.norm))  # 随机产生一个目录用于实验
     if not osp.exists(args.exp_dir):
         os.makedirs(args.exp_dir)
     set_log_file(osp.join(args.exp_dir, 'run.log'))

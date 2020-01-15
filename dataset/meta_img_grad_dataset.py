@@ -9,7 +9,7 @@ import numpy as np
 import torch
 from torch.utils import data
 
-from config import IMAGE_SIZE, IN_CHANNELS, PY_ROOT, ALL_MODELS, MODELS_I, MODELS_II
+from config import IMAGE_SIZE, IN_CHANNELS, PY_ROOT, ALL_MODELS, MODELS_TRAIN, MODELS_TEST
 from constant_enum import SPLIT_DATA_PROTOCOL, LOAD_TASK_MODE
 
 
@@ -27,9 +27,9 @@ class MetaTaskDataset(data.Dataset):
         self.dataset = dataset
         self.sequence_len = 40
         if protocol == SPLIT_DATA_PROTOCOL.TRAIN_I_TEST_II:
-            self.model_names = MODELS_I
+            self.model_names = MODELS_TRAIN
         elif protocol == SPLIT_DATA_PROTOCOL.TRAIN_II_TEST_I:
-            self.model_names = MODELS_II
+            self.model_names = MODELS_TEST
         elif protocol == SPLIT_DATA_PROTOCOL.TRAIN_ALL_TEST_ALL:
             self.model_names = ALL_MODELS
         if self.dataset == "TinyImageNet":

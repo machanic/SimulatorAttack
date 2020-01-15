@@ -93,9 +93,9 @@ class BanditAttack(object):
         total_queries = ch.zeros(args.batch_size).cuda()
         prior = ch.zeros(args.batch_size, IN_CHANNELS[args.dataset], prior_size, prior_size).cuda()
         dim = prior.nelement() / args.batch_size  # nelement() --> total number of elements
-        prior_step = BanditAttack.gd_prior_step if args.mode == 'l2' else BanditAttack.eg_step
-        image_step = BanditAttack.l2_image_step if args.mode == 'l2' else BanditAttack.linf_step
-        proj_maker = BanditAttack.l2_proj if args.mode == 'l2' else BanditAttack.linf_proj  # 调用proj_maker返回的是一个函数
+        prior_step = BanditAttack.gd_prior_step if args.norm == 'l2' else BanditAttack.eg_step
+        image_step = BanditAttack.l2_image_step if args.norm == 'l2' else BanditAttack.linf_step
+        proj_maker = BanditAttack.l2_proj if args.norm == 'l2' else BanditAttack.linf_proj  # 调用proj_maker返回的是一个函数
         proj_step = proj_maker(image, args.epsilon)
         # Loss function
         criterion = ch.nn.CrossEntropyLoss(reduction='none')
