@@ -1,5 +1,5 @@
 from torch import nn
-import torch
+
 
 class AutoEncoder(nn.Module):
 
@@ -22,9 +22,10 @@ class AutoEncoder(nn.Module):
         self.deconv3 = nn.ConvTranspose2d(128, 64, kernel_size=2, stride=2, padding=0)
         self.bn7 = nn.BatchNorm2d(64)
         self.conv5 = nn.Conv2d(64, input_channels, kernel_size=3, stride=1, padding=1)
-
+        self.bn8 = nn.BatchNorm2d(input_channels)
+        # self.constant = torch.tensor(3.0).float().cuda()
         self.relu = nn.ReLU()
-        self.tanh = nn.Tanh()  # 输出是0到1之间的矩阵
+        # self.tanh = nn.Tanh()  # 输出是0到1之间的矩阵
 
 
     def encode(self, x):
@@ -38,7 +39,7 @@ class AutoEncoder(nn.Module):
         out = self.relu(self.bn5(self.deconv1(z)))
         out = self.relu(self.bn6(self.deconv2(out)))
         out = self.relu(self.bn7(self.deconv3(out)))
-        out = self.tanh(self.conv5(out))
+        out = self.bn8(self.conv5(out))
         return out
 
     def forward(self, x):
@@ -46,3 +47,4 @@ class AutoEncoder(nn.Module):
         x = x.view(-1, C, H, W)
         z = self.encode(x)
         return self.decode(z)
+

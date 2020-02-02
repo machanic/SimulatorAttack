@@ -1,23 +1,25 @@
 import glob
 import os
-import pickle
 import random
-import re
-from collections import defaultdict
 
 import numpy as np
 import torch
 from torch.utils import data
+from torchvision.datasets import CIFAR10, CIFAR100, MNIST, FashionMNIST, ImageFolder
 
-from config import IMAGE_SIZE, IN_CHANNELS, PY_ROOT, ALL_MODELS, MODELS_TRAIN, MODELS_TEST
-from constant_enum import SPLIT_DATA_PROTOCOL, LOAD_TASK_MODE
+from config import IMAGE_SIZE, ALL_MODELS, MODELS_TEST, IMAGE_DATA_ROOT, MODELS_TRAIN_STANDARD, PY_ROOT, IN_CHANNELS, \
+    MODELS_TEST_STANDARD
+from constant_enum import SPLIT_DATA_PROTOCOL
+from dataset.dataset_loader_maker import DataLoaderMaker
+from dataset.model_constructor import StandardModel
+from dataset.tiny_imagenet import TinyImageNet
 
 
-class MetaTaskDataset(data.Dataset):
+class MetaImgOnlineGradTaskDataset(data.Dataset):
     """
     Support 和query数据用同样的PGD 40 sequence, support数据是指用0~20 PGD的前一半迭代，或指定几个监督信号， query数据是指用20~40的后一半
     """
-    def __init__(self, data_loss_type, num_tot_tasks, dataset, load_mode, protocol):
+    def __init__(self, tot_num_tasks, dataset, inner_batch_size, protocol):
         """
         Args:
             num_samples_per_class: num samples to generate "per class" in one batch
@@ -25,97 +27,147 @@ class MetaTaskDataset(data.Dataset):
         """
         self.img_size = IMAGE_SIZE[dataset]
         self.dataset = dataset
-        self.sequence_len = 40
+
         if protocol == SPLIT_DATA_PROTOCOL.TRAIN_I_TEST_II:
-            self.model_names = MODELS_TRAIN
+            self.model_names = MODELS_TRAIN_STANDARD[self.dataset]
         elif protocol == SPLIT_DATA_PROTOCOL.TRAIN_II_TEST_I:
-            self.model_names = MODELS_TEST
+            self.model_names = MODELS_TEST_STANDARD[self.dataset]
         elif protocol == SPLIT_DATA_PROTOCOL.TRAIN_ALL_TEST_ALL:
-            self.model_names = ALL_MODELS
-        if self.dataset == "TinyImageNet":
-            self.data_root_dir = "{}/data_PGD_without_sep_labels/{}/".format(PY_ROOT, data_loss_type)
-            pattern_str = ".*_model_(.*?)_images.*"
-        else:
-            self.data_root_dir = "{}/data_PGD_40/{}/".format(PY_ROOT, data_loss_type)
-            pattern_str = ".*_model_(.*?)_label.*"
-        self.pattern = re.compile(pattern_str)
-        self.train_files = []
+            self.model_names = MODELS_TRAIN_STANDARD[self.dataset] + MODELS_TEST_STANDARD[self.dataset]
 
-        for img_file_path in glob.glob(self.data_root_dir + "{}/{}*_images.npy".format(self.dataset, self.dataset)):
-            file_name = os.path.basename(img_file_path)
-            ma = self.pattern.match(file_name)
-            model_name = ma.group(1)
-            if model_name in self.model_names:
-                grad_file_path = img_file_path.replace("_images.npy","_grad.npy")
-                with open(img_file_path.replace(".npy",".txt"), "r") as file_obj:
-                    count = int(file_obj.read().strip())
-                each_file_json = {"count": count, "arch":model_name, "grad_file":grad_file_path, "img_file":img_file_path}
-                self.train_files.append(each_file_json)
-        self.num_tot_trn_tasks = num_tot_tasks
-        self.task_dump_txt_path = "{}/task/{}_{}/{}_data_loss_{}_tot_num_tasks_{}.pkl".format(PY_ROOT, protocol,
-                                            dataset, dataset, data_loss_type, num_tot_tasks)
-        self.store_tasks(load_mode, self.task_dump_txt_path, self.train_files)
-
-    def store_tasks(self, load_mode, task_dump_txt_path, train_files):
+        self.model_dict = {}
+        for arch in self.model_names:
+            if StandardModel.check_arch(arch, dataset):
+                model = StandardModel(dataset, arch, no_grad=False).eval()
+                if dataset != "ImageNet":
+                    model = model.cuda()
+                self.model_dict[arch] = model
+        is_train = True
+        preprocessor = DataLoaderMaker.get_preprocessor(IMAGE_SIZE[dataset], is_train)
+        if dataset == "CIFAR-10":
+            train_dataset = CIFAR10(IMAGE_DATA_ROOT[dataset], train=is_train, transform=preprocessor)
+        elif dataset == "CIFAR-100":
+            train_dataset = CIFAR100(IMAGE_DATA_ROOT[dataset], train=is_train, transform=preprocessor)
+        elif dataset == "MNIST":
+            train_dataset = MNIST(IMAGE_DATA_ROOT[dataset], train=is_train, transform=preprocessor)
+        elif dataset == "FashionMNIST":
+            train_dataset = FashionMNIST(IMAGE_DATA_ROOT[dataset], train=is_train, transform=preprocessor)
+        elif dataset == "TinyImageNet":
+            train_dataset = TinyImageNet(IMAGE_DATA_ROOT[dataset], preprocessor, is_train=is_train)
+        elif dataset == "ImageNet":
+            preprocessor = DataLoaderMaker.get_preprocessor(IMAGE_SIZE[dataset], is_train, center_crop=True)
+            sub_folder = "/train" if is_train else "/validation"  # Note that ImageNet uses pretrainedmodels.utils.TransformImage to apply transformation
+            train_dataset = ImageFolder(IMAGE_DATA_ROOT[dataset] + sub_folder, transform=preprocessor)
+        self.train_dataset = train_dataset
+        self.total_num_images = len(train_dataset)
         self.all_tasks = dict()
-        if load_mode == LOAD_TASK_MODE.LOAD and os.path.exists(task_dump_txt_path):
-            with open(task_dump_txt_path, "rb") as file_obj:
-                self.all_tasks = pickle.load(file_obj)
-            return
+        all_images_indexes = np.arange(self.total_num_images).tolist()
+        for i in range(tot_num_tasks):
+            self.all_tasks[i] = {"image": random.sample(all_images_indexes, inner_batch_size), "arch": random.choice(list(self.model_dict.keys()))}
 
-        for i in range(self.num_tot_trn_tasks):  # 总共的训练任务个数，每次迭代都从这些任务去取
-            if i % 1000 == 0:
-                print("store {} tasks".format(i))
-            file_entry = random.choice(train_files)
-            img_whole_path, grad_path = self.get_image_paths(file_entry)
-            arch = file_entry["arch"]
-            img_path, index = img_whole_path.split("#")
-            index = int(index)
-            self.all_tasks[i] = {"task_idx":i, "arch": arch, "img_path": img_path, "grad_path": grad_path,
-                                          "seq_index":index}
-
-        self.dump_task(self.all_tasks, task_dump_txt_path)
-
-    def dump_task(self, all_tasks, task_dump_txt_path):
-        os.makedirs(os.path.dirname(task_dump_txt_path),exist_ok=True)
-        with open(task_dump_txt_path, "wb") as file_obj:
-            pickle.dump(all_tasks, file_obj, protocol=True)
-
-    def get_image_paths(self, file_entry):
-        img_file_path = file_entry["img_file"]
-        grad_file_path = file_entry["grad_file"]
-        count = file_entry["count"]
-        all_index_list = np.arange(count).tolist()
-        seq_index = random.choice(all_index_list)
-        img_whole_path = "{}#{}".format(img_file_path, seq_index)
-        return img_whole_path, grad_file_path
+    def cw_loss(self, logit, label):
+        # untargeted cw loss: max_{i\neq y}logit_i - logit_y
+        _, argsort = logit.sort(dim=1, descending=True)
+        gt_is_max = argsort[:, 0].eq(label).long()
+        second_max_index = gt_is_max.long() * argsort[:, 1] + (1 - gt_is_max).long() * argsort[:, 0]
+        gt_logit = logit[torch.arange(logit.shape[0]), label]
+        second_max_logit = logit[torch.arange(logit.shape[0]), second_max_index]
+        return second_max_logit - gt_logit
 
     def __getitem__(self, task_index):
         data_json = self.all_tasks[task_index]
-        image_path = data_json["img_path"]
-        seq_index = data_json["seq_index"]
-        arch_name = data_json["arch"]
-        fobj = open(image_path, "rb")
-        im = np.memmap(fobj, dtype='float32', mode='r', shape=(
-            1, self.sequence_len, IN_CHANNELS[self.dataset], IMAGE_SIZE[self.dataset][0], IMAGE_SIZE[self.dataset][1]),
-                       offset=seq_index * self.sequence_len * IN_CHANNELS[self.dataset] * IMAGE_SIZE[self.dataset][0] * IMAGE_SIZE[self.dataset][1]
-                              * 32 // 8).copy()
-        adv_image = im.reshape(self.sequence_len,  IN_CHANNELS[self.dataset], IMAGE_SIZE[self.dataset][0],
-                               IMAGE_SIZE[self.dataset][1])
-        fobj.close()
-        grad_path = data_json["grad_path"]
-        fobj = open(grad_path, "rb")
-        im = np.memmap(fobj, dtype='float32', mode='r', shape=(
-            1, self.sequence_len, IN_CHANNELS[self.dataset], IMAGE_SIZE[self.dataset][0], IMAGE_SIZE[self.dataset][1]),
-                       offset=seq_index * self.sequence_len * IN_CHANNELS[self.dataset] * IMAGE_SIZE[self.dataset][0] * IMAGE_SIZE[self.dataset][1]
-                              * 32 // 8).copy()
-        grad_image = im.reshape(self.sequence_len, IN_CHANNELS[self.dataset], IMAGE_SIZE[self.dataset][0],
-                                IMAGE_SIZE[self.dataset][1])
-        fobj.close()
-        adv_image = torch.from_numpy(adv_image)  # T, C, H, W
-        grad_image = torch.from_numpy(grad_image)  # T, C, H, W
-        return adv_image, grad_image, ALL_MODELS.index(arch_name)
+        arch = data_json["arch"]
+        # print("using {}".format(arch))
+        image_indexes = data_json["image"]
+        images, labels = [], []
+        for image_index in image_indexes:
+            image, label = self.train_dataset[image_index]
+            images.append(image)
+            labels.append(label)
+        images, labels = torch.stack(images).cuda(), torch.from_numpy(np.array(labels)).cuda().long()
+        images.requires_grad_()
+        model = self.model_dict[arch].cuda()
+        logits = model(images)
+        loss = self.cw_loss(logits, labels).mean()
+        model.zero_grad()
+        loss.backward()
+        grad_gt = images.grad
+        if self.dataset == "ImageNet":
+            self.model_dict[arch].cpu()
+        return images.detach(), grad_gt.detach()
 
     def __len__(self):
         return len(self.all_tasks)
 
+
+class MetaImgOfflineGradTaskDataset(data.Dataset):
+
+    def __init__(self, tot_num_tasks, dataset, inner_batch_size, protocol):
+        """
+        Args:
+            num_samples_per_class: num samples to generate "per class" in one batch
+            batch_size: size of meta batch size (e.g. number of functions)
+        """
+        self.img_size = IMAGE_SIZE[dataset]
+        self.dataset = dataset
+
+        if protocol == SPLIT_DATA_PROTOCOL.TRAIN_I_TEST_II:
+            self.model_names = MODELS_TRAIN_STANDARD[self.dataset]
+        elif protocol == SPLIT_DATA_PROTOCOL.TRAIN_II_TEST_I:
+            self.model_names = MODELS_TEST_STANDARD[self.dataset]
+        elif protocol == SPLIT_DATA_PROTOCOL.TRAIN_ALL_TEST_ALL:
+            self.model_names = MODELS_TRAIN_STANDARD[self.dataset] + MODELS_TEST_STANDARD[self.dataset]
+        data_dir_path = "{}/data_grad_regression/{}/*images.npy".format(PY_ROOT, dataset)
+        data_len_dict = {}
+        for file_path in glob.glob(data_dir_path):
+            file_name = os.path.basename(file_path)
+            arch = file_name.split("_")[0]
+            if arch in self.model_names:
+                shape_file_path = file_path.replace(".npy",".txt")
+                with open(shape_file_path, "r") as file_obj:
+                    img_shape = eval(file_obj.read().strip())
+                    length = img_shape[0]
+                data_len_dict[file_path] = length
+        self.all_tasks = {}
+        for i in range(tot_num_tasks):
+            file_path = random.choice(list(data_len_dict.keys()))
+            length = data_len_dict[file_path]
+            image_indexes = random.sample(np.arange(length).tolist(), inner_batch_size)
+            self.all_tasks[i] = {"image_indexes" : image_indexes, "image_file_path": file_path, "grad_file_path": file_path.replace("images.npy","gradients.npy")}
+
+    def __getitem__(self, task_index):
+        data_json = self.all_tasks[task_index]
+        image_indexes = data_json["image_indexes"]
+        image_file_path = data_json["image_file_path"]
+        grad_file_path = data_json["grad_file_path"]
+
+        images = []
+        grads = []
+        with open(image_file_path, "rb") as file_obj:
+            for image_index in image_indexes:
+                image = np.memmap(file_obj, dtype='float32', mode='r', shape=(IN_CHANNELS[self.dataset],
+                                                                                  IMAGE_SIZE[self.dataset][0],
+                                                                                  IMAGE_SIZE[self.dataset][1]),
+                                      offset=image_index * IN_CHANNELS[self.dataset] * IMAGE_SIZE[self.dataset][0] * \
+                                             IMAGE_SIZE[self.dataset][1] * 32 // 8).copy()
+                image = image.reshape(IN_CHANNELS[self.dataset], IMAGE_SIZE[self.dataset][0],
+                                              IMAGE_SIZE[self.dataset][1])
+                images.append(image)
+        with open(grad_file_path, "rb") as file_obj:
+            for image_index in image_indexes:
+                grad = np.memmap(file_obj, dtype='float32', mode='r', shape=(IN_CHANNELS[self.dataset],
+                                                                              IMAGE_SIZE[self.dataset][0],
+                                                                              IMAGE_SIZE[self.dataset][1]),
+                                  offset=image_index * IN_CHANNELS[self.dataset] * IMAGE_SIZE[self.dataset][0] * \
+                                         IMAGE_SIZE[self.dataset][1] * 32 // 8).copy()
+                grad = grad.reshape(IN_CHANNELS[self.dataset], IMAGE_SIZE[self.dataset][0],
+                                      IMAGE_SIZE[self.dataset][1])
+                grads.append(grad)
+        images = np.stack(images)
+        grads = np.stack(grads)
+        images = torch.from_numpy(images)
+        grads = torch.from_numpy(grads)
+        return images, grads
+
+    def __len__(self):
+        return len(self.all_tasks)

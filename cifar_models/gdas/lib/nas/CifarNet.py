@@ -76,13 +76,14 @@ class NetworkCIFAR(nn.Module):
     s0 = s1 = self.stem(inputs)
     for i, cell in enumerate(self.cells):
       s0, s1 = s1, cell(s0, s1, self.drop_path_prob)
-      # if i == 2*self._layers//3:
-      #   if self.auxiliary_head and self.training:
-      #     logits_aux = self.auxiliary_head(s1)
+      if i == 2*self._layers//3:
+        if self.auxiliary_head and self.training:
+          logits_aux = self.auxiliary_head(s1)
+    if self.auxiliary_head and self.training:
+      return logits_aux
     out = self.global_pooling(s1)
     out = out.view(out.size(0), -1)
     logits = self.classifier(out)
-
     # if self.auxiliary_head and self.training:
     #   return logits, logits_aux
     # else:

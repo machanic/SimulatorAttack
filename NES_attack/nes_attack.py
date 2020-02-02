@@ -1,3 +1,4 @@
+import glob
 import os
 import random
 import sys
@@ -10,67 +11,144 @@ import numpy as np
 import torch
 from torch.nn import functional as F
 from types import SimpleNamespace
+from config import CLASS_NUM, CIFAR_ALL_MODELS, PY_ROOT, IMAGENET_ALL_MODELS
+from dataset_loader_maker import DataLoaderMaker
+from dataset.model_constructor import StandardModel
 
-from attacker_with_statistics.attacker_statistics_base import Attacker
-from config import CLASS_NUM
-from target_models.standard_model import StandardModel
 
-
-class NesAttacker(Attacker):
-    def __init__(self, dataset_name, *args):
-        super(NesAttacker, self).__init__(*args)
+class NesAttacker(object):
+    def __init__(self, dataset_name, total_images, targeted):
         self.dataset_name = dataset_name
         self.num_classes = CLASS_NUM[self.dataset_name]
+        self.dataset_loader = DataLoaderMaker.get_img_label_data_loader(dataset_name, 1, False)
         self.dataset = self.dataset_loader.dataset
+        self.total_images = total_images
+        self.targeted = targeted
+        self.query_all = torch.zeros(self.total_images)
+        self.correct_all = torch.zeros_like(self.query_all)  # number of images
+        self.not_done_all = torch.zeros_like(self.query_all)  # always set to 0 if the original image is misclassified
+        self.success_all = torch.zeros_like(self.query_all)
+        self.success_query_all = torch.zeros_like(self.query_all)
+        self.not_done_loss_all = torch.zeros_like(self.query_all)
+        self.not_done_prob_all = torch.zeros_like(self.query_all)
+        log.info("label index dict build begin")
+        self.label_data_index_dict = self.get_label_dataset(self.dataset)
+        log.info("label index dict build over!")
 
     def get_label_dataset(self, dataset):
         label_index = defaultdict(list)
-        for index, label in enumerate(dataset.labels):  # 保证这个data_loader没有shuffle过
+        for index, (img, label) in enumerate(dataset):  # 保证这个data_loader没有shuffle过
             label_index[label].append(index)
+        return label_index
 
     def get_image_of_class(self, target_labels, dataset):
         images = []
-        label_index = self.get_label_dataset(dataset)
-        for label in target_labels:
-            index = random.choice(label_index[label])
-            image, *_ = dataset[index]
+        for label in target_labels:  # length of target_labels is 1
+            index = random.choice(self.label_data_index_dict[label.item()])
+            image, label_ = dataset[index]
+            assert label_ == label.item()
             images.append(image)
-        return torch.stack(images)  # B,C,H,W
+        return torch.stack(images).cuda()  # B,C,H,W
 
-    def xent_loss(self, logit, true_label, target=None):
+    def xent_loss(self, logits, noise, true_labels, target_labels, top_k):
         if self.targeted:
-            return -F.cross_entropy(logit, target, reduction='none')
+            return -F.cross_entropy(logits, target_labels, reduction='none'), noise
         else:
-            return F.cross_entropy(logit, true_label, reduction='none')
+            assert target_labels is None, "target label must set to None in untargeted attack"
+            return F.cross_entropy(logits, true_labels, reduction='none'), noise
 
-    # @deprecated
-    # def partial_info_loss(self, input, labels,target_labels, noise):
-    #     logits = self.model(input)
-    #     loss = F.cross_entropy(logits, labels)
-    #     vals, inds = torch.topk(logits, k=self.top_k)  # inds shape = batch_size, k
-    #     inds = inds.detach().cpu().numpy()
-    #     target_labels = target_labels.detach().cpu().numpy()
-    #
-    #     good_inds = np.where(inds == target_labels)  # FIXME
-    #     good_images = good_inds[:, 0]
-    #     good_images = torch.from_numpy(good_images).cuda()
-    #     loss = torch.gather(loss, 0, good_images)
-    #     noise = torch.gather(noise,0,good_images)
-    #     return loss, noise
+    def partial_info_loss(self, logits, noise, true_labels, target_labels, top_k):
+        # logit 是融合了batch_size of noise 的, shape = (batch_size, num_classes)
+        losses, noise = self.xent_loss(logits=logits,noise=noise, true_labels=true_labels, target_labels=target_labels, top_k=top_k)
+        vals, inds = torch.topk(logits, k=top_k, largest=True, sorted=True)
+        # inds is batch_size x k
+        target_class = target_labels[0].item()  # 一个batch的target都是一样的
+        good_image_inds = torch.sum(inds == target_class, dim=1).byte()    # shape = (batch_size,)
+        losses = losses[good_image_inds]
+        noise = noise[good_image_inds]
+        return losses, noise
 
     #  STEP CONDITION (important for partial-info attacks)
-    def robust_in_top_k(self, target_labels, adv_images, top_k): # target_label shape=(batch_size,)
+    def robust_in_top_k(self, target_model, adv_images, target_labels, top_k):
         if top_k == self.num_classes:
             return True
-        eval_logits = self.model(adv_images)
-        _,  top_pred_indices = eval_logits.topk(k=top_k,largest=True,sorted=True)  # top_pred_indices shape = (batch_size, top_k)
-        target_labels = target_labels.view(-1,1).repeat(1, top_k)
-        exists_check_array = (target_labels == top_pred_indices).byte()
-        exists_check_array = exists_check_array.cpu().detach().numpy()  # shape = (batch_size, top_k)
-        exists_check_array = np.bitwise_or.reduce(exists_check_array, axis=1)  # shape = (batch_size)
-        if np.all(exists_check_array):  # all is True: all target_label is in top_k prediction
-            return True
-        return False
+        eval_logits = target_model(adv_images)
+        t = target_labels[0].item()
+        _, top_pred_indices = torch.topk(eval_logits, k=top_k, largest=True,
+                                               sorted=True)  # top_pred_indices shape = (1, top_k)
+        top_pred_indices = top_pred_indices.view(-1).detach().cpu().numpy().tolist()
+        if t not in top_pred_indices:
+            return False
+        return True
+
+    def get_grad(self, x, sigma, samples_per_draw, batch_size, true_labels, target_labels, target_model, loss_fn, top_k):
+        num_batches = samples_per_draw // batch_size  # 一共产生多少个samples噪音点，每个batch
+        losses = []
+        grads = []
+
+        for _ in range(num_batches):
+            assert x.size(0) == 1
+            noise_pos = torch.randn((batch_size//2,) + (x.size(1), x.size(2), x.size(3)))  # B//2, C, H, W
+            noise = torch.cat([-noise_pos, noise_pos], dim=0).cuda()  # B, C, H, W
+            eval_points = x + sigma * noise  # 1,C,H,W + B, C, H, W = B,C,H,W
+            logits = target_model(eval_points)  # B, num_classes
+            # losses shape = (batch_size,)
+            loss, noise = loss_fn(logits, noise, true_labels, target_labels.repeat(batch_size), top_k)  # true_labels and target_labels have already repeated for batch_size
+            loss = loss.view(-1,1,1,1) # shape = (B,1,1,1)
+            grad = torch.mean(loss * noise, dim=0, keepdim=True)/sigma # loss shape = (B,1,1,1) * (B,C,H,W), then mean axis= 0 ==> (1,C,H,W)
+            losses.append(loss.mean())
+            grads.append(grad)
+        losses = torch.stack(losses).mean()  # (1,)
+        grads = torch.mean(torch.stack(grads), dim=0)  # (1,C,H,W)
+        return losses.item(), grads
+
+    def attack_all_images(self, args, arch_name, target_model, result_dump_path):
+        attack_unsuccessful_images = []
+        for batch_idx, (images, true_labels) in enumerate(self.dataset_loader):
+            if batch_idx >= self.total_images:
+                break
+            if args.targeted:
+                if args.target_type == 'random':
+                    target_labels = torch.randint(low=0, high=CLASS_NUM[args.dataset],
+                                                  size=true_labels.size()).long().cuda()
+                elif args.target_type == 'least_likely':
+                    with torch.no_grad():
+                        logit = target_model(images)
+                    target_labels = logit.argmin(dim=1)
+            else:
+                target_labels = None
+
+            attack_success = self.make_adversarial_examples(batch_idx, images.cuda(), true_labels.cuda(), target_labels, args, target_model)
+            if not attack_success:
+                attack_unsuccessful_images.append(images)
+        if attack_unsuccessful_images:
+            attack_unsuccessful_images = torch.cat(attack_unsuccessful_images, 0).detach().cpu().numpy()
+
+        log.info('{} is attacked finished ({} images)'.format(arch_name, self.total_images))
+        log.info('        avg correct: {:.4f}'.format(self.correct_all.mean().item()))
+        log.info('       avg not_done: {:.4f}'.format(self.not_done_all.mean().item()))  # 有多少图没做完
+        if self.success_all.sum().item() > 0:
+            log.info('     avg mean_query: {:.4f}'.format(self.success_query_all[self.success_all.byte()].mean().item()))
+            log.info('   avg median_query: {:.4f}'.format(self.success_query_all[self.success_all.byte()].median().item()))
+            log.info('     max query: {}'.format(self.success_query_all[self.success_all.byte()].max().item()))
+        if self.not_done_all.sum().item() > 0:
+            log.info('  avg not_done_loss: {:.4f}'.format(self.not_done_loss_all[self.not_done_all.byte()].mean().item()))
+            log.info('  avg not_done_prob: {:.4f}'.format(self.not_done_prob_all[self.not_done_all.byte()].mean().item()))
+        log.info('Saving results to {}'.format(result_dump_path))
+        meta_info_dict = {"avg_correct": self.correct_all.mean().item(), "avg_not_done": self.not_done_all.mean().item(),
+                          "mean_query": self.success_query_all[self.success_all.byte()].mean().item(),
+                          "median_query": self.success_query_all[self.success_all.byte()].median().item(),
+                          "max_query": self.success_query_all[self.success_all.byte()].max().item(),
+                          "not_done_loss": self.not_done_loss_all[self.not_done_all.byte()].mean().item(),
+                          "not_done_prob": self.not_done_prob_all[self.not_done_all.byte()].mean().item()}
+        meta_info_dict['args'] = vars(args)
+        with open(result_dump_path, "w") as result_file_obj:
+            json.dump(meta_info_dict, result_file_obj, indent=4, sort_keys=True)
+        save_npy_path = os.path.dirname(result_dump_path) + "/{}_attack_not_success_images.npy".format(arch_name)
+        if attack_unsuccessful_images:
+            np.save(save_npy_path, attack_unsuccessful_images)
+        log.info("done, write stats info to {}".format(result_dump_path))
+
 
     def norm(self, t):
         assert len(t.shape) == 4
@@ -78,120 +156,171 @@ class NesAttacker(Attacker):
         norm_vec += (norm_vec == 0).float() * 1e-8
         return norm_vec
 
-    def get_grad(self, x, true_labels, target_labels):
-        # loss_fn = self.partial_info_loss if k < self.num_classes else self.xent_loss
-        dim = x.size(1) * x.size(2) * x.size(3)
-        noise = torch.randn_like(x) / (dim ** 0.5)
-        query_1 = x + self.sigma * noise
-        query_2 = x - self.sigma * noise
-        logits_q1 = self.model(query_1)
-        logits_q2 = self.model(query_2)
-        loss_1 = self.xent_loss(logits_q1, true_labels, target_labels)  # losses shape = (batch_size,)
-        loss_2 = self.xent_loss(logits_q2, true_labels, target_labels)  # losses shape = (batch_size,)
-        est_deriv = (loss_1 - loss_2) / self.sigma
-        grad_estimate = est_deriv.view(-1,1,1,1) * noise  # B,C,H,W
-        final_loss = (loss_1 + loss_2) / 2.0  #  shape = (batch_size,)
-        return grad_estimate, final_loss
+    def l2_image_step(self, x, g, lr):
+        return x + lr * g / self.norm(g)
 
-    def untargeted_attack_iteration(self, step_index, adv_images, true_labels, target_labels, args):  # like PGD
-        if step_index == 0:
-            initial_img = adv_images.clone()
-            g = torch.zeros_like(initial_img).cuda()  # 梯度，(B,C,H,W)
-        prev_g = g.clone()
-        g, _ = self.get_grad(adv_images, true_labels, target_labels)
-        # SIMPLE MOMENTUM
-        g = args.momentum * prev_g + (1.0 - args.momentum) * g
-        adv_images = adv_images + args.lr * torch.sign(g)
-        eta = torch.clamp(adv_images - initial_img, min=-args.epsilon, max=args.epsilon)
-        proposed_adv = torch.clamp(initial_img + eta, min=args.clip_min, max=args.clip_max).detach_()
-        return proposed_adv
+    def linf_step(self, x, g, lr):
+        return x + lr * torch.sign(g)
 
+    def l2_proj(self, image, eps):
+        orig = image.clone()
+        def proj(new_x):
+            delta = new_x - orig
+            out_of_bounds_mask = (self.norm(delta) > eps).float()
+            x = (orig + eps * delta / self.norm(delta)) * out_of_bounds_mask
+            x += new_x * (1 - out_of_bounds_mask)
+            return x
+        return proj
 
-    def targeted_attack_iteration(self, step_index, adv_images, true_labels, target_labels, args):
-        if step_index == 0:
-            initial_img = adv_images.clone()
-            last_loss = []
-            adv_thresh = args.adv_thresh
-            max_lr = args.max_lr
-            goal_epsilon = args.epsilon
-            clip_min = args.clip_min
-            clip_max = args.clip_max
-            g = torch.zeros_like(initial_img).cuda()  # 梯度，(B,C,H,W)
+    def linf_proj(self, image, eps):
+        orig = image.clone()
+        def proj(new_x):
+            return orig + torch.clamp(new_x - orig, -eps, eps)
+        return proj
+
+    def make_adversarial_examples(self, batch_index, images, true_labels, target_labels, args, target_model):
+        batch_size = args.batch_size  # Actually, the batch size of images is 1, the goal of args.batch_size is to sample noises
+        # some statistics variables
+        assert images.size(0) == 1
+        with torch.no_grad():
+            logit = target_model(images)
+        pred = logit.argmax(dim=1)
+        query = torch.zeros(1).cuda()
+        correct = pred.eq(true_labels).float()  # shape = (1,)
+        not_done = correct.clone()  # shape = (1,)
+        selected = torch.arange(batch_index, batch_index + 1)  # 选择这个batch的所有图片的index
+        adv_images = images.clone()
+
+        samples_per_draw = args.samples_per_draw  # samples per draw
+        epsilon = args.epsilon
+        goal_epsilon = epsilon
+        max_lr = args.max_lr
+        # ----- partial info params -----
+        k = args.top_k
+        adv_thresh = args.adv_thresh
+        if k > 0:
+            assert self.targeted, "Partial-information attack is a targeted attack."
             adv_images = self.get_image_of_class(target_labels, self.dataset)
             epsilon = args.starting_eps
-            delta_epsilon = args.starting_delta_eps
-            lower = torch.clamp(initial_img - epsilon, clip_min, clip_max)
-            upper = torch.clamp(initial_img + epsilon, clip_min, clip_max)
-            adv_images = torch.min(torch.max(adv_images, lower), upper)
-        prev_g = g.clone()
-        g, l = self.get_grad(adv_images, true_labels, target_labels)
-        # SIMPLE MOMENTUM
-        g = args.momentum * prev_g + (1.0 - args.momentum) * g
-        # PLATEAU LR ANNEALING
-        last_loss.append(l)
-        last_loss = last_loss[-args.plateau_length:]
-        if last_loss[-1] > last_loss[0] and len(last_loss) == args.plateau_length:
-            if max_lr > args.min_lr:
-                print("[log] Annealing max_lr")
-                max_lr = max(max_lr / args.plateau_drop, args.min_lr)
-            last_loss.clear()
-        # SEARCH FOR LR AND EPSILON DECAY
-        current_lr = max_lr
-        proposed_adv = adv_images - current_lr * torch.sign(g)
-        prop_de = 0.0
-        if l < adv_thresh and epsilon > goal_epsilon:
-            prop_de = delta_epsilon
-        while current_lr > args.min_lr:
-            proposed_adv = adv_images - int(self.targeted) * current_lr * torch.sign(g)
-            lower = torch.clamp(initial_img - epsilon, clip_min, clip_max)
-            upper = torch.clamp(initial_img + epsilon, clip_min, clip_max)
-            proposed_adv = torch.min(torch.max(proposed_adv, lower), upper)
-            # if self.robust_in_top_k(target_labels, proposed_adv, k):  # target_label=(batch_size, 10),
-            #     adv_images = proposed_adv
-            #     epsilon = max(epsilon - prop_de / args.conservative, goal_epsilon)
-            #     return adv_images
-            if current_lr >= args.min_lr * 2:
-                current_lr = current_lr / 2
+        else:   # if we don't want to top-k paritial attack set k = -1 as the default setting
+            k = self.num_classes
+        delta_epsilon = args.starting_delta_eps
+        g = torch.zeros_like(adv_images).cuda()
+        last_ls = []
+        true_labels = true_labels.repeat(batch_size)  # for noise sampling points
+        queries_per_iter = args.samples_per_draw
+        max_iters = int(np.ceil(args.max_queries // queries_per_iter))
+
+        loss_fn = self.partial_info_loss if k < self.num_classes else self.xent_loss  # 若非paritial_information模式，k = num_classes
+        image_step = self.l2_image_step if args.norm == 'l2' else self.linf_step
+        proj_maker = self.l2_proj if args.norm == 'l2' else self.linf_proj  # 调用proj_maker返回的是一个函数
+        proj_step = proj_maker(images, args.epsilon)
+
+        for step_index in range(max_iters):
+            # CHECK IF WE SHOULD STOP
+            if not not_done.byte().any() and epsilon <= goal_epsilon:  # all success
+                attack_success = True
+                break
+
+            prev_g = g
+            l, g = self.get_grad(adv_images, args.sigma, samples_per_draw, batch_size, true_labels, target_labels,
+                                 target_model, loss_fn, k)
+            query += samples_per_draw * not_done
+            # SIMPLE MOMENTUM
+            g = args.momentum * prev_g + (1.0 - args.momentum) * g
+            # PLATEAU LR ANNEALING
+            last_ls.append(l)
+            last_ls = last_ls[-args.plateau_length:]
+            if last_ls[-1] > last_ls[0] and len(last_ls) == args.plateau_length:
+                if max_lr > args.min_lr:
+                    max_lr = max(max_lr / args.plateau_drop, args.min_lr)
+                    log.info("[log] Annealing max_lr : {:.5f}".format(max_lr))
+                last_ls = []
+            # SEARCH FOR LR AND EPSILON DECAY
+            current_lr = max_lr
+            prop_de = 0.0
+            if l < adv_thresh and epsilon > goal_epsilon:
+                prop_de = delta_epsilon
+            while current_lr >= args.min_lr:
+                # PARTIAL INFORMATION ONLY
+                if k < self.num_classes:
+                    proposed_epsilon = max(epsilon - prop_de, goal_epsilon)
+                    proj_step = proj_maker(images, proposed_epsilon)
+                # GENERAL LINE SEARCH
+                proposed_adv = image_step(adv_images, g, current_lr)
+                proposed_adv = proj_step(proposed_adv)
+                proposed_adv = torch.clamp(proposed_adv, 0, 1)
+                query += 1 * not_done  # we must query for check robust_in_top_k
+                if self.robust_in_top_k(target_model, proposed_adv, target_labels, k):
+                    if prop_de > 0:
+                        delta_epsilon = max(prop_de, 0.1)
+                    adv_images = proposed_adv
+                    epsilon = max(epsilon - prop_de / args.conservative, goal_epsilon)
+                    break
+                elif current_lr > args.min_lr * 2:
+                    current_lr = current_lr / 2
+                else:
+                    prop_de = prop_de / 2
+                    if prop_de == 0:
+                        raise ValueError("Did not converge.")
+                    if prop_de < 2e-3:
+                        prop_de = 0
+                    current_lr = max_lr
+                    log.info("[log] backtracking eps to {:.3f}".format(epsilon-prop_de))
+
+            with torch.no_grad():
+                adv_logit = target_model(adv_images)
+            adv_pred = adv_logit.argmax(dim=1)  # shape = (1, )
+            adv_prob = F.softmax(adv_logit, dim=1)
+            adv_loss, _ = loss_fn(adv_logit, None, true_labels[0].unsqueeze(0), target_labels, top_k=k)
+            if self.targeted:
+                not_done = not_done * (1 - adv_pred.eq(target_labels)).float()
             else:
-                prop_de = prop_de / 2
-                if prop_de == 0:
-                    raise ValueError("Did not converge.")
-                if prop_de < 2e-3:
-                    prop_de = 0
-                # current_lr = max_lr
-                log.info("[log] backtracking eps to %3f" % (epsilon - prop_de,))
-            epsilon = max(epsilon - prop_de / args.conservative, goal_epsilon)  # goal_epsilon是最低的eps
+                not_done = not_done * adv_pred.eq(true_labels[0].unsqueeze(0)).float()  # 只要是跟原始label相等的，就还需要query，还没有成功
+            success = (1 - not_done) * correct
+            success_query = success * query
+            not_done_loss = adv_loss * not_done
+            not_done_prob = adv_prob[0, true_labels[0].item()] * not_done
 
-        return proposed_adv
+            # log.info('Attacking image {} - {} / {}, step {}, max query {}'.format(
+            #     batch_index, batch_index + 1,
+            #     self.total_images, step_index + 1, int(query.max().item())
+            # ))
+            # log.info('        correct: {:.4f}'.format(correct.mean().item()))
+            # log.info('       not_done: {:.4f}'.format(not_done.mean().item()))
+            # if success.sum().item() > 0:
+            #     log.info('     mean_query: {:.4f}'.format(success_query[success.byte()].mean().item()))
+            #     log.info('   median_query: {:.4f}'.format(success_query[success.byte()].median().item()))
+            # if not_done.sum().item() > 0:
+            #     log.info('  not_done_loss: {:.4f}'.format(not_done_loss[not_done.byte()].mean().item()))
+            #     log.info('  not_done_prob: {:.4f}'.format(not_done_prob[not_done.byte()].mean().item()))
 
-    def make_adv_examples_iteration(self, step_index, adv_images, true_labels, target_labels, args):
-        if self.targeted:
-            return self.targeted_attack_iteration(step_index, adv_images, true_labels, target_labels, args)
+
         else:
-            return self.untargeted_attack_iteration(step_index, adv_images, true_labels, target_labels, args)
+            attack_success = False
+        for key in ['query', 'correct',  'not_done',
+                    'success', 'success_query', 'not_done_loss', 'not_done_prob']:
+            value_all = getattr(self, key+"_all")
+            value = eval(key)
+            value_all[selected] = value.detach().float().cpu()  # 由于value_all是全部图片都放在一个数组里，当前batch选择出来
+        return attack_success
 
-def get_random_dir_name(dataset, arch, mode):
-    import string
+
+def get_exp_dir_name(dataset, norm, targeted, target_type):
     from datetime import datetime
-    dirname = datetime.now().strftime('%Y-%m-%d_%H-%M-%S_')
-    vocab = string.ascii_uppercase + string.ascii_lowercase + string.digits
-    dirname = 'nes_attack_{}_{}_{}_'.format(dataset, arch, mode) + dirname + ''.join(random.choice(vocab) for _ in range(8))
+    dirname = datetime.now().strftime('%Y_%m_%d_%H_%M_%S')
+    target_str = "untargeted" if not targeted else "targeted_{}".format(target_type)
+    dirname = 'NES-attack-{}-{}-{}-'.format(dataset, norm, target_str) + dirname
     return dirname
 
+
 def set_log_file(fname):
-    # set log file
-    # simple tricks for duplicating logging destination in the logging module such as:
-    # logging.getLogger().addHandler(logging.FileHandler(filename))
-    # does NOT work well here, because python Traceback message (not via logging module) is not sent to the file,
-    # the following solution (copied from : https://stackoverflow.com/questions/616645) is a little bit
-    # complicated but simulates exactly the "tee" command in linux shell, and it redirects everything
     import subprocess
-    # sys.stdout = os.fdopen(sys.stdout.fileno(), 'wb', 0)
     tee = subprocess.Popen(['tee', fname], stdin=subprocess.PIPE)
     os.dup2(tee.stdin.fileno(), sys.stdout.fileno())
     os.dup2(tee.stdin.fileno(), sys.stderr.fileno())
 
-def print_args():
+def print_args(args):
     keys = sorted(vars(args).keys())
     max_len = max([len(key) for key in keys])
     for key in keys:
@@ -211,9 +340,6 @@ if __name__ == "__main__":
     parser.add_argument('--lr', type=float, default=1e-2)
     parser.add_argument('--img-path', type=str)
     parser.add_argument('--img-index', type=int)
-    parser.add_argument('--out-dir', type=str, required=True,
-                        help='dir to save to if not gridding; otherwise parent \
-                            dir of grid directories')
     parser.add_argument('--log-iters', type=int, default=1)
     parser.add_argument('--restore', type=str, help='restore path of img')
     parser.add_argument('--momentum', type=float, default=0.9)
@@ -222,18 +348,19 @@ if __name__ == "__main__":
     parser.add_argument('--plateau-drop', type=float, default=2.0)
     parser.add_argument('--min-lr-ratio', type=int, default=200)
     parser.add_argument('--plateau-length', type=int, default=5)
-    parser.add_argument('--gpus', type=int, help='number of GPUs to use')
     parser.add_argument('--imagenet-path', type=str)
     parser.add_argument('--visualize', action='store_true')
     parser.add_argument('--max-lr', type=float, default=1e-2)
     parser.add_argument('--min-lr', type=float, default=5e-5)
     # PARTIAL INFORMATION ARGUMENTS
-    parser.add_argument('--top-k', type=int, default=-1)
+    parser.add_argument('--top-k', type=int, default=-1, help="if you don't want to use the partial information mode, "
+                                                              "just leave this argument to -1 as the default setting")
     parser.add_argument('--adv-thresh', type=float, default=-1.0)
     # LABEL ONLY ARGUMENTS
-    parser.add_argument('--label-only', action='store_true')
-    parser.add_argument('--zero-iters', type=int, default=100, help="how many points to use for the proxy score")
-    parser.add_argument('--label-only-sigma', type=float, default=1e-3, help="distribution width for proxy score")
+    parser.add_argument('--label-only', action='store_true', help="still on developing in progress")
+    parser.add_argument('--zero-iters', type=int, default=100, help="how many points to use for the proxy score, which is still on developing")
+    parser.add_argument('--label-only-sigma', type=float, default=1e-3, help="distribution width for proxy score, which is still on developing")
+
     parser.add_argument('--starting-eps', type=float, default=1.0)
     parser.add_argument('--starting-delta-eps', type=float, default=0.5)
     parser.add_argument('--min-delta-eps', type=float, default=0.1)
@@ -243,28 +370,58 @@ if __name__ == "__main__":
                         help='directory to save results and logs')
     parser.add_argument('--dataset', type=str, required=True,
                         choices=['CIFAR-10', 'ImageNet', "FashionMNIST", "MNIST", "TinyImageNet"],help='which dataset to use')
-    parser.add_argument('--arch', default='wrn-28-10-drop', type=str, help='network architecture')
+    parser.add_argument('--norm', type=str, default="linf", choices=["linf","l2"], help='Which lp constraint to update image [linf|l2]')
+    parser.add_argument('--arch', default='', type=str, help='network architecture')
+    parser.add_argument('--test-archs', action="store_true")
     parser.add_argument('--targeted', action="store_true")
     parser.add_argument('--target_type', type=str, default='random', choices=["random", "least_likely"])
-
+    parser.add_argument("--total-images", type=int, default=1000)
+    parser.add_argument('--seed', default=0, type=int, help='random seed')
     args = parser.parse_args()
     os.environ["CUDA_DEVICE_ORDER"] = "PCI_BUS_ID"
     os.environ['CUDA_VISIBLE_DEVICES'] = str(args.gpu)
     os.environ['CUDA_VISIBLE_DEVICE'] = str(args.gpu)
-    print("using GPU {}".format(args.gpu))
-    args.exp_dir = os.path.join(args.exp_dir, get_random_dir_name(args.dataset,  args.arch, "targeted" if args.targeted else "untargeted"))  # 随机产生一个目录用于实验
-    if not os.path.exists(args.exp_dir):
-        os.makedirs(args.exp_dir)
+
+    if args.targeted:
+        args.max_queries = 50000
+    args.exp_dir = os.path.join(args.exp_dir, get_exp_dir_name(args.dataset, args.norm, args.targeted, args.target_type))  # 随机产生一个目录用于实验
+    os.makedirs(args.exp_dir, exist_ok=True)
     set_log_file(os.path.join(args.exp_dir, 'run.log'))
+    DataLoaderMaker.setup_seed(args.seed)
+    archs = [args.arch]
+    if args.test_archs:
+        archs = []
+        if args.dataset == "CIFAR-10" or args.dataset == "CIFAR-100":
+            for arch in CIFAR_ALL_MODELS:
+                test_model_path = "{}/train_pytorch_model/real_image_model/{}-pretrained/{}/checkpoint.pth.tar".format(
+                    PY_ROOT,
+                    args.dataset, arch)
+                if os.path.exists(test_model_path):
+                    archs.append(arch)
+                else:
+                    log.info(test_model_path + " does not exists!")
+        else:
+            for arch in IMAGENET_ALL_MODELS:
+                test_model_list_path = "{}/train_pytorch_model/real_image_model/{}-pretrained/checkpoints/{}*.pth.tar".format(
+                    PY_ROOT,
+                    args.dataset, arch)
+                test_model_list_path = list(glob.glob(test_model_list_path))
+                if len(test_model_list_path) == 0:  # this arch does not exists in args.dataset
+                    continue
+                archs.append(arch)
+    args.arch = ", ".join(archs)
     log.info('Command line is: {}'.format(' '.join(sys.argv)))
+    log.info("using GPU {}".format(args.gpu))
+    log.info("Log file is written in {}".format(os.path.join(args.exp_dir, 'run.log')))
     log.info('Called with args:')
-    print_args()
-    torch.backends.cudnn.deterministic = True
-    random.seed(args.seed)
-    np.random.seed(args.seed)
-    torch.manual_seed(args.seed)
-    target_model = StandardModel(args.dataset, args.arch, no_grad=True, train_data='full', epoch='final').eval()
-    log.info("initializing target model {} on {}".format(args.arch, args.dataset))
-    attacker = NesAttacker(args.dataset, target_model, args.targeted, args.target_type, args.dataset, args.batch_size)
-    result_dump_path = args.exp_dir + "/hyper_params_and_result.json"
-    attacker.attack_dataset(args, args.max_queries, result_dump_path)
+    print_args(args)
+    attacker = NesAttacker(args.dataset, args.total_images, args.targeted)
+    for arch in archs:
+        model = StandardModel(args.dataset, arch, no_grad=True)
+        model.cuda()
+        model.eval()
+        save_result_path = args.exp_dir + "/{}_result.json".format(arch)
+        log.info("Begin attack {} on {}, result will be saved to {}".format(arch, args.dataset, save_result_path))
+        attacker.attack_all_images(args, arch, model, save_result_path)
+        model.cpu()
+    log.info("All done!")

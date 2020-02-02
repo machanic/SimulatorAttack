@@ -6,13 +6,13 @@ import random
 import os
 from config import PY_ROOT
 from torch.utils.data import DataLoader
-from cifar_models import *
+from cifar_models_myself import *
 from meta_simulator_model.tensorboard_helper import TensorBoardWriter
 from meta_simulator_model.meta_network import MetaNetwork
 import numpy as np
 from inner_loop_pair_loss import InnerLoopPairLoss
 from optimizer.radam import RAdam
-from cifar_models.model_constructor import ModelConstructor
+from dataset.model_constructor import MetaLearnerModelBuilder
 
 class MetaTwoQueriesLearner(object):
     def __init__(self, dataset, arch, meta_batch_size, meta_step_size,
@@ -51,11 +51,11 @@ class MetaTwoQueriesLearner(object):
 
     def construct_model(self, arch, dataset):
         if dataset in ["CIFAR-10","MNIST","FashionMNIST"]:
-            network = ModelConstructor.construct_cifar_model(arch, dataset)
+            network = MetaLearnerModelBuilder.construct_cifar_model(arch, dataset)
         elif dataset == "TinyImageNet":
-            network = ModelConstructor.construct_tiny_imagenet_model(arch, dataset)
+            network = MetaLearnerModelBuilder.construct_tiny_imagenet_model(arch, dataset)
         elif dataset == "ImageNet":
-            network = ModelConstructor.construct_imagenet_model(arch)
+            network = MetaLearnerModelBuilder.construct_imagenet_model(arch)
         return network
 
     def forward_pass(self, network, input, target):

@@ -393,7 +393,8 @@ def main():
             adv_image = torch.clamp(adv_image, 0, 1)
 
             # update statistics
-            adv_logit = model(adv_image)
+            with torch.no_grad():
+                adv_logit = model(adv_image)
             adv_pred = adv_logit.argmax(dim=1)
             adv_prob = F.softmax(adv_logit, dim=1)
             adv_loss = loss_func(adv_logit, label, target)

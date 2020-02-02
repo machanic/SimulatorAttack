@@ -14,15 +14,15 @@ from meta_two_queries_distillation_learner import MetaTwoQueriesLearner
 def parse_args():
     parser = argparse.ArgumentParser(description='PyTorch Meta Model Training')
     parser.add_argument('--gpu', type=int, default=0, help="GPU ID to train")
-    parser.add_argument("--epoch", type=int, default=4, help="number of epochs.")
+    parser.add_argument("--epoch", type=int, default=3, help="number of epochs.")
     parser.add_argument('--meta_batch_size', type=int, default=30, help='number of tasks sampled per meta-update')
     parser.add_argument('--meta_lr', type=float, default=1e-3, help='the base learning rate')
     parser.add_argument('--inner_lr', type=float, default=1e-2, help="lr for inner update")
     parser.add_argument('--lr_decay_itr',type=int, default=7000, help="* 1/10. the number of iteration that the meta lr should decay")
     parser.add_argument('--num_updates', type=int, default=12,
                         help='number of inner gradient updates(on support set) during training.')
-    parser.add_argument('--tot_num_tasks', type=int, default=20000, help='the maximum number of tasks in total, which is repeatly processed in training.')
-    parser.add_argument('--arch', type=str, default='AE',help='network name')  #10 层
+    parser.add_argument('--tot_num_tasks', type=int, default=30000, help='the maximum number of tasks in total, which is repeatly processed in training.')
+    parser.add_argument('--arch', type=str, default='resnet34',help='network name')  #10 层
     parser.add_argument('--meta_learner', type=str, default="2q_distillation", choices=["2q_distillation", "grad_regression",
                                                                                         "logits_distillation"])
     parser.add_argument("--num_support", type=int, default=20)
@@ -34,6 +34,7 @@ def parse_args():
                         help="load task mode")
     parser.add_argument("--study_subject", type=str, default="cross_arch_attack", required=True)
     parser.add_argument("--distill_loss", type=str, default="MSE", choices=["MSE", "CSE"])
+
     # the following args are set for choosing which npy data
     parser.add_argument("--data_loss_type", type=str, default="xent", choices=["xent", "cw"])
     parser.add_argument("--adv_norm", type=str, choices=["l2", "linf"])

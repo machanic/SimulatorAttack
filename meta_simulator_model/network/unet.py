@@ -1,6 +1,6 @@
 import torch
 from torchvision import models
-from cifar_models.resnet import ResNet18
+from cifar_models_myself.resnet import ResNet18
 from torch import nn
 
 def convrelu(in_channels, out_channels, kernel, padding):

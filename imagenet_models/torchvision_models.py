@@ -8,8 +8,7 @@ import re
 
 # drop-out/layer for vgg and resent
 from .utils import DropoutConv2d
-from . import vgg as drop_vgg
-from . import resnet as drop_resnet
+from . import resnet as drop_resnet, vgg as drop_vgg
 
 #################################################################
 # You can find the definitions of those target_models here:

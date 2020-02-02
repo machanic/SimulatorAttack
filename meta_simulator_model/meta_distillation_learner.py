@@ -2,13 +2,13 @@ import glob
 import random
 import sys
 sys.path.append("/home1/machen/meta_perturbations_black_box_attack")
-from cifar_models.model_constructor import ModelConstructor
+from dataset.model_constructor import MetaLearnerModelBuilder
 import os
 from config import PY_ROOT, ALL_MODELS
 from torch.optim import Adam
 from torch.utils.data import DataLoader
-from dataset.meta_img_grad_dataset import MetaTaskDataset
-from cifar_models import *
+from dataset.meta_img_grad_dataset import MetaImgOnlineGradTaskDataset
+from cifar_models_myself import *
 from meta_simulator_model.inner_loop import InnerLoop
 from meta_simulator_model.tensorboard_helper import TensorBoardWriter
 from meta_simulator_model.meta_network import MetaNetwork
@@ -40,7 +40,7 @@ class MetaDistillationLearner(object):
                                                         map_location=lambda storage, location: storage)["state_dict"])
 
         self.num_support = num_support
-        trn_dataset = MetaTaskDataset(data_loss_type, tot_num_tasks, dataset, load_mode=load_task_mode, protocol=protocol)
+        trn_dataset = MetaImgOnlineGradTaskDataset(data_loss_type, tot_num_tasks, dataset, load_mode=load_task_mode, protocol=protocol)
         # task number per mini-batch is controlled by DataLoader
         self.train_loader = DataLoader(trn_dataset, batch_size=meta_batch_size, shuffle=True, num_workers=0, pin_memory=True)
         self.tensorboard = TensorBoardWriter("{0}/tensorboard/distillation".format(PY_ROOT),
@@ -82,11 +82,11 @@ class MetaDistillationLearner(object):
         if arch in self.arch_pool:
             return self.arch_pool[arch]
         if self.dataset in ["CIFAR-10","MNIST","FashionMNIST"]:
-            model = ModelConstructor.construct_cifar_model(arch, self.dataset)
+            model = MetaLearnerModelBuilder.construct_cifar_model(arch, self.dataset)
         elif self.dataset == "TinyImageNet":
-            model = ModelConstructor.construct_tiny_imagenet_model(arch, self.dataset)
+            model = MetaLearnerModelBuilder.construct_tiny_imagenet_model(arch, self.dataset)
         else:
-            model = ModelConstructor.construct_imagenet_model(arch)
+            model = MetaLearnerModelBuilder.construct_imagenet_model(arch)
         model_load_path = "{}/train_pytorch_model/real_image_model/{}@{}@epoch_*@lr_*@batch_*.pth.tar".format(
             PY_ROOT, self.dataset, arch)
         model_load_path = glob.glob(model_load_path)[0]

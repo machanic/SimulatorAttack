@@ -10,10 +10,10 @@ import numpy as np
 import torch as ch
 from torch.nn import DataParallel
 from torch.nn.modules import Upsample
-from cifar_models import *
+from cifar_models_myself import *
 from config import IN_CHANNELS, IMAGE_SIZE, PY_ROOT
 from dataset_loader_maker import DataLoaderMaker
-from model_constructor import ModelConstructor
+from model_constructor import MetaLearnerModelBuilder
 
 
 class BanditAttack(object):
@@ -347,7 +347,7 @@ if __name__ == "__main__":
     models = []
     if args.dataset == "TinyImageNet":
         for arch, model_path in model_names.items():
-            model = ModelConstructor.construct_tiny_imagenet_model(arch, args.dataset)
+            model = MetaLearnerModelBuilder.construct_tiny_imagenet_model(arch, args.dataset)
             model.load_state_dict(
                 torch.load(model_path, map_location=lambda storage, location: storage)["state_dict"])
             model.eval()
@@ -355,12 +355,12 @@ if __name__ == "__main__":
             models.append({"arch_name":arch, "model":model})
     elif args.dataset == "ImageNet":
         for arch, model_path in model_names.items():
-            model = ModelConstructor.construct_imagenet_model(arch)
+            model = MetaLearnerModelBuilder.construct_imagenet_model(arch)
             model.eval()
             models.append({"arch_name": arch, "model": model})
     else:
         for arch, model_path in model_names.items():
-            model = ModelConstructor.construct_cifar_model(arch, args.dataset)
+            model = MetaLearnerModelBuilder.construct_cifar_model(arch, args.dataset)
             model.load_state_dict(
                 torch.load(model_path, map_location=lambda storage, location: storage)["state_dict"])
             model.eval()

@@ -10,8 +10,8 @@ from meta_simulator_model.inner_loop_pair_loss import InnerLoopPairLoss
 from config import PY_ROOT, IN_CHANNELS, CLASS_NUM, IMAGE_SIZE, ALL_MODELS
 from torch.optim import Adam
 from torch.utils.data import DataLoader
-from dataset.meta_img_grad_dataset import MetaTaskDataset
-from cifar_models import *
+from dataset.meta_img_grad_dataset import MetaImgOnlineGradTaskDataset
+from cifar_models_myself import *
 from meta_simulator_model.inner_loop import InnerLoop
 from meta_simulator_model.tensorboard_helper import TensorBoardWriter
 from meta_simulator_model.meta_network import MetaNetwork
@@ -45,8 +45,8 @@ class MetaPairDistillationLearner(object):
 
         self.num_support = num_support
         self.sequence_num = sequence_num   # 默认为1，每个task一个sequence
-        trn_dataset = MetaTaskDataset(data_loss_type, tot_num_tasks, sequence_num, dataset, load_mode=load_task_mode,
-                                      protocol=protocol)
+        trn_dataset = MetaImgOnlineGradTaskDataset(data_loss_type, tot_num_tasks, sequence_num, dataset, load_mode=load_task_mode,
+                                                   protocol=protocol)
         # task number per mini-batch is controlled by DataLoader
         self.train_loader = DataLoader(trn_dataset, batch_size=meta_batch_size, shuffle=True, num_workers=0, pin_memory=True)
         self.tensorboard = TensorBoardWriter("{0}/tensorboard/pair_loss_distillation".format(PY_ROOT),

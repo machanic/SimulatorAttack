@@ -7,9 +7,9 @@ from tiny_imagenet import TinyImageNet
 sys.path.append("/home1/machen/meta_perturbations_black_box_attack")
 import os
 from torchvision.datasets import CIFAR10, CIFAR100, MNIST, FashionMNIST
-from benign_image_classifier.train import get_preprocessor
+from benign_image_classifier.train_cifar import get_preprocessor
 from config import IN_CHANNELS, CLASS_NUM, IMAGE_SIZE, IMAGE_DATA_ROOT, PY_ROOT
-from cifar_models import *
+from cifar_models_myself import *
 import numpy as np
 from torchvision import models as torch_models
 from tiny_imagenet_models.densenet import densenet121, densenet161, densenet169, densenet201

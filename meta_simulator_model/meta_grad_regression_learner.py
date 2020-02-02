@@ -2,15 +2,15 @@ import random
 import sys
 sys.path.append("/home1/machen/meta_perturbations_black_box_attack")
 
-from meta_simulator_model.network.autoencoder import AutoEncoder
+from meta_grad_regression_auto_encoder.network.autoencoder import AutoEncoder
 from meta_simulator_model.network.fcn_8s import FCN8s
 from meta_simulator_model.network.unet import ResNetUNet
 import os
 from config import PY_ROOT, IN_CHANNELS, CLASS_NUM
 from torch.optim import Adam
 from torch.utils.data import DataLoader
-from dataset.meta_img_grad_dataset import MetaTaskDataset
-from cifar_models import *
+from dataset.meta_img_grad_dataset import MetaImgOnlineGradTaskDataset
+from cifar_models_myself import *
 from meta_simulator_model.inner_loop import InnerLoop
 from meta_simulator_model.tensorboard_helper import TensorBoardWriter
 from meta_simulator_model.meta_network import MetaNetwork
@@ -40,7 +40,7 @@ class MetaGradRegressionLearner(object):
         self.network = MetaNetwork(backbone)
         self.network.cuda()
         self.num_support = num_support
-        trn_dataset = MetaTaskDataset(data_loss_type, tot_num_tasks, dataset, load_mode=load_task_mode, protocol=protocol)
+        trn_dataset = MetaImgOnlineGradTaskDataset(data_loss_type, tot_num_tasks, dataset, load_mode=load_task_mode, protocol=protocol)
         # task number per mini-batch is controlled by DataLoader
         self.train_loader = DataLoader(trn_dataset, batch_size=meta_batch_size, shuffle=True, num_workers=0, pin_memory=True)
         self.tensorboard = TensorBoardWriter("{0}/tensorboard/grad_regression/".format(PY_ROOT),

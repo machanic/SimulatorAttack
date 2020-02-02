@@ -1,6 +1,8 @@
+import math
 import os
 import os.path as osp
 import pickle
+import random
 import sys
 from glob import glob
 
@@ -13,6 +15,7 @@ from torchvision.datasets.utils import download_url, check_integrity
 
 from config import IMAGE_DATA_ROOT, IMAGE_SIZE
 from dataset.tiny_imagenet import TinyImageNet
+from dataset.npz_dataset import NpzDataset
 
 
 def pil_loader(path):
@@ -60,6 +63,8 @@ class ImageNetIDDataset(torch.utils.data.Dataset):
         # transform
         self.transform = transforms.Compose([transforms.Resize(size=(IMAGE_SIZE["ImageNet"][0], IMAGE_SIZE["ImageNet"][1])),
                                              transforms.ToTensor()])
+        self.transform_bigger = transforms.Compose([transforms.Resize(size=(299, 299)),
+                                             transforms.ToTensor()])
 
     def __getitem__(self, index):
         # we always emit data in [0, 1] range to keep things simpler (normalization is performed in the attack script).
@@ -71,11 +76,10 @@ class ImageNetIDDataset(torch.utils.data.Dataset):
         with open(image_fname, 'rb') as f:
             with Image.open(f) as image:
                 image = image.convert('RGB')
-
         # get standard format: 224x224, 0-1 range, RGB channel order
-        image = self.transform(image)  # [3, 224, 224]
-
-        return image_id, image, label
+        image_small = self.transform(image)  # [3, 224, 224]
+        image_big = self.transform_bigger(image)
+        return image_id, image_small, image_big, label
 
     def __len__(self):
         return len(self.images_fname)
@@ -243,6 +247,7 @@ class FashionMNISTIDDataset(MNISTIDDataset):
     ]
 
 
+
 class CIFAR10IDDataset(torch.utils.data.Dataset):
     # Adopted from torchvision
     base_folder = 'cifar-10-batches-py'
@@ -331,13 +336,10 @@ class CIFAR10IDDataset(torch.utils.data.Dataset):
 
     def __getitem__(self, index):
         image_id, image, label = self.images_id[index], self.images[index], self.labels[index]
-
         # doing this so that it is consistent with all other datasets
         # to return a PIL Image
         image = Image.fromarray(image)
-
         image = self.transform(image)
-
         return image_id, image, label
 
     def __len__(self):
@@ -370,22 +372,75 @@ class CIFAR10IDDataset(torch.utils.data.Dataset):
         tar.close()
         os.chdir(cwd)
 
+class CIFAR100IDDataset(CIFAR10IDDataset):
+    base_folder = 'cifar-100-python'
+    url = "https://www.cs.toronto.edu/~kriz/cifar-100-python.tar.gz"
+    filename = "cifar-100-python.tar.gz"
+    tgz_md5 = 'eb9058c3a382ffc7106e4002c42a8d85'
+    train_list = [
+        ['train', '16019d7e3df5f24257cddd939b257f8d'],
+    ]
+
+    test_list = [
+        ['test', 'f0ef6b0ae62326f3e7ffdfab6717acfc'],
+    ]
+
 
 class DataLoaderMaker(object):
 
     @staticmethod
-    def get_preprocessor(input_size=None, use_flip=True):
+    def get_imagenet_preprocessor(model, scale=0.875, random_crop=False, random_hflip=False, random_vflip=False,
+                            preserve_aspect_ratio=True):
+        input_size = model.input_size
+        tfs = []
+        if preserve_aspect_ratio:
+            tfs.append(transforms.Resize(int(math.floor(max(input_size) / scale))))
+        else:
+            height = int(input_size[1] / scale)
+            width = int(input_size[2] / scale)
+            tfs.append(transforms.Resize((height, width)))
+
+        if random_crop:
+            tfs.append(transforms.RandomCrop(max(input_size)))
+        else:
+            tfs.append(transforms.CenterCrop(max(input_size)))
+
+        if random_hflip:
+            tfs.append(transforms.RandomHorizontalFlip())
+
+        if random_vflip:
+            tfs.append(transforms.RandomVerticalFlip())
+
+        tfs.append(transforms.ToTensor())
+        return transforms.Compose(tfs)
+
+    @staticmethod
+    def get_preprocessor(input_size=None, use_flip=True, center_crop=False):
         processors = []
         if input_size is not None:
             processors.append(transforms.Resize(size=input_size))
         if use_flip:
             processors.append(transforms.RandomHorizontalFlip())
+        if center_crop:
+            processors.append(transforms.CenterCrop(max(input_size)))
         processors.append(transforms.ToTensor())
         return transforms.Compose(processors)
 
     @staticmethod
-    def get_img_label_data_loader(datasetname, batch_size, is_train):
-        preprocessor = DataLoaderMaker.get_preprocessor(IMAGE_SIZE[datasetname], is_train)
+    def setup_seed(seed):
+        torch.manual_seed(seed)
+        torch.cuda.manual_seed_all(seed)
+        np.random.seed(seed)
+        random.seed(seed)
+        torch.backends.cudnn.deterministic = True
+
+
+    @staticmethod
+    def get_img_label_data_loader(datasetname, batch_size, is_train, image_size=None):
+        workers = 0
+        if image_size is None:
+            image_size =  IMAGE_SIZE[datasetname]
+        preprocessor = DataLoaderMaker.get_preprocessor(image_size, is_train)
         if datasetname == "CIFAR-10":
             train_dataset = CIFAR10(IMAGE_DATA_ROOT[datasetname], train=is_train, transform=preprocessor)
         elif datasetname == "CIFAR-100":
@@ -397,12 +452,24 @@ class DataLoaderMaker(object):
         elif datasetname == "TinyImageNet":
             train_dataset = TinyImageNet(IMAGE_DATA_ROOT[datasetname], preprocessor, is_train=is_train)
         elif datasetname == "ImageNet":
-            sub_folder = "/train" if is_train else "/validation"   # Note that ImageNet uses pretrainedmodels.utils.TransformImage to apply transformation
-            train_dataset = ImageFolder(IMAGE_DATA_ROOT[datasetname] + sub_folder)
-
-        data_loader = torch.utils.data.DataLoader(train_dataset, batch_size=batch_size, shuffle=is_train,
-                                                  num_workers=0)
+            preprocessor = DataLoaderMaker.get_preprocessor(image_size, is_train, center_crop=True)
+            sub_folder = "/train" if is_train else "/validation"  # Note that ImageNet uses pretrainedmodels.utils.TransformImage to apply transformation
+            train_dataset = ImageFolder(IMAGE_DATA_ROOT[datasetname] + sub_folder, transform=preprocessor)
+            workers = 5
+        data_loader = torch.utils.data.DataLoader(train_dataset, batch_size=batch_size, shuffle=True,
+                                                  num_workers=workers)
         return data_loader
+
+    @staticmethod
+    def get_imagenet_img_label_data_loader(model, datasetname, batch_size, is_train):
+        assert datasetname == "ImageNet"
+        preprocessor = DataLoaderMaker.get_imagenet_preprocessor(model)
+        sub_folder = "/train" if is_train else "/validation"   # Note that ImageNet uses pretrainedmodels.utils.TransformImage to apply transformation
+        train_dataset = ImageFolder(IMAGE_DATA_ROOT[datasetname] + sub_folder, transform=preprocessor)
+        data_loader = torch.utils.data.DataLoader(train_dataset, batch_size=batch_size, shuffle=True,
+                                                  num_workers=5)
+        return data_loader
+
 
     @staticmethod
     def get_imgid_img_label_data_loader(datasetname, batch_size, is_train, seed=0):
@@ -429,18 +496,27 @@ class DataLoaderMaker(object):
 
         if datasetname == 'ImageNet':
             loader = torch.utils.data.DataLoader(ImageNetIDDataset(IMAGE_DATA_ROOT[datasetname], phase, seed),
-                                                 batch_size=batch_size, num_workers=6,shuffle=is_train)
+                                                 batch_size=batch_size, num_workers=0, shuffle=True)
 
-        elif datasetname == 'CIFAR-10':
+        elif datasetname == "CIFAR-10":
             loader = torch.utils.data.DataLoader(CIFAR10IDDataset(IMAGE_DATA_ROOT[datasetname], phase, seed),
-                                                 batch_size=batch_size, num_workers=0,shuffle=is_train)
+                                                 batch_size=batch_size, num_workers=0, shuffle=True)
+        elif datasetname == "CIFAR-100":
+            loader = torch.utils.data.DataLoader(CIFAR100IDDataset(IMAGE_DATA_ROOT[datasetname], phase, seed),
+                                                 batch_size=batch_size, num_workers=0, shuffle=True)
         elif datasetname == "MNIST":
             loader = torch.utils.data.DataLoader(MNISTIDDataset(IMAGE_DATA_ROOT[datasetname], phase, seed),
-                                                 batch_size=batch_size, num_workers=0,shuffle=is_train)
+                                                 batch_size=batch_size, num_workers=0,shuffle=True)
         elif datasetname == "FashionMNIST":
             loader = torch.utils.data.DataLoader(FashionMNISTIDDataset(IMAGE_DATA_ROOT[datasetname], phase, seed),
-                                                 batch_size=batch_size, num_workers=0,shuffle=is_train)
+                                                 batch_size=batch_size, num_workers=0,shuffle=True)
         elif datasetname == "TinyImageNet":
             loader = torch.utils.data.DataLoader(TinyImageNetIDDataset(IMAGE_DATA_ROOT[datasetname], phase, seed),
-                                                 batch_size=batch_size, num_workers=0,shuffle=is_train)
+                                                 batch_size=batch_size, num_workers=0,shuffle=True)
+        return loader
+
+    @staticmethod
+    def get_test_attacked_data(datasetname, batch_size):
+        dataset = NpzDataset(datasetname)
+        loader = torch.utils.data.DataLoader(dataset, batch_size=batch_size, num_workers=0, shuffle=False)
         return loader

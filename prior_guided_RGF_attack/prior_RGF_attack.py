@@ -13,7 +13,7 @@ from torch.nn import functional as F
 from torch import nn
 
 from dataset_loader_maker import DataLoaderMaker
-from model_constructor import ModelConstructor
+from model_constructor import MetaLearnerModelBuilder
 
 class PriorRGFAttack(object):
     # 目前只能一张图一张图做对抗样本
@@ -365,14 +365,14 @@ if __name__ == "__main__":
     print_args(args)
     torch.backends.cudnn.deterministic = True
     if args.dataset in ["CIFAR-10", "MNIST", "FashionMNIST"]:
-        model = ModelConstructor.construct_cifar_model(args.arch, args.dataset)
-        surrogate_model = ModelConstructor.construct_cifar_model(args.surrogate_arch, args.dataset)
+        model = MetaLearnerModelBuilder.construct_cifar_model(args.arch, args.dataset)
+        surrogate_model = MetaLearnerModelBuilder.construct_cifar_model(args.surrogate_arch, args.dataset)
     elif args.dataset == "TinyImageNet":
-        model = ModelConstructor.construct_tiny_imagenet_model(args.arch, args.dataset)
-        surrogate_model = ModelConstructor.construct_tiny_imagenet_model(args.surrogate_arch, args.dataset)
+        model = MetaLearnerModelBuilder.construct_tiny_imagenet_model(args.arch, args.dataset)
+        surrogate_model = MetaLearnerModelBuilder.construct_tiny_imagenet_model(args.surrogate_arch, args.dataset)
     elif args.dataset == "ImageNet":
-        model = ModelConstructor.construct_imagenet_model(args.arch)
-        surrogate_model = ModelConstructor.construct_imagenet_model(args.surrogate_arch)
+        model = MetaLearnerModelBuilder.construct_imagenet_model(args.arch)
+        surrogate_model = MetaLearnerModelBuilder.construct_imagenet_model(args.surrogate_arch)
 
     if args.dataset != "ImageNet":
         target_model_path = "{root}/train_pytorch_model/real_image_model/{dataset}@{arch}*.pth.tar".format(root=PY_ROOT, dataset=args.dataset,

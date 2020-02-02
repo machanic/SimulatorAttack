@@ -37,7 +37,6 @@ class Bottleneck(nn.Module):
         self.downsample = downsample
         self.stride = stride
         self.prob = prob
-        self.padding = None
 
     def forward(self, x):
 
@@ -69,11 +68,9 @@ class Bottleneck(nn.Module):
         residual_channel = out.size()[1]
         shortcut_channel = shortcut.size()[1]
         if residual_channel != shortcut_channel:
-            if self.padding is None:
-                self.padding = torch.zeros(batch_size, residual_channel - shortcut_channel,
-                                           featuremap_size[0], featuremap_size[1])
-                self.padding = self.padding.to(x.device)
-            out += torch.cat((shortcut, self.padding), 1)
+            padding_tensor = torch.zeros(batch_size, residual_channel - shortcut_channel,
+                                           featuremap_size[0], featuremap_size[1]).to(x.device)
+            out += torch.cat((shortcut, padding_tensor), 1)
         else:
             out += shortcut
 

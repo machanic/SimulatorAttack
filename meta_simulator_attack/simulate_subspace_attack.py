@@ -2,7 +2,7 @@
 import sys
 sys.path.append("/home1/machen/meta_perturbations_black_box_attack")
 from meta_simulator_attack.meta_model_finetune import MetaModelFinetune
-from cifar_models import ResNet34
+from cifar_models_myself import ResNet34
 from config import CLASS_NUM, IN_CHANNELS
 import os
 import os.path as osp

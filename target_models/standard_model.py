@@ -2,13 +2,11 @@ import glob
 import os.path as osp
 import h5py
 import target_models.cifar
-import target_models.imagenet
 from config import IN_CHANNELS, IMAGE_SIZE, PY_ROOT, CLASS_NUM
 from tiny_imagenet_models.inception import inception_v3
-from torchvision import models as torch_models
 from target_models.cifar.carlinet import carlinet
 import numpy as np
-from cifar_models import *
+from cifar_models_myself import *
 from tiny_imagenet_models.densenet import densenet121, densenet161, densenet169, densenet201
 from tiny_imagenet_models.resnext import resnext101_32x4d, resnext101_64x4d
 
@@ -161,6 +159,7 @@ class StandardModel(nn.Module):
 
                 # load weight
                 self.load_weight_from_pth_checkpoint(model, osp.join(prefix, arch, suffix))
+                print("load model checkpoint from {}".format(osp.join(prefix, arch, suffix)))
 
                 # assign meta info
                 model.mean = [0.4914, 0.4822, 0.4465]

@@ -1,0 +1,74 @@
+
+{ "CIFAR-10": {
+        "use_tanh": false,
+        "lr": 1e-2,
+        "max_iterations": 1000,
+        "compress_mode": 2,
+        "target_type": "random",
+        "codec_path": "{}/train_pytorch_model/AutoZOOM/AutoEncoder_CIFAR-10@*use_tanh_False*.tar",
+        "resize": null,
+        "init_const": 1,
+        "switch_iterations": 100
+  },
+    "CIFAR-100": {
+        "use_tanh": false,
+        "lr": 1e-2,
+        "max_iterations": 1000,
+        "compress_mode": 2,
+        "target_type": "random",
+        "codec_path": "{}/train_pytorch_model/AutoZOOM/AutoEncoder_CIFAR-100@*use_tanh_False*.tar",
+         "resize": null,
+      "init_const": 1,
+      "switch_iterations": 100
+  },
+    "MNIST": {
+        "use_tanh": false,
+        "lr": 1e-2,
+        "max_iterations": 1000,
+        "compress_mode": 1,
+        "target_type": "random",
+        "codec_path": "{}/train_pytorch_model/AutoZOOM/AutoEncoder_MNIST@*use_tanh_False*.tar",
+         "resize": null,
+      "init_const": 1,
+      "switch_iterations": 100
+  },
+    "FashionMNIST": {
+        "use_tanh": false,
+        "lr": 1e-2,
+        "max_iterations": 1000,
+        "compress_mode": 1,
+        "target_type": "random",
+        "codec_path": "{}/train_pytorch_model/AutoZOOM/AutoEncoder_FashionMNIST@*use_tanh_False*.tar",
+        "resize": null,
+      "init_const": 1,
+      "switch_iterations": 100
+  },
+    "ImageNet": {
+        "use_tanh": true,
+        "lr": 2e-3,
+        "compress_mode": 3,
+        "target_type": "random",
+        "codec_path": "{}/train_pytorch_model/AutoZOOM/AutoEncoder_ImageNet@*use_tanh_True*.tar",
+        "resize": 128,
+      "init_const": 10,
+      "switch_iterations": 1000
+    },
+    "zoo": {
+        "batch_size": 128,
+        "max_iterations": 20000
+    },
+    "zoo_ae": {
+        "batch_size": 128,
+        "max_iterations": 20000
+    },
+    "autozoom_bilin":
+    {
+        "batch_size": 1,
+        "max_iterations": 100000
+    },
+    "autozoom_ae":
+    {
+        "batch_size": 1,
+        "max_iterations": 100000
+    }
+}

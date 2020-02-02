@@ -94,9 +94,6 @@ class BanditsAttack(object):
         else:
             return F.cross_entropy(logit, label, reduction='none')
 
-    ##
-    # Main functions
-    ##
 
     def make_adversarial_examples(self, batch_index, images, true_labels, args, target_model, meta_finetuner):
         '''
@@ -266,7 +263,6 @@ class BanditsAttack(object):
             json.dump(vars(args), f, sort_keys=True, indent=4)
 
 
-
 def get_random_dir_name(mode):
     import string
     from datetime import datetime
@@ -329,7 +325,7 @@ if __name__ == "__main__":
     parser.add_argument('--image-lr', type=float, help='Learning rate for the image (iterative attack)')
     parser.add_argument('--online-lr', type=float, help='Learning rate for the prior')
     parser.add_argument('--norm', type=str, help='Which lp constraint to run bandits [linf|l2]')
-    parser.add_argument('--exploration', type=float, default=0.5,
+    parser.add_argument('--exploration', type=float,
                         help='\delta, parameterizes the exploration to be done around the prior')
     parser.add_argument('--tile-size', type=int, help='the side length of each tile (for the tiling prior)')
     parser.add_argument('--json-config', type=str, help='a config file to be passed in instead of arguments')

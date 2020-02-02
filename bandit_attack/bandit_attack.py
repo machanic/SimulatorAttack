@@ -6,18 +6,16 @@ import json
 import os
 import os.path as osp
 import random
-import time
 from types import SimpleNamespace
-from cifar_models.model_constructor import ModelConstructor
+from dataset.model_constructor import StandardModel
 import glog as log
 import numpy as np
 import torch
 from torch.nn import functional as F
 from torch.nn.modules import Upsample
-
-from config import IMAGE_SIZE, IN_CHANNELS, CLASS_NUM, PY_ROOT, MODELS_TEST
+from config import IMAGE_SIZE, IN_CHANNELS, CLASS_NUM, PY_ROOT, MODELS_TEST, CIFAR_ALL_MODELS, IMAGENET_ALL_MODELS, \
+    MODELS_TEST_STANDARD
 from dataset.dataset_loader_maker import DataLoaderMaker
-from torchvision.transforms import transforms
 
 class BanditsAttack(object):
     def __init__(self, args):
@@ -30,8 +28,6 @@ class BanditsAttack(object):
         self.success_query_all = torch.zeros_like(self.query_all)
         self.not_done_loss_all = torch.zeros_like(self.query_all)
         self.not_done_prob_all = torch.zeros_like(self.query_all)
-        self.normalize = transforms.Normalize(mean=[0.485, 0.456, 0.406],
-                                     std=[0.229, 0.224, 0.225])
 
     def norm(self, t):
         assert len(t.shape) == 4
@@ -94,14 +90,23 @@ class BanditsAttack(object):
         else:
             return F.cross_entropy(logit, label, reduction='none')
 
-    def normalized_image(self, x):
-        x_copy = x.clone()
-        x_copy = torch.stack([self.normalize(x_copy[i]) for i in range(x.size(0))])
-        return x_copy
-
-    ##
-    # Main functions
-    ##
+    def cw_loss(self, logit, label, target=None):
+        if target is not None:
+            # targeted cw loss: logit_t - max_{i\neq t}logit_i
+            _, argsort = logit.sort(dim=1, descending=True)
+            target_is_max = argsort[:, 0].eq(target).long()
+            second_max_index = target_is_max.long() * argsort[:, 1] + (1 - target_is_max).long() * argsort[:, 0]
+            target_logit = logit[torch.arange(logit.shape[0]), target]
+            second_max_logit = logit[torch.arange(logit.shape[0]), second_max_index]
+            return target_logit - second_max_logit
+        else:
+            # untargeted cw loss: max_{i\neq y}logit_i - logit_y
+            _, argsort = logit.sort(dim=1, descending=True)
+            gt_is_max = argsort[:, 0].eq(label).long()
+            second_max_index = gt_is_max.long() * argsort[:, 1] + (1 - gt_is_max).long() * argsort[:, 0]
+            gt_logit = logit[torch.arange(logit.shape[0]), label]
+            second_max_logit = logit[torch.arange(logit.shape[0]), second_max_index]
+            return second_max_logit - gt_logit
 
     def make_adversarial_examples(self, batch_index, images, true_labels, args, target_model):
         '''
@@ -114,10 +119,7 @@ class BanditsAttack(object):
         else:
             upsampler = lambda x: x
         with torch.no_grad():
-            if args.dataset == "ImageNet":
-                logit = target_model(self.normalized_image(images))
-            else:
-                logit = target_model(images)
+            logit = target_model(images)
         pred = logit.argmax(dim=1)
         query = torch.zeros(args.batch_size).cuda()
         correct = pred.eq(true_labels).float()  # shape = (batch_size,)
@@ -137,6 +139,7 @@ class BanditsAttack(object):
         image_step = self.l2_image_step if args.norm == 'l2' else self.linf_step
         proj_maker = self.l2_proj if args.norm == 'l2' else self.linf_proj  # 调用proj_maker返回的是一个函数
         proj_step = proj_maker(images, args.epsilon)
+        criterion = self.cw_loss if args.loss == "cw" else self.xent_loss
         # Loss function
         adv_images = images.clone()
         not_success_images = None
@@ -152,14 +155,10 @@ class BanditsAttack(object):
             q1_images = adv_images + args.fd_eta * q1 / self.norm(q1)
             q2_images = adv_images + args.fd_eta * q2 / self.norm(q2)
             with torch.no_grad():
-                if args.dataset == "ImageNet":
-                    q1_logits = target_model(self.normalized_image(q1_images))
-                    q2_logits = target_model(self.normalized_image(q2_images))
-                else:
-                    q1_logits = target_model(q1_images)
-                    q2_logits = target_model(q2_images)
-            l1 = self.xent_loss(q1_logits, true_labels, target_labels)
-            l2 = self.xent_loss(q2_logits, true_labels, target_labels)
+                q1_logits = target_model(q1_images)
+                q2_logits = target_model(q2_images)
+            l1 = criterion(q1_logits, true_labels, target_labels)
+            l2 = criterion(q2_logits, true_labels, target_labels)
             # Finite differences estimate of directional derivative
             est_deriv = (l1 - l2) / (args.fd_eta * args.exploration)  # 方向导数 , l1和l2是loss
             # 2-query gradient estimate
@@ -173,13 +172,10 @@ class BanditsAttack(object):
             adv_images = proj_step(adv_images)
             adv_images = torch.clamp(adv_images, 0, 1)
             with torch.no_grad():
-                if args.dataset == "ImageNet":
-                    adv_logit = target_model(self.normalized_image(adv_images))
-                else:
-                    adv_logit = target_model(adv_images)
+                adv_logit = target_model(adv_images)
             adv_pred = adv_logit.argmax(dim=1)
             adv_prob = F.softmax(adv_logit, dim=1)
-            adv_loss = self.xent_loss(adv_logit, true_labels, target_labels)
+            adv_loss = criterion(adv_logit, true_labels, target_labels)
             ## Continue query count
             query = query + 2 * not_done
             if args.targeted:
@@ -205,7 +201,7 @@ class BanditsAttack(object):
                 log.info('  not_done_loss: {:.4f}'.format(not_done_loss[not_done.byte()].mean().item()))
                 log.info('  not_done_prob: {:.4f}'.format(not_done_prob[not_done.byte()].mean().item()))
 
-            if not not_done.byte().any(): # all success
+            if not not_done.byte().any():  # all success
                 break
         else:
             not_success_images = images[not_done.byte()].detach().cpu()
@@ -218,19 +214,21 @@ class BanditsAttack(object):
 
         return not_success_images
 
-    def attack_all_images(self, args, target_model, result_dump_path):
+    def attack_all_images(self, args, arch_name, target_model, result_dump_path):
 
-        not_success_images_list = []
+        unsuccessful_images_list = []
+        batch_size = args.batch_size
         for batch_idx, (images, true_labels) in enumerate(self.dataset_loader):
-            if batch_idx * args.batch_size >= self.total_images:
+            if batch_idx * batch_size >= self.total_images:
                 break
-            not_success_images = self.make_adversarial_examples(batch_idx, images.cuda(), true_labels.cuda(), args, target_model)
-            if not_success_images is not None:
-                not_success_images_list.append(not_success_images)
+            batch_size = images.size(0)
+            unsuccessful_images = self.make_adversarial_examples(batch_idx, images.cuda(), true_labels.cuda(), args, target_model)
+            if unsuccessful_images is not None:
+                unsuccessful_images_list.append(unsuccessful_images)
+        if unsuccessful_images_list:
+            all_unsuccessful_images = torch.cat(unsuccessful_images_list, 0).detach().cpu().numpy()
 
-        all_not_success_images = torch.cat(not_success_images_list, 0).detach().cpu().numpy()
-
-        log.info('Attack finished ({} images)'.format(self.total_images))
+        log.info('{} is attacked finished ({} images)'.format(arch_name, self.total_images))
         log.info('        avg correct: {:.4f}'.format(self.correct_all.mean().item()))
         log.info('       avg not_done: {:.4f}'.format(self.not_done_all.mean().item()))  # 有多少图没做完
         if self.success_all.sum().item() > 0:
@@ -241,7 +239,8 @@ class BanditsAttack(object):
             log.info('  avg not_done_loss: {:.4f}'.format(self.not_done_loss_all[self.not_done_all.byte()].mean().item()))
             log.info('  avg not_done_prob: {:.4f}'.format(self.not_done_prob_all[self.not_done_all.byte()].mean().item()))
         log.info('Saving results to {}'.format(result_dump_path))
-        meta_info_dict = {"avg_correct": self.correct_all.mean().item(),"adv_not_done": self.not_done_all.mean().item(),
+        meta_info_dict = {"avg_correct": self.correct_all.mean().item(),
+                          "avg_not_done": self.not_done_all.mean().item(),
                           "mean_query": self.success_query_all[self.success_all.byte()].mean().item(),
                           "median_query": self.success_query_all[self.success_all.byte()].median().item(),
                           "max_query": self.success_query_all[self.success_all.byte()].max().item(),
@@ -250,18 +249,18 @@ class BanditsAttack(object):
         meta_info_dict['args'] = vars(args)
         with open(result_dump_path, "w") as result_file_obj:
             json.dump(meta_info_dict, result_file_obj, indent=4, sort_keys=True)
-        save_npy_path = os.path.dirname(result_dump_path) + "/not_done_images.npy"
-        np.save(save_npy_path, all_not_success_images)
+        save_npy_path = os.path.dirname(result_dump_path) + "/{}_attack_not_success_images.npy".format(arch)
+        if unsuccessful_images_list:
+            np.save(save_npy_path, all_unsuccessful_images)
         log.info("done, write stats info to {}".format(result_dump_path))
 
 
 
-def get_exp_dir_name(dataset, norm, targeted, target_type):
-    import string
+def get_exp_dir_name(dataset, loss, norm, targeted, target_type):
     from datetime import datetime
     dirname = datetime.now().strftime('%Y_%m_%d_%H_%M_%S')
     target_str = "untargeted" if not targeted else "targeted_{}".format(target_type)
-    dirname = 'bandits_attack-{}-{}-{}-'.format(dataset, norm, target_str) + dirname
+    dirname = 'bandits_attack-{}-{}loss-{}-{}-'.format(dataset, loss, norm, target_str) + dirname
     return dirname
 
 def print_args(args):
@@ -292,6 +291,7 @@ if __name__ == "__main__":
     parser.add_argument('--image-lr', type=float, help='Learning rate for the image (iterative attack)')
     parser.add_argument('--online-lr', type=float, help='Learning rate for the prior')
     parser.add_argument('--norm', type=str, help='Which lp constraint to run bandits [linf|l2]')
+    parser.add_argument("--loss", type=str, default="xent", choices=["xent", "cw"])
     parser.add_argument('--exploration', type=float,
                         help='\delta, parameterizes the exploration to be done around the prior')
     parser.add_argument('--tile-size', type=int, help='the side length of each tile (for the tiling prior)')
@@ -301,9 +301,9 @@ if __name__ == "__main__":
     parser.add_argument('--epsilon', type=float, help='the lp perturbation bound')
     parser.add_argument('--batch-size', type=int, help='batch size for bandits')
     parser.add_argument('--dataset', type=str, required=True,
-                        choices=['CIFAR-10', 'ImageNet', "FashionMNIST", "MNIST", "TinyImageNet"],
+                        choices=['CIFAR-10', 'CIFAR-100', 'ImageNet', "FashionMNIST", "MNIST", "TinyImageNet"],
                         help='which dataset to use')
-    parser.add_argument('--arch', default='wideresnet28drop', type=str, help='network architecture')
+    parser.add_argument('--arch', default="", type=str, help='network architecture')
     parser.add_argument('--test-archs', action="store_true")
     parser.add_argument("--total-images",type=int)
     parser.add_argument('--targeted', action="store_true")
@@ -316,6 +316,7 @@ if __name__ == "__main__":
     os.environ["CUDA_DEVICE_ORDER"] = "PCI_BUS_ID"
     os.environ['CUDA_VISIBLE_DEVICES'] = str(args.gpu)
     os.environ['CUDA_VISIBLE_DEVICE'] = str(args.gpu)
+    os.environ["TORCH_HOME"] = "/home1/machen/.cache/torch/pretrainedmodels"
     print("using GPU {}".format(args.gpu))
 
     args_dict = None
@@ -332,45 +333,45 @@ if __name__ == "__main__":
         args_dict = defaults
     if args.targeted:
         args.max_queries = 50000
-    args.exp_dir = osp.join(args.exp_dir, get_exp_dir_name(args.dataset, args.norm, args.targeted, args.target_type))  # 随机产生一个目录用于实验
+    args.exp_dir = osp.join(args.exp_dir, get_exp_dir_name(args.dataset, args.loss, args.norm, args.targeted, args.target_type))  # 随机产生一个目录用于实验
     os.makedirs(args.exp_dir, exist_ok=True)
     set_log_file(osp.join(args.exp_dir, 'run.log'))
-    log.info('Command line is: {}'.format(' '.join(sys.argv)))
-    log.info("Log file is written in {}".format(osp.join(args.exp_dir, 'run.log')))
-    log.info('Called with args:')
-    print_args(args)
+
     torch.backends.cudnn.deterministic = True
     random.seed(args.seed)
     np.random.seed(args.seed)
     torch.manual_seed(args.seed)
-
     archs = [args.arch]
     if args.test_archs:
-        archs = MODELS_TEST
+        archs = []
+        if args.dataset == "CIFAR-10" or args.dataset == "CIFAR-100":
+            for arch in MODELS_TEST_STANDARD[args.dataset]:
+                test_model_path = "{}/train_pytorch_model/real_image_model/{}-pretrained/{}/checkpoint.pth.tar".format(PY_ROOT,
+                                                                                        args.dataset,  arch)
+                if os.path.exists(test_model_path):
+                    archs.append(arch)
+                else:
+                    log.info(test_model_path + " does not exists!")
+        else:
+            for arch in MODELS_TEST_STANDARD[args.dataset]:
+                test_model_list_path = "{}/train_pytorch_model/real_image_model/{}-pretrained/checkpoints/{}*.pth.tar".format(
+                    PY_ROOT,
+                    args.dataset, arch)
+                test_model_list_path = list(glob.glob(test_model_list_path))
+                if len(test_model_list_path) == 0:  # this arch does not exists in args.dataset
+                    continue
+                archs.append(arch)
+    args.arch = ", ".join(archs)
+    log.info('Command line is: {}'.format(' '.join(sys.argv)))
+    log.info("Log file is written in {}".format(osp.join(args.exp_dir, 'run.log')))
+    log.info('Called with args:')
+    print_args(args)
+    attacker = BanditsAttack(args)
     for arch in archs:
-        test_model_list_path = "{}/train_pytorch_model/real_image_model/{}@{}@*.pth.tar".format(PY_ROOT, args.dataset,
-                                                                                           arch)
-        test_model_list_path = list(glob.glob(test_model_list_path))
-        if len(test_model_list_path) == 0:  # this arch does not exists in args.dataset
-            continue
-
-        if args.dataset in ["CIFAR-10","MNIST","FashionMNIST"]:
-            target_model = ModelConstructor.construct_cifar_model(arch, args.dataset)
-        elif args.dataset == "ImageNet":
-            target_model = ModelConstructor.construct_imagenet_model(arch)
-        elif args.dataset == "TinyImageNet":
-            target_model = ModelConstructor.construct_tiny_imagenet_model(arch, args.dataset)
-        target_model.eval()
-
-        if args.dataset != "ImageNet":
-            model_list_path = "{}/train_pytorch_model/real_image_model/{}@{}@*.pth.tar".format(PY_ROOT, args.dataset,
-                                                                                               arch)
-            model_path = list(glob.glob(model_list_path))[0]
-            target_model.load_state_dict(
-                torch.load(model_path, map_location=lambda storage, location: storage)["state_dict"])
-        target_model.cuda()
-        log.info("initializing target model {} on {}".format(arch, args.dataset))
-
-        attacker = BanditsAttack(args)
+        model = StandardModel(args.dataset, arch, no_grad=True)
+        model.cuda()
+        model.eval()
         save_result_path = args.exp_dir + "/{}_result.json".format(arch)
-        attacker.attack_all_images(args, target_model, save_result_path)
+        log.info("Begin attack {} on {}, result will be saved to {}".format(arch, args.dataset, save_result_path))
+        attacker.attack_all_images(args, arch, model, save_result_path)
+        model.cpu()

@@ -3,11 +3,13 @@ sys.path.append("/home1/machen/meta_perturbations_black_box_attack")
 import os
 import re
 import time
-from dataset_loader_maker import DataLoaderMaker
-from model_constructor import ModelConstructor
+from dataset.dataset_loader_maker import DataLoaderMaker
+from model_constructor import MetaLearnerModelBuilder
 import argparse
 import glob
-from cifar_models import *
+from cifar_models_myself import *
+import pretrainedmodels
+import glog as log
 
 class AverageMeter(object):
     """Computes and stores the average and current value"""
@@ -69,37 +71,52 @@ def validate(val_loader, model):
 
     return top1.avg
 
-
-
-data_loader_cache = {}
-
+def set_log_file(fname):
+    # set log file
+    # simple tricks for duplicating logging destination in the logging module such as:
+    # logging.getLogger().addHandler(logging.FileHandler(filename))
+    # does NOT work well here, because python Traceback message (not via logging module) is not sent to the file,
+    # the following solution (copied from : https://stackoverflow.com/questions/616645) is a little bit
+    # complicated but simulates exactly the "tee" command in linux shell, and it redirects everything
+    import subprocess
+    # sys.stdout = os.fdopen(sys.stdout.fileno(), 'wb', 0)
+    tee = subprocess.Popen(['tee', fname], stdin=subprocess.PIPE)
+    os.dup2(tee.stdin.fileno(), sys.stdout.fileno())
+    os.dup2(tee.stdin.fileno(), sys.stderr.fileno())
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--gpu",type=int, required=True)
     parser.add_argument("--dir_path",type=str,default="/home1/machen/meta_perturbations_black_box_attack/train_pytorch_model/real_image_model")
+    parser.add_argument("--dataset",type=str, required=True)
     args = parser.parse_args()
     os.environ["CUDA_DEVICE_ORDER"] = "PCI_BUS_ID"
     os.environ['CUDA_VISIBLE_DEVICES'] = str(args.gpu)
     os.environ['CUDA_VISIBLE_DEVICE'] = str(args.gpu)
+    os.environ["TORCH_HOME"] = "/home1/machen/.cache/torch/pretrainedmodels"
     print("using GPU {}".format(args.gpu))
     pattern = re.compile("(.*?)@(.*?)@.*tar")
-    for abs_path in glob.glob(args.dir_path + "/*.tar"):
+    set_log_file(args.dir_path + "/check_{}.log".format(args.dataset))
+    print(args.dir_path + "/{}*.tar".format(args.dataset))
+    for abs_path in glob.glob(args.dir_path + "/{}*.tar".format(args.dataset)):
         f = os.path.basename(abs_path)
         ma = pattern.match(f)
-        dataset = ma.group(1)
-        if dataset not in ["CIFAR-10","MNIST","FashionMNIST"]:
-            continue
+        dataset = args.dataset
         arch = ma.group(2)
+        print(arch)
         if dataset in ["CIFAR-10","MNIST","FashionMNIST"]:
-            model = ModelConstructor.construct_cifar_model(arch, dataset)
+            model = MetaLearnerModelBuilder.construct_cifar_model(arch, dataset)
         elif dataset == "TinyImageNet":
-            model = ModelConstructor.construct_tiny_imagenet_model(arch, dataset)
+            model = MetaLearnerModelBuilder.construct_tiny_imagenet_model(arch, dataset)
         elif dataset == "ImageNet":
-            model = ModelConstructor.construct_imagenet_model(arch)
-        model.load_state_dict(torch.load(abs_path, map_location=lambda storage, location: storage)["state_dict"])
+            if arch not in pretrainedmodels.__dict__:
+                print("arch {} not in pretrained models".format(arch))
+                continue
+            model = MetaLearnerModelBuilder.construct_imagenet_model(arch)
+        if dataset != "ImageNet":
+            model.load_state_dict(torch.load(abs_path, map_location=lambda storage, location: storage)["state_dict"])
         model.cuda()
         model.eval()
-        data_loader = DataLoaderMaker.get_img_label_data_loader(dataset, 50, False)
+        data_loader = DataLoaderMaker.get_img_label_data_loader(dataset, 100, False)
         acc = validate(data_loader, model)
-        print("val_acc:{:.3f}  dataset {}, model {}, path {}".format(acc, dataset,arch, f))
+        log.info("val_acc:{:.4f}  dataset {}, model {}, path {}".format(acc, dataset, arch, f))

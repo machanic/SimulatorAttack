@@ -8,7 +8,7 @@ from torch import nn
 from torch.optim import SGD, Adam
 from torchvision import models as torch_models
 
-from cifar_models import ResNet34
+from cifar_models_myself import ResNet34
 from config import PY_ROOT, IN_CHANNELS, CLASS_NUM
 from constant_enum import SPLIT_DATA_PROTOCOL
 from meta_simulator_model.meta_network import MetaNetwork
