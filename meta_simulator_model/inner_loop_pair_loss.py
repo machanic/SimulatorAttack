@@ -10,7 +10,7 @@ class InnerLoopPairLoss(nn.Module):
     The forward method updates weights with gradient steps on training data, 
     then computes and returns a meta-gradient w.r.t. validation data
     '''
-    def __init__(self, network, num_updates, step_size, meta_batch_size):
+    def __init__(self, network, num_updates, step_size, meta_batch_size, loss_type):
         super(InnerLoopPairLoss, self).__init__()
         self.network = copy.deepcopy(network)
         # Number of updates to be taken
@@ -22,6 +22,7 @@ class InnerLoopPairLoss(nn.Module):
         self.pair_wise_distance = nn.PairwiseDistance(p=2)
         self.mse_loss = nn.MSELoss(reduction="mean")
         self.softmax = nn.Softmax(dim=1)
+        self.loss_type = loss_type    # pair_mse, mse
 
     def copy_weights(self, net):
         ''' Set this module's weights to be the same as those of 'net' '''
@@ -42,10 +43,13 @@ class InnerLoopPairLoss(nn.Module):
         target_2 = self.softmax(target_2)
         diff_loss1 = self.mse_loss(out_1, target_1)
         diff_loss2 = self.mse_loss(out_2, target_2)
-        predict_distance = self.pair_wise_distance(out_1, out_2)  # shape = （batch_size,)
-        target_distance = self.pair_wise_distance(target_1, target_2)  # shape = （batch_size,)
-        distance_loss = self.mse_loss(predict_distance, target_distance)
-        loss = distance_loss + 0.1 * diff_loss1 + 0.1 * diff_loss2
+        if self.loss_type == "pair_mse":
+            predict_distance = self.pair_wise_distance(out_1, out_2)  # shape = （batch_size,)
+            target_distance = self.pair_wise_distance(target_1, target_2)  # shape = （batch_size,)
+            distance_loss = self.mse_loss(predict_distance, target_distance)
+            loss = distance_loss + 0.1 * diff_loss1 + 0.1 * diff_loss2
+        else:
+            loss = diff_loss1 + diff_loss2
         return loss
 
     def evaluate_accuracy(self, query_images, query_targets, weights):
@@ -78,9 +82,9 @@ class InnerLoopPairLoss(nn.Module):
         loss = loss / self.meta_batch_size   # normalize loss
         grads = torch.autograd.grad(loss, self.parameters())
         meta_grads = {name:g for ((name, _), g) in zip(self.named_parameters(), grads)}
-        query_images = torch.cat((task_query_images_1, task_query_images_2), dim=0)  # B, C,H,W
-        query_targets = torch.cat((task_query_target_1, task_query_target_2), dim=0)  # B, #class
-        with torch.no_grad():
-            accuracy, mse_error = self.evaluate_accuracy(query_images, query_targets, fast_weights)
-        return meta_grads, accuracy, mse_error
+        # query_images = torch.cat((task_query_images_1, task_query_images_2), dim=0)  # B, C,H,W
+        # query_targets = torch.cat((task_query_target_1, task_query_target_2), dim=0)  # B, #class
+        # with torch.no_grad():
+        #     accuracy, mse_error = self.evaluate_accuracy(query_images, query_targets, fast_weights)
+        return meta_grads #, accuracy, mse_error
 

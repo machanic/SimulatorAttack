@@ -11,12 +11,13 @@ IMAGE_DATA_ROOT = {"CIFAR-10":"/home1/machen/dataset/CIFAR-10", "CIFAR-100":"/ho
                    "ImageNet": "/home1/machen/dataset/ILSVRC2012/",
                    "TinyImageNet": "/home1/machen/dataset/tinyImageNet/"}
 
-
-
-
 pretrained_cifar_model_conf = {"CIFAR-10":{
+                                "vgg11_bn":None,
+                                "vgg13_bn":None,
+                                "vgg16_bn":None,
                                 "vgg19_bn":None,
                                 "alexnet":None,
+                                "alexnet_bn":None,
                                 "resnet-20":{"depth":20, "epochs":164, "schedule":[81,122], "gamma":0.1, "wd":1e-4, "block_name":"BasicBlock"},
                                 "resnet-32":{"depth":32, "epochs":164, "schedule":[81,122], "gamma":0.1, "wd":1e-4, "block_name":"BasicBlock"},
                                 "resnet-44":{"depth":44, "epochs":164, "schedule":[81,122], "gamma":0.1, "wd":1e-4, "block_name":"BasicBlock"},
@@ -37,8 +38,12 @@ pretrained_cifar_model_conf = {"CIFAR-10":{
                                 "densenet-bc-L190-k40":{"depth":190,"growthRate":40,"train_batch":64,"epochs":300, "schedule":[150,225],"wd":1e-4,"gamma":0.1,"compressionRate":2,"drop":0},
                             },
                             "CIFAR-100":{
-                                "vgg19_bn": None,
+                                "vgg11_bn":None,
+                                "vgg13_bn":None,
+                                "vgg16_bn":None,
+                                "vgg19_bn":None,
                                 "alexnet":None,
+                                "alexnet_bn":None,
                                 "resnet-20":{"depth":20, "epochs":164, "schedule":[81,122], "gamma":0.1, "wd":1e-4, "block_name":"BasicBlock"},
                                 "resnet-32":{"depth":32, "epochs":164, "schedule":[81,122], "gamma":0.1, "wd":1e-4, "block_name":"BasicBlock"},
                                 "resnet-44":{"depth":44, "epochs":164, "schedule":[81,122], "gamma":0.1, "wd":1e-4, "block_name":"BasicBlock"},
@@ -61,10 +66,6 @@ pretrained_cifar_model_conf = {"CIFAR-10":{
             }
 
 
-CIFAR_ALL_MODELS = ["alexnet","resnet-110","resnet-1202","preresnet-110","WRN-28-10-drop","densenet-bc-100-12","densenet-bc-L190-k40",
-                    "gdas","pyramidnet272","resnext-8x64d","resnext-16x64d"]
-CIFAR_MODELS_GROUP = [["alexnet", "gdas", "pyramidnet272"],["resnet-110","resnet-1202","preresnet-110","resnext-8x64d","resnext-16x64d"],
-                      ["WRN-28-10-drop","densenet-bc-100-12","densenet-bc-L190-k40"]]
 # IMAGENET_ALL_MODELS = ['squeezenet1_0', 'senet154', 'fbresnet152', 'resnet34', 'vgg19_bn', 'vgg13_bn', 'resnet18',
 #                        'resnext101_64x4d', 'xception', 'resnet50', 'vgg16', 'vgg11', 'resnext101_32x4d', 'squeezenet1_1',
 #                        'dpn68', 'resnet152', 'vgg16_bn', 'densenet201', 'inceptionv4', 'vgg19', 'inceptionresnetv2',
@@ -86,31 +87,33 @@ MODELS_TRAIN_STANDARD = {"CIFAR-10": ["alexnet", "densenet-bc-100-12", "densenet
 
 MODELS_TEST_STANDARD = {"CIFAR-10": ["pyramidnet272", "gdas","WRN-28-10-drop","WRN-40-10-drop"],
                         "CIFAR-100":["pyramidnet272", "gdas","WRN-28-10-drop","WRN-40-10-drop"],
-                        "ImageNet": ["inceptionv3","inceptionv4","pnasnet5large","senet154","resnet101"]}
+                        "ImageNet": ["inceptionv3","inceptionv4","senet154","pnasnet5large","resnet101"]}
 
-MODELS_TRAIN_TEST_STANDARD = {"CIFAR-10": ["alexnet", "densenet-bc-100-12", "densenet-bc-L190-k40",  "preresnet-110",
-                                          "resnext-16x64d","resnext-8x64d","vgg19_bn","resnet-20","resnet-32","resnet-44","resnet-50",
-                                          "resnet-56","resnet-110", "gdas","pyramidnet272",
-                                          "WRN-28-10", "WRN-28-10-drop","WRN-34-10","WRN-34-10-drop","WRN-40-10","WRN-40-10-drop"],
-                         "CIFAR-100": ["alexnet", "densenet-bc-100-12", "densenet-bc-L190-k40",  "preresnet-110",
-                                          "resnext-16x64d","resnext-8x64d","vgg19_bn","resnet-20","resnet-32","resnet-44","resnet-50",
-                                          "resnet-56","resnet-110", "gdas","pyramidnet272",
-                                          "WRN-28-10", "WRN-28-10-drop","WRN-34-10","WRN-34-10-drop","WRN-40-10","WRN-40-10-drop"],
-                         "ImageNet": ["alexnet", "bninception","densenet121", "densenet161","densenet169", "densenet201","dpn68",
-                                     "resnext101_32x4d","resnext101_64x4d","se_resnext101_32x4d",
-                                      "se_resnext50_32x4d","squeezenet1_0","squeezenet1_1","vgg11","vgg11_bn","vgg13_bn","vgg13",
-                                      "vgg16","vgg16_bn","vgg19_bn","vgg19"]}
 
-MODELS_TRAIN = ['conv3', 'densenet121', 'densenet161', 'densenet169', 'densenet201', 'dpn26', 'dpn92', 'efficientnet', 'googlenet',
-            'mobilenet', 'mobilenet_v2', 'pnasnetA', 'pnasnetB', 'preactresnet101', 'preactresnet152', 'preactresnet18',
-            'preactresnet34', 'preactresnet50', 'resnext29_2', 'resnext29_32', 'resnext29_4', 'resnext29_8', 'resnext32_4',
-            'resnext64_4', 'senet18', "resnext101_32x8d","resnext50_32x4d",
-            'shufflenet_G2', 'shufflenet_G3', 'shufflenet_v2_x0_5','shufflenet_v2_x1_0', 'squeezenet1_0', 'squeezenet1_1',
-            'vgg11', 'vgg13', 'vgg16', 'vgg19','vgg11_bn', 'vgg13_bn', 'vgg16_bn', 'vgg19_bn']
-MODELS_TEST = ["inceptionv3","inceptionv4", "senet154", "pnasnet5large", "wideresnet28drop", "wideresnet28","gdas", "pyramidnet272",
-               "carlinet"
-               "resnet18", "resnet34", "resnet50", "resnet101", "resnet152",  "wideresnet34", "wideresnet40",
-                "wideresnet34drop", "wideresnet40drop"]
-ALL_MODELS= MODELS_TRAIN + MODELS_TEST
 
-MAX_QUERIES_GENERATE_TRAIN_DATA = {"MNIST": 200, "CIFAR-10":2000, "FashionMNIST":200}
+# MODELS_TRAIN_TEST_STANDARD = {"CIFAR-10": ["alexnet", "densenet-bc-100-12", "densenet-bc-L190-k40",  "preresnet-110",
+#                                           "resnext-16x64d","resnext-8x64d","vgg19_bn","resnet-20","resnet-32","resnet-44","resnet-50",
+#                                           "resnet-56","resnet-110", "gdas","pyramidnet272",
+#                                           "WRN-28-10", "WRN-28-10-drop","WRN-34-10","WRN-34-10-drop","WRN-40-10","WRN-40-10-drop"],
+#                          "CIFAR-100": ["alexnet", "densenet-bc-100-12", "densenet-bc-L190-k40",  "preresnet-110",
+#                                           "resnext-16x64d","resnext-8x64d","vgg19_bn","resnet-20","resnet-32","resnet-44","resnet-50",
+#                                           "resnet-56","resnet-110", "gdas","pyramidnet272",
+#                                           "WRN-28-10", "WRN-28-10-drop","WRN-34-10","WRN-34-10-drop","WRN-40-10","WRN-40-10-drop"],
+#                          "ImageNet": ["alexnet", "bninception","densenet121", "densenet161","densenet169", "densenet201","dpn68",
+#                                      "resnext101_32x4d","resnext101_64x4d","se_resnext101_32x4d",
+#                                       "se_resnext50_32x4d","squeezenet1_0","squeezenet1_1","vgg11","vgg11_bn","vgg13_bn","vgg13",
+#                                       "vgg16","vgg16_bn","vgg19_bn","vgg19"]}
+
+
+# MODELS_TRAIN = ['conv3', 'densenet121', 'densenet161', 'densenet169', 'densenet201', 'dpn26', 'dpn92', 'efficientnet', 'googlenet',
+#             'mobilenet', 'mobilenet_v2', 'pnasnetA', 'pnasnetB', 'preactresnet101', 'preactresnet152', 'preactresnet18',
+#             'preactresnet34', 'preactresnet50', 'resnext29_2', 'resnext29_32', 'resnext29_4', 'resnext29_8', 'resnext32_4',
+#             'resnext64_4', 'senet18', "resnext101_32x8d","resnext50_32x4d",
+#             'shufflenet_G2', 'shufflenet_G3', 'shufflenet_v2_x0_5','shufflenet_v2_x1_0', 'squeezenet1_0', 'squeezenet1_1',
+#             'vgg11', 'vgg13', 'vgg16', 'vgg19','vgg11_bn', 'vgg13_bn', 'vgg16_bn', 'vgg19_bn']
+# MODELS_TEST = ["inceptionv3","inceptionv4", "senet154", "pnasnet5large", "wideresnet28drop", "wideresnet28","gdas", "pyramidnet272",
+#                "carlinet"
+#                "resnet18", "resnet34", "resnet50", "resnet101", "resnet152",  "wideresnet34", "wideresnet40",
+#                 "wideresnet34drop", "wideresnet40drop"]
+# ALL_MODELS= MODELS_TRAIN + MODELS_TEST
+

@@ -5,10 +5,9 @@ import glog as log
 import numpy as np
 import torch
 from torch.nn import functional as F
-
+from torch import nn
 from config import IN_CHANNELS, CLASS_NUM
 
-LEARNING_RATE = 2e-3     # larger values converge faster to less accurate results
 
 # settings for ADAM solver
 ADAM_BETA1 = 0.9
@@ -28,16 +27,34 @@ def coordinate_ADAM(losses, indice, grad, hess, batch_size, mt_arr, vt_arr, real
     # epoch is an array; for each index we can have a different epoch number
     epoch = adam_epoch[indice]
     corr = (np.sqrt(1 - np.power(beta2,epoch))) / (1 - np.power(beta1, epoch))
-    m = real_modifier.reshape(-1) # 注意修改real_modifier,这个相当于直接改x图像
+    m = real_modifier.reshape(-1)
     old_val = m[indice]
     old_val -= lr * corr * mt / (np.sqrt(vt)  + 1e-8 )
 
     m[indice] = old_val
     adam_epoch[indice] = epoch + 1
 
+
+
+# 原作者的image是-0.5到+0.5之间
+def SGD(losses, indice, grad, hess, batch_size, mt_arr, vt_arr, real_modifier, lr, adam_epoch, beta1, beta2, proj, beta, z, q=1):
+    for i in range(q):
+        grad[i] = q * (losses[i+1] - losses[0]) * z[i] / beta
+
+    # argument indice should be removed for the next version
+    # the entire modifier is updated for every epoch and thus indice is not required
+    avg_grad = np.mean(grad, axis=0)
+    m = real_modifier.reshape(-1)
+    old_val = m[indice]
+    old_val -= lr * np.sign(avg_grad)
+    m[indice] = old_val
+
+
+# 原作者的image是-0.5到+0.5之间
 def ADAM(losses, indice, grad, hess, batch_size, mt_arr, vt_arr, real_modifier, lr, adam_epoch, beta1, beta2, proj, beta, z, q=1):
     for i in range(q):
-        grad[i] = q*(losses[i+1] - losses[0])* z[i] / beta
+        grad[i] = q * (losses[i+1] - losses[0]) * z[i] / beta
+
     # argument indice should be removed for the next version
     # the entire modifier is updated for every epoch and thus indice is not required
     avg_grad = np.mean(grad, axis=0)
@@ -78,8 +95,9 @@ class BlackboxAttack(metaclass=ABCMeta):
         self.BATCH_SIZE = args["batch_size"]  # number of pixels' gradients evaluations to run simultaneously.
         self.LEARNING_RATE = args["lr"]
         self.CONFIDENCE = args["confidence"]
-        self.ABORT_EARLY = False  # # if we stop improving, abort gradient descent early
+        self.ABORT_EARLY = True  # # if we stop improving, abort gradient descent early
         self.modifier_size = args["img_resize"]
+        self.epsilone = args["epsilone"]
         self.image_shape = (self.num_channels, self.image_size, self.image_size)
         self.modifier_shape = (self.num_channels, self.modifier_size, self.modifier_size)
         # self.early_stop_iters = args["early_stop_iters"] if args["early_stop_iters"] != 0 else self.MAX_ITER // 10
@@ -136,7 +154,13 @@ class BlackboxAttack(metaclass=ABCMeta):
         # real_val =  self.real(logits, tlab)
         # other_val = self.other(logits, tlab)  # shape = (batch_size,)
         # loss1_val = self.loss1(real_val, other_val)  # shape = (batch_size,)
-        loss1_val = self.negative_cw_loss(logits, true_label, target_label)
+        if true_label.size(0)!=logits.size(0):
+            assert logits.size(0) % true_label.size(0) == 0
+            repeat_num = logits.size(0) // true_label.size(0)
+            true_label = true_label.repeat(repeat_num)
+            if target_label is not None:
+                target_label = target_label.repeat(repeat_num)
+        loss1_val = self.cw_loss(logits, true_label, target_label)
         loss2_val = self.loss2(newimg, timg)  # returned shape = (batch_size,) ; clean_x shape = (1,C,H,W) newimg = (B,C,H,W)
         assert loss1_val.size() == loss2_val.size()
         return const * loss1_val + loss2_val, loss1_val, loss2_val, logits
@@ -153,7 +177,8 @@ class BlackboxAttack(metaclass=ABCMeta):
     #     return second_max_logit
 
 
-    def negative_cw_loss(self, logit, label, target):
+    def cw_loss(self, logit, label, target):
+        logit = F.log_softmax(logit, dim=1)
         if target is not None:
             # targeted cw loss: logit_t - max_{i\neq t}logit_i
             _, argsort = logit.sort(dim=1, descending=True)
@@ -192,21 +217,28 @@ class BlackboxAttack(metaclass=ABCMeta):
     def post_success_setting(self):
         pass
 
-    def compare(self,x, true_label, target_label):
+
+    def compare(self, x, true_label, target_label):
+        if target_label is None:
+            y = true_label[0].item()
+        else:
+            assert self.ATTACK_TYPE == "targeted"
+            y = target_label[0].item()
         temp_x = np.copy(x)
         if not isinstance(x, (float, int, np.int64)):
             if self.ATTACK_TYPE == "targeted":
-                temp_x[target_label] -= self.CONFIDENCE
+                temp_x[y] -= self.CONFIDENCE
                 temp_x = np.argmax(temp_x)
             else:
                 for i in range(len(temp_x)):
-                    if i != true_label:
+                    if i != y:
                         temp_x[i] -= self.CONFIDENCE
                 temp_x = np.argmax(temp_x)
         if self.ATTACK_TYPE == "targeted":
-            return temp_x == target_label
+            return temp_x == y
         else:
-            return temp_x != true_label
+            return temp_x != y
+
 
     def attack(self, img, true_label, target_label):
         """
@@ -230,7 +262,6 @@ class BlackboxAttack(metaclass=ABCMeta):
         assert batch_size == 1
         # if img.dim() == 4:
         #     img = img[0]  # C,H,W
-
         # set the lower and upper bounds accordingly
         lower_bound = 0.0
         CONST = self.INIT_CONST
@@ -242,7 +273,6 @@ class BlackboxAttack(metaclass=ABCMeta):
             img_flatten = img.view(-1)
             self.modifier_up =  torch.ones_like(img_flatten) - img_flatten
             self.modifier_down = torch.zeros_like(img_flatten) - img_flatten
-
 
         # the over all best l2, score, and image attack
         o_bestl2 = 1e10
@@ -261,8 +291,8 @@ class BlackboxAttack(metaclass=ABCMeta):
         self.mt.fill(0.0)
         self.vt.fill(0.0)
         self.adam_epoch.fill(1)
-        self.stage = 0
         self.real_modifier.fill(0)  # clear the modifier
+        self.stage = 0
         eval_costs = 0
         o_bestscore = -1
         # np.random.seed(1234)
@@ -286,18 +316,12 @@ class BlackboxAttack(metaclass=ABCMeta):
                 self.adam_epoch.fill(1)
                 self.stage = 1
             last_loss1 = loss1
-            last_loss2 = loss2
-            # if self.ABORT_EARLY and iteration % self.early_stop_iters == 0:
-            #     if l > prev * 0.9999:
-            #         log.info("Early stopping because there is no improvement")
-            #         break
-            #     prev = l
             score = score.detach().cpu().numpy()
-            if l2 < bestl2 and self.compare(score, true_label[0].item(), target_label[0].item()):
+            if l2 < bestl2 and self.compare(score, true_label, target_label):
                 bestl2 = l2
                 bestscore = np.argmax(score)
 
-            if l2 < o_bestl2 and self.compare(score, true_label[0].item(), target_label[0].item()):
+            if l2 < o_bestl2 and self.compare(score, true_label, target_label):
                 # print a message if it is the first attack found
                 if o_bestl2 == 1e10:
                     # print("save modifier")
@@ -308,9 +332,7 @@ class BlackboxAttack(metaclass=ABCMeta):
                     self.post_success_setting()
                     lower_bound = 0.0
                 o_bestl2 = l2
-                o_bestscore = np.argmax(score)
                 o_bestattack = nimg
-
                 # begin statistics
                 query.fill_(eval_costs)
                 with torch.no_grad():
@@ -325,12 +347,16 @@ class BlackboxAttack(metaclass=ABCMeta):
                 success_query = success * query
                 not_done_prob = adv_prob[torch.arange(batch_size), true_label] * not_done
                 # end statistics
-
+                if self.ABORT_EARLY:
+                    if loss2 < self.epsilone and not not_done.byte().any():
+                        log.info(
+                            "Early stopping attack successfully and total pixels' distortion is {:.3f}".format(loss2))
+                        break
             self.train_timer += time.time() - attack_begin_time
 
             # switch constant when reaching switch iterations
             if iteration % self.SWITCH_ITER == 0 and iteration != 0:
-                if self.compare(bestscore, true_label[0].item(), target_label[0].item()) and bestscore != -1:
+                if self.compare(bestscore, true_label, target_label) and bestscore != -1:
                     # success, divide const by two
                     log.info("iter:{} old constant:{}".format(iteration, CONST))
                     upper_bound = min(upper_bound, CONST)
@@ -372,8 +398,8 @@ class BlackboxAttack(metaclass=ABCMeta):
         return o_bestattack, stats_info
 
 
-
 class ZOO(BlackboxAttack):
+
     def __init__(self, model, dataset, args):
         super(ZOO, self).__init__(model, dataset, args)
         self.grad = np.zeros(self.BATCH_SIZE, dtype=np.float32)
@@ -386,7 +412,8 @@ class ZOO(BlackboxAttack):
             self.img_modifier =  modifier  # not resizing image or using autoencoder
         else:
             # resizing image
-            self.img_modifier = F.upsample_bilinear(modifier, [self.image_size, self.image_size])
+            self.img_modifier = F.interpolate(modifier, [self.image_size, self.image_size], mode="bilinear",
+                                              align_corners=True)
 
     def get_eval_costs(self):
         return self.BATCH_SIZE * 2
@@ -425,10 +452,12 @@ class ZOO_AE(ZOO):
             self.img_modifier = self.decoder(modifier)
         else:
             self.decoder_output = self.decoder(modifier)
-            self.img_modifier = F.upsample_bilinear(self.decoder_output, [self.image_size, self.image_size])
+            self.img_modifier = F.interpolate(self.decoder_output, [self.image_size, self.image_size], mode="bilinear",
+                                              align_corners=True)
 
     def post_success_setting(self):
         pass
+
 
 class AutoZOOM_BiLIN(BlackboxAttack):
 
@@ -442,20 +471,20 @@ class AutoZOOM_BiLIN(BlackboxAttack):
 
     def set_img_modifier(self, modifier):
         assert modifier.size()[1:] == self.modifier_shape
-        if (self.modifier_size == self.image_size):
+        if self.modifier_size == self.image_size:
             # not resizing image or using autoencoder
             self.img_modifier = modifier
         else:
-            self.img_modifier = F.upsample_bilinear(modifier, [self.image_size, self.image_size])
+            self.img_modifier = F.interpolate(modifier, [self.image_size, self.image_size],mode="bilinear",align_corners=True)
 
     def get_eval_costs(self):
         return self.num_rand_vec + 1
 
-    def blackbox_optimizer(self,iteration, timg, true_label, target_label, const):
+    def blackbox_optimizer(self, iteration, timg, true_label, target_label, const):
         # argument iteration is for debugging
         var_size = self.real_modifier.size
         indice = list(range(var_size))
-        self.beta = 1 / (var_size)
+        self.beta = 1.0 / (var_size)  # 使用beta相乘，会使值变得过小，从而loss2越变越大，暂时不知道园有
         var_noise = np.random.normal(loc=0, scale=1000, size=(self.num_rand_vec, var_size))
         # var_mean = np.mean(var_noise, axis=1, keepdims=True)
         # var_std = np.std(var_noise, axis=1, keepdims=True)
@@ -465,9 +494,12 @@ class AutoZOOM_BiLIN(BlackboxAttack):
                               self.real_modifier + self.beta * var_noise.reshape(self.num_rand_vec, self.num_channels,
                                                                                  self.modifier_size, self.modifier_size,
                                                                                  )), axis=0)
-        modifier = torch.from_numpy(var).cuda().float()
+        modifier = torch.from_numpy(var).cuda().float() # 此时修改modifier内容不会影响var或者self.real_modifier的内容
         newimg = self.get_newimg(timg, modifier)
-        losses, loss1, loss2, scores = self.loss(newimg,timg, true_label, target_label, const)
+        losses, loss1, loss2, scores = self.loss(newimg, timg, true_label, target_label, const)
+        print("losses :{}, loss1:{}, loss2:{}".format(losses, loss1, loss2))
+        # if (iteration + 1) % 10 == 0:
+        #     time.sleep(5)
         self.solver(losses.detach().cpu().numpy(), indice, self.grad, self.hess, self.BATCH_SIZE, self.mt, self.vt, self.real_modifier,
                     self.LEARNING_RATE, self.adam_epoch, self.beta1, self.beta2, not self.USE_TANH, self.beta,
                     var_noise, self.num_rand_vec)
@@ -479,6 +511,7 @@ class AutoZOOM_BiLIN(BlackboxAttack):
         log.info("Set random vector number to :{}".format(self.num_rand_vec))
 
 class AutoZOOM_AE(AutoZOOM_BiLIN):
+
     def __init__(self, model, dataset, args, decoder):
         super(AutoZOOM_AE, self).__init__(model, dataset, args)
         self.decoder = decoder
@@ -494,7 +527,8 @@ class AutoZOOM_AE(AutoZOOM_BiLIN):
             self.img_modifier = self.decoder(modifier)
         else:
             self.decoder_output = self.decoder(modifier)
-            self.img_modifier =  F.upsample_bilinear(self.decoder_output, [self.image_size, self.image_size])
+            self.img_modifier = F.interpolate(self.decoder_output, [self.image_size, self.image_size], mode="bilinear",
+                                              align_corners=True)
 
     def post_success_setting(self):
         self.num_rand_vec = self.post_success_num_rand_vec

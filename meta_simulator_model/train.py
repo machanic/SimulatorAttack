@@ -1,11 +1,9 @@
 import sys
 sys.path.append("/home1/machen/meta_perturbations_black_box_attack")
-from meta_simulator_model.meta_distillation_learner import MetaDistillationLearner
 import argparse
 from config import PY_ROOT
 import random
 import numpy as np
-from meta_simulator_model.meta_grad_regression_learner import MetaGradRegressionLearner
 import torch
 from constant_enum import SPLIT_DATA_PROTOCOL, LOAD_TASK_MODE
 import os
@@ -14,7 +12,7 @@ from meta_two_queries_distillation_learner import MetaTwoQueriesLearner
 def parse_args():
     parser = argparse.ArgumentParser(description='PyTorch Meta Model Training')
     parser.add_argument('--gpu', type=int, default=0, help="GPU ID to train")
-    parser.add_argument("--epoch", type=int, default=3, help="number of epochs.")
+    parser.add_argument("--epoch", type=int, default=4, help="number of epochs.")
     parser.add_argument('--meta_batch_size', type=int, default=30, help='number of tasks sampled per meta-update')
     parser.add_argument('--meta_lr', type=float, default=1e-3, help='the base learning rate')
     parser.add_argument('--inner_lr', type=float, default=1e-2, help="lr for inner update")
@@ -23,23 +21,24 @@ def parse_args():
                         help='number of inner gradient updates(on support set) during training.')
     parser.add_argument('--tot_num_tasks', type=int, default=30000, help='the maximum number of tasks in total, which is repeatly processed in training.')
     parser.add_argument('--arch', type=str, default='resnet34',help='network name')  #10 层
-    parser.add_argument('--meta_learner', type=str, default="2q_distillation", choices=["2q_distillation", "grad_regression",
+    parser.add_argument('--meta_learner', type=str, default="2q_distillation", choices=["2q_distillation",
                                                                                         "logits_distillation"])
-    parser.add_argument("--num_support", type=int, default=20)
+    parser.add_argument("--num_support", type=int, default=50)
     parser.add_argument('--test_num_updates', type=int, default=20, help='number of inner gradient updates during testing')
     parser.add_argument("--dataset", type=str, default="CIFAR-10", help="the dataset to train")
     parser.add_argument("--split_protocol", required=True, type=SPLIT_DATA_PROTOCOL, choices=list(SPLIT_DATA_PROTOCOL),
                         help="split protocol of data")
     parser.add_argument("--load_task_mode", default=LOAD_TASK_MODE.LOAD, type=LOAD_TASK_MODE, choices=list(LOAD_TASK_MODE),
                         help="load task mode")
-    parser.add_argument("--study_subject", type=str, default="cross_arch_attack", required=True)
+    parser.add_argument("--study_subject", type=str, default="meta_simulator")
     parser.add_argument("--distill_loss", type=str, default="MSE", choices=["MSE", "CSE"])
 
     # the following args are set for choosing which npy data
-    parser.add_argument("--data_loss_type", type=str, default="xent", choices=["xent", "cw"])
-    parser.add_argument("--adv_norm", type=str, choices=["l2", "linf"])
+    parser.add_argument("--data_loss_type", type=str, choices=["xent", "cw"], required=True)
+    parser.add_argument("--loss_type", type=str, default="pair_mse", choices=["pair_mse","mse"])
+    parser.add_argument("--adv_norm", type=str, choices=["l2", "linf"], required=True)
     parser.add_argument("--targeted", action="store_true", help="Does it train on the data of targeted attack?")
-    parser.add_argument("--target_type", type=str, choices=["random", "least_likely"])
+    parser.add_argument("--target_type", type=str, default="random", choices=["random", "least_likely"])
     parser.add_argument("--evaluate", action="store_true")
     ## Logging, saving, and testing options
     args = parser.parse_args()
@@ -56,28 +55,24 @@ def main():
 
     if not args.evaluate:
         data_str = "{loss}_{norm}_{target}".format(loss=args.data_loss_type, norm=args.adv_norm, target="untargeted_attack" if not args.targeted else "targeted_attack_{}".format(args.target_type))
-        param_prefix = "{}@{}@model_{}@dataloss_{}@distill_loss_{}@epoch_{}@meta_batch_size_{}@num_support_{}@num_updates_{}@lr_{}@inner_lr_{}".format(
+        param_prefix = "{}@{}@model_{}@loss_{}@dataloss_{}@epoch_{}@meta_batch_size_{}@num_support_{}@num_updates_{}@lr_{}@inner_lr_{}".format(
             args.dataset,
-            args.split_protocol, args.arch, data_str, args.distill_loss, args.epoch, args.meta_batch_size,
+            args.split_protocol, args.arch, args.loss_type, data_str, args.epoch, args.meta_batch_size,
             args.num_support, args.num_updates, args.meta_lr, args.inner_lr)
         model_path = '{}/train_pytorch_model/{}/{}@{}.pth.tar'.format(
             PY_ROOT, args.study_subject, args.meta_learner.upper(), param_prefix)
         os.makedirs(os.path.dirname(model_path), exist_ok=True)
-        if args.meta_learner == "grad_regression":
-            learner = MetaGradRegressionLearner(args.dataset, args.arch, args.meta_batch_size, args.meta_lr, args.inner_lr,
-                                                args.lr_decay_itr, args.epoch, args.num_updates, args.load_task_mode,
-                                                args.split_protocol, args.tot_num_tasks, args.num_support, args.data_loss_type,
-                                                param_prefix)
-        elif args.meta_learner == "logits_distillation":
-            learner = MetaDistillationLearner(args.dataset, args.arch, args.meta_batch_size, args.meta_lr, args.inner_lr,
-                                              args.lr_decay_itr, args.epoch, args.num_updates, args.load_task_mode,
-                                              args.split_protocol, args.tot_num_tasks, args.num_support, args.distill_loss,
-                                              args.data_loss_type, param_prefix)
-        elif args.meta_learner == "2q_distillation":
-            learner = MetaTwoQueriesLearner(args.dataset, args.arch, args.meta_batch_size, args.meta_lr, args.inner_lr,
-                                            args.lr_decay_itr, args.epoch, args.num_updates, args.load_task_mode,
-                                            args.split_protocol, args.tot_num_tasks, args.num_support, args.data_loss_type,
-                                            args.adv_norm, args.targeted, args.target_type, param_prefix)
+        # if args.meta_learner == "logits_distillation":
+        #     learner = MetaDistillationLearner(args.dataset, args.arch, args.meta_batch_size, args.meta_lr, args.inner_lr,
+        #                                       args.lr_decay_itr, args.epoch, args.num_updates, args.load_task_mode,
+        #                                       args.split_protocol, args.tot_num_tasks, args.num_support, args.distill_loss,
+        #                                       args.data_loss_type, param_prefix)
+        # elif args.meta_learner == "2q_distillation":
+        learner = MetaTwoQueriesLearner(args.dataset, args.arch, args.meta_batch_size, args.meta_lr, args.inner_lr,
+                                        args.lr_decay_itr, args.epoch, args.num_updates, args.load_task_mode,
+                                        args.split_protocol, args.tot_num_tasks, args.num_support, args.data_loss_type,
+                                        args.loss_type,
+                                        args.adv_norm, args.targeted, args.target_type, param_prefix)
 
         resume_epoch = 0
         if os.path.exists(model_path):

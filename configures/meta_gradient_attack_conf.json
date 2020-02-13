@@ -1,4 +1,3 @@
-
 {"CIFAR-10": {
     "meta_interval": 5,
     "top_q": 500,
@@ -14,12 +13,12 @@
       "top_q": 128,
       "epsilon": 0.031372
   },
-    "FashionMNIST": {
+  "FashionMNIST": {
     "meta_interval": 5,
       "top_q": 128,
       "epsilon": 0.031372
   },
-    "ImageNet": {
+  "ImageNet": {
     "meta_interval": 3,
       "top_q": 500,
       "epsilon": 0.05

@@ -3,10 +3,13 @@ import os
 import pickle
 import random
 import re
+
 import numpy as np
 import torch
 from torch.utils import data
-from config import IMAGE_SIZE, IN_CHANNELS, PY_ROOT, ALL_MODELS, MODELS_TRAIN, MODELS_TEST, CLASS_NUM
+
+from config import IMAGE_SIZE, IN_CHANNELS, PY_ROOT, CLASS_NUM, \
+    MODELS_TRAIN_STANDARD, MODELS_TEST_STANDARD
 from constant_enum import SPLIT_DATA_PROTOCOL, LOAD_TASK_MODE
 
 
@@ -19,11 +22,11 @@ class TwoQueriesMetaTaskDataset(data.Dataset):
         """
         self.dataset = dataset
         if protocol == SPLIT_DATA_PROTOCOL.TRAIN_I_TEST_II:
-            self.model_names = MODELS_TRAIN
+            self.model_names = MODELS_TRAIN_STANDARD[dataset]
         elif protocol == SPLIT_DATA_PROTOCOL.TRAIN_II_TEST_I:
-            self.model_names = MODELS_TEST
+            self.model_names = MODELS_TEST_STANDARD[dataset]
         elif protocol == SPLIT_DATA_PROTOCOL.TRAIN_ALL_TEST_ALL:
-            self.model_names = ALL_MODELS
+            self.model_names = MODELS_TRAIN_STANDARD[dataset] + MODELS_TEST_STANDARD[dataset]
         self.data_root_dir = "{}/data_bandit_attack/{}/{}".format(PY_ROOT, dataset, "targeted_attack" if targeted else "untargeted_attack")
         self.pattern = re.compile(".*arch_(.*?)@.*")
         self.train_files = []

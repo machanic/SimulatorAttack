@@ -1,0 +1,62 @@
+
+{"CIFAR-10": {
+      "l2":{
+          "starting_eps": 10,
+          "epsilon": 4.6,
+        "starting_delta_eps": 2.0
+        },
+      "linf": {
+          "starting_eps": 1.0,
+          "epsilon": 0.031372,
+        "starting_delta_eps": 0.5
+      }
+  },
+    "CIFAR-100": {
+      "l2":{
+        "starting_eps": 10,
+          "epsilon": 4.6,
+         "starting_delta_eps": 2.0
+        },
+      "linf": {
+        "starting_eps": 1.0,
+          "epsilon": 0.031372,
+        "starting_delta_eps": 0.5
+      }
+  },
+  "FashionMNIST": {
+      "l2":{
+           "starting_eps": 10,
+          "epsilon": 4.6,
+         "starting_delta_eps": 2.0
+        },
+      "linf": {
+          "starting_eps": 1.0,
+          "epsilon": 0.031372,
+        "starting_delta_eps": 0.5
+      }
+  },
+  "MNIST": {
+      "l2":{
+             "starting_eps": 10,
+          "epsilon": 4.6,
+         "starting_delta_eps": 2.0
+        },
+      "linf": {
+        "starting_eps": 1.0,
+          "epsilon": 0.031372,
+        "starting_delta_eps": 0.5
+      }
+  },
+    "ImageNet": {
+        "l2":{
+             "starting_eps": 10,
+          "epsilon": 4.6,
+         "starting_delta_eps": 2.0
+        },
+        "linf": {
+          "starting_eps": 1.0,
+          "epsilon": 0.05,
+          "starting_delta_eps": 0.5
+        }
+    }
+}

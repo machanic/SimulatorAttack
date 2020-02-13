@@ -357,7 +357,7 @@ if __name__ == "__main__":
     parser.add_argument('--exploration', type=float, default=0.5,
                         help='\delta, parameterizes the exploration to be done around the prior')
     parser.add_argument('--tile-size', type=int, help='the side length of each tile (for the tiling prior)')
-    parser.add_argument('--json-config', type=str, help='a config file to be passed in instead of arguments')
+    parser.add_argument('--json-configures', type=str, help='a configures file to be passed in instead of arguments')
     parser.add_argument('--epsilon', type=float, help='the lp perturbation bound')
     parser.add_argument('--batch-size', type=int, help='batch size for bandits')
     parser.add_argument('--log-progress', action='store_true')

@@ -9,10 +9,10 @@ import random
 import glog as log
 import numpy as np
 import torch
-
-from autozoom_attack.blackbox_attack import ZOO, ZOO_AE, AutoZOOM_BiLIN, AutoZOOM_AE
+from torch.nn import functional as F
+from autozoom_attack.autozoom_attack import ZOO, ZOO_AE, AutoZOOM_BiLIN, AutoZOOM_AE
 from autozoom_attack.codec import Codec
-from config import IN_CHANNELS, CLASS_NUM, CIFAR_ALL_MODELS, PY_ROOT, IMAGENET_ALL_MODELS, MODELS_TEST_STANDARD
+from config import IN_CHANNELS, CLASS_NUM, PY_ROOT, MODELS_TEST_STANDARD
 from dataset.dataset_loader_maker import DataLoaderMaker
 from dataset.model_constructor import StandardModel
 
@@ -62,18 +62,27 @@ class AutoZoomAttackFramework(object):
         if args["attack_type"] == "targeted":
 
             if args["target_type"] == "random":
+                with torch.no_grad():
+                    logit = target_model(images)
                 target_labels = torch.randint(low=0, high=CLASS_NUM[args["dataset"]], size=true_labels.size()).long().cuda()
+                invalid_target_index = target_labels.eq(true_labels)
+                while invalid_target_index.sum().item() > 0:
+                    target_labels[invalid_target_index] = torch.randint(low=0, high=logit.shape[1],
+                                                                        size=target_labels[
+                                                                            invalid_target_index].shape).long().cuda()
+                    invalid_target_index = target_labels.eq(true_labels)
             elif args["target_type"] == 'least_likely':
                 with torch.no_grad():
                     logit = target_model(images)
                 target_labels = logit.argmin(dim=1)
+            else:
+                target_labels = torch.fmod(true_labels + 1, CLASS_NUM[args.dataset])
         else:
             target_labels = None
+        log.info("Begin attack batch {}!".format(batch_index))
         with torch.no_grad():
-            if args["attack_type"] == "untargeted":
-                adv_images, stats_info = attacker.attack(images, true_labels, true_labels)
-            else:
-                adv_images, stats_info = attacker.attack(images, target_labels, true_labels)
+            adv_images, stats_info = attacker.attack(images, true_labels, target_labels)
+
         query = stats_info["query"]
         correct = stats_info["correct"]
         not_done = stats_info["not_done"]
@@ -88,21 +97,23 @@ class AutoZoomAttackFramework(object):
             value_all = getattr(self, key+"_all")
             value = eval(key)
             value_all[selected] = value.detach().float().cpu()  # 由于value_all是全部图片都放在一个数组里，当前batch选择出来
-        if not_done.byte().any():
-            return images[not_done.byte()]
-        return None
+
 
     def attack_dataset_images(self, args, attacker, arch_name, target_model, codec, result_dump_path):
-        unsuccessful_images_list = []
-        for batch_idx, (images, true_labels) in enumerate(self.dataset_loader):
-            unsuccessful_images = self.make_adversarial_examples(batch_idx, images.cuda(), true_labels.cuda(),
+        for batch_idx, data_tuple in enumerate(self.dataset_loader):
+            if args.dataset == "ImageNet":
+                if target_model.input_size[-1] >= 299:
+                    images, true_labels = data_tuple[1], data_tuple[2]
+                else:
+                    images, true_labels = data_tuple[0], data_tuple[2]
+            else:
+                images, true_labels = data_tuple[0], data_tuple[1]
+
+            if images.size(-1) != target_model.input_size[-1]:
+                images = F.interpolate(images, size=target_model.input_size[-1], mode='bilinear')
+            self.make_adversarial_examples(batch_idx, images.cuda(), true_labels.cuda(),
                                                                  args, attacker, target_model, codec)
-            if unsuccessful_images is not None:
-                unsuccessful_images_list.append(unsuccessful_images)
 
-
-        if unsuccessful_images_list:
-            all_unsuccessful_images = torch.cat(unsuccessful_images_list, 0).detach().cpu().numpy()
         log.info('{} is attacked finished ({} images)'.format(arch_name, self.total_images))
         log.info('        avg correct: {:.4f}'.format(self.correct_all.mean().item()))
         log.info('       avg not_done: {:.4f}'.format(self.not_done_all.mean().item()))  # 有多少图没做完
@@ -128,9 +139,6 @@ class AutoZoomAttackFramework(object):
         meta_info_dict['args'] = vars(args)
         with open(result_dump_path, "w") as result_file_obj:
             json.dump(meta_info_dict, result_file_obj, indent=4, sort_keys=True)
-        save_npy_path = os.path.dirname(result_dump_path) + "/{}_attack_not_success_images.npy".format(arch_name)
-        if unsuccessful_images_list:
-            np.save(save_npy_path, all_unsuccessful_images)
         log.info("done, write stats info to {}".format(result_dump_path))
 
 
@@ -152,7 +160,7 @@ def main(args, arch):
         codec.cuda()
         decoder = codec.decoder
         args["img_resize"] = decoder.input_shape[1]
-        log.info("Using autoencoder, set the attack image size to:{}".format(args["img_resize"]))
+        log.info("Loading autoencoder: {}, set the attack image size to:{}".format(args["codec_path"], args["img_resize"]))
 
     # setup attack
     if args["attack_method"] == "zoo":
@@ -199,7 +207,6 @@ if __name__ == "__main__":
     parser.add_argument("-b", "--batch_size", type=int, default=None, help="the batch size for zoo, zoo_ae attack")
     parser.add_argument("-c", "--init_const", type=float, default=1, help="the initial setting of the constant lambda")
     parser.add_argument("-d", "--dataset", type=str, required=True, choices=["CIFAR-10", "CIFAR-100", "ImageNet", "MNIST", "FashionMNIST"])
-    parser.add_argument("-n", "--num_img", type=int, default=100, help="number of test images to attack")
     parser.add_argument("-m", "--max_iterations", type=int, default=None, help="set 0 to use the default value")
     parser.add_argument("-p", "--print_every", type=int, default=100,
                         help="print information every PRINT_EVERY iterations")
@@ -209,7 +216,7 @@ if __name__ == "__main__":
                         help="print objs every EARLY_STOP_ITER iterations, 0 is maxiter//10")
     parser.add_argument("--confidence", default=0, type=float, help="the attack confidence")
     parser.add_argument("--codec_path", default=None, type=str, help="the coedec path, load the default codec is not set")
-    parser.add_argument("--target_type", type=str, default="random",
+    parser.add_argument("--target_type", type=str, default="increment",  choices=['random', 'least_likely',"increment"],
                         help="if set, choose random target, otherwise attack every possible target class, only works when ATTACK_TYPE=targeted")
     parser.add_argument("--num_rand_vec", type=int, default=1,
                         help="the number of random vector for post success iteration")
@@ -217,6 +224,7 @@ if __name__ == "__main__":
                         help="the offset of the image index when getting attack data")
     parser.add_argument("--img_resize", default=None, type=int,
                         help="this option only works for ATTACK METHOD zoo and autozoom_bilin")
+    parser.add_argument("--epsilone", type=float, default=4.6, help="the maximum threshold of L2 constraint")
     parser.add_argument("--resize", default=None,type=int, help="this option only works for the preprocess resize of images")
     parser.add_argument("--switch_iterations", type=int, default=None,
                         help="the iteration number for dynamic switching")
@@ -227,9 +235,9 @@ if __name__ == "__main__":
     parser.add_argument('--exp_dir', default='logs', type=str,
                         help='directory to save results and logs')
     parser.add_argument('--seed', default=0, type=int, help='random seed')
-    parser.add_argument('--json-config', type=str,
+    parser.add_argument('--json-configures', type=str,
                         default='/home1/machen/meta_perturbations_black_box_attack/autozoom_attack_conf.json',
-                        help='a config file to be passed in instead of arguments')
+                        help='a configures file to be passed in instead of arguments')
     args = parser.parse_args()
     os.environ["CUDA_DEVICE_ORDER"] = "PCI_BUS_ID"
     os.environ['CUDA_VISIBLE_DEVICES'] = str(args.gpu)
@@ -249,7 +257,7 @@ if __name__ == "__main__":
         if args["attack_method"] == "zoo_ae" or args["attack_method"] == "autozoom_ae":
             log.info("Attack method {} cannot use option img_resize, arugment ignored".format(args["attack_method"]))
 
-    if args["attack_type"] == "targeted" and args["max_iterations"] < 50000:
+    if args["attack_type"] == "targeted" and args["max_iterations"] < 20000:
             args["max_iterations"] = 5 * args["max_iterations"]
 
     args["exp_dir"] = osp.join(args["exp_dir"], get_exp_dir_name(args['dataset'],  args['attack_method'],
@@ -260,7 +268,7 @@ if __name__ == "__main__":
     log.info('Command line is: {}'.format(' '.join(sys.argv)))
     log.info("Log file is written in {}".format(osp.join(args["exp_dir"], 'run.log')))
     log.info('Called with args:')
-    print_args(args)
+
     # setup random seed
     random.seed(args["seed"])
     np.random.seed(args["seed"])
@@ -290,6 +298,8 @@ if __name__ == "__main__":
                 if len(test_model_list_path) == 0:  # this arch does not exists in args.dataset
                     continue
                 archs.append(arch)
+        args["arch"] = ",".join(archs)
+    print_args(args)
     for arch in archs:
         main(args, arch)
 

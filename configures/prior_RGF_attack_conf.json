@@ -1,0 +1,18 @@
+
+{ "CIFAR-10": {
+    "dataprior": false
+},
+
+  "CIFAR-100": {
+    "dataprior": false
+  },
+  "MNIST": {
+       "dataprior": false
+  },
+    "FashionMNIST": {
+        "dataprior": false
+  },
+    "ImageNet": {
+       "dataprior": true
+    }
+}

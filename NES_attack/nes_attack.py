@@ -1,28 +1,35 @@
+import sys
+sys.path.append("/home1/machen/meta_perturbations_black_box_attack")
+import argparse
 import glob
+import json
 import os
 import random
-import sys
-from collections import defaultdict
 
-import argparse
+from collections import defaultdict
+from types import SimpleNamespace
+
 import glog as log
-import json
 import numpy as np
 import torch
 from torch.nn import functional as F
-from types import SimpleNamespace
-from config import CLASS_NUM, CIFAR_ALL_MODELS, PY_ROOT, IMAGENET_ALL_MODELS
-from dataset_loader_maker import DataLoaderMaker
+
+from config import CLASS_NUM, PY_ROOT, MODELS_TEST_STANDARD
 from dataset.model_constructor import StandardModel
+from dataset.dataset_loader_maker import DataLoaderMaker
+from utils.statistics_toolkit import success_rate_and_query_coorelation, success_rate_avg_query
 
 
 class NesAttacker(object):
-    def __init__(self, dataset_name, total_images, targeted):
+    def __init__(self, dataset_name, targeted):
         self.dataset_name = dataset_name
         self.num_classes = CLASS_NUM[self.dataset_name]
-        self.dataset_loader = DataLoaderMaker.get_img_label_data_loader(dataset_name, 1, False)
+        self.dataset_loader = DataLoaderMaker.get_test_attacked_data(dataset_name, 1)
         self.dataset = self.dataset_loader.dataset
-        self.total_images = total_images
+        log.info("label index dict data build begin")
+        self.label_data_index_dict = self.get_label_dataset(self.dataset)
+        log.info("label index dict data build over!")
+        self.total_images = len(self.dataset)
         self.targeted = targeted
         self.query_all = torch.zeros(self.total_images)
         self.correct_all = torch.zeros_like(self.query_all)  # number of images
@@ -31,13 +38,10 @@ class NesAttacker(object):
         self.success_query_all = torch.zeros_like(self.query_all)
         self.not_done_loss_all = torch.zeros_like(self.query_all)
         self.not_done_prob_all = torch.zeros_like(self.query_all)
-        log.info("label index dict build begin")
-        self.label_data_index_dict = self.get_label_dataset(self.dataset)
-        log.info("label index dict build over!")
 
     def get_label_dataset(self, dataset):
         label_index = defaultdict(list)
-        for index, (img, label) in enumerate(dataset):  # 保证这个data_loader没有shuffle过
+        for index, (*_, label) in enumerate(dataset):  # 保证这个data_loader没有shuffle过
             label_index[label].append(index)
         return label_index
 
@@ -60,7 +64,7 @@ class NesAttacker(object):
     def partial_info_loss(self, logits, noise, true_labels, target_labels, top_k):
         # logit 是融合了batch_size of noise 的, shape = (batch_size, num_classes)
         losses, noise = self.xent_loss(logits=logits,noise=noise, true_labels=true_labels, target_labels=target_labels, top_k=top_k)
-        vals, inds = torch.topk(logits, k=top_k, largest=True, sorted=True)
+        vals, inds = torch.topk(logits, dim=1, k=top_k, largest=True, sorted=True) # inds shape = (B, top_k)
         # inds is batch_size x k
         target_class = target_labels[0].item()  # 一个batch的target都是一样的
         good_image_inds = torch.sum(inds == target_class, dim=1).byte()    # shape = (batch_size,)
@@ -93,7 +97,9 @@ class NesAttacker(object):
             eval_points = x + sigma * noise  # 1,C,H,W + B, C, H, W = B,C,H,W
             logits = target_model(eval_points)  # B, num_classes
             # losses shape = (batch_size,)
-            loss, noise = loss_fn(logits, noise, true_labels, target_labels.repeat(batch_size), top_k)  # true_labels and target_labels have already repeated for batch_size
+            if target_labels is not None:
+                target_labels = target_labels.repeat(batch_size)
+            loss, noise = loss_fn(logits, noise, true_labels, target_labels, top_k)  # true_labels and target_labels have already repeated for batch_size
             loss = loss.view(-1,1,1,1) # shape = (B,1,1,1)
             grad = torch.mean(loss * noise, dim=0, keepdim=True)/sigma # loss shape = (B,1,1,1) * (B,C,H,W), then mean axis= 0 ==> (1,C,H,W)
             losses.append(loss.mean())
@@ -104,25 +110,42 @@ class NesAttacker(object):
 
     def attack_all_images(self, args, arch_name, target_model, result_dump_path):
         attack_unsuccessful_images = []
-        for batch_idx, (images, true_labels) in enumerate(self.dataset_loader):
-            if batch_idx >= self.total_images:
-                break
+        attack_unsuccessful_labels = []
+        attack_unsuccessful_targets = []
+        has_unsuccessful_images = False
+
+        for batch_idx, data_tuple in enumerate(self.dataset_loader):
+            # if batch_idx >= self.total_images:
+            #     break
+            if self.dataset_name == "ImageNet":
+                if target_model.input_size[-1]>=299:
+                    images, true_labels = data_tuple[1],data_tuple[2]
+                else:
+                    images, true_labels = data_tuple[0],data_tuple[2]
+            else:
+                images, true_labels = data_tuple[0], data_tuple[1]
+            if images.size(-1) != target_model.input_size[-1]:
+                images = F.interpolate(images, size=target_model.input_size[-1], mode='bilinear')
             if args.targeted:
                 if args.target_type == 'random':
                     target_labels = torch.randint(low=0, high=CLASS_NUM[args.dataset],
                                                   size=true_labels.size()).long().cuda()
+                    invalid_target_index = target_labels.eq(true_labels)
+                    while invalid_target_index.sum().item() > 0:
+                        target_labels[invalid_target_index] = torch.randint(low=0, high=logit.shape[1],
+                                                                            size=target_labels[
+                                                                                invalid_target_index].shape).long().cuda()
+                        invalid_target_index = target_labels.eq(true_labels)
                 elif args.target_type == 'least_likely':
                     with torch.no_grad():
                         logit = target_model(images)
                     target_labels = logit.argmin(dim=1)
+                elif args.target_type == "increment":
+                    target_labels = torch.fmod(true_labels + 1, CLASS_NUM[args.dataset]).cuda()
             else:
                 target_labels = None
-
-            attack_success = self.make_adversarial_examples(batch_idx, images.cuda(), true_labels.cuda(), target_labels, args, target_model)
-            if not attack_success:
-                attack_unsuccessful_images.append(images)
-        if attack_unsuccessful_images:
-            attack_unsuccessful_images = torch.cat(attack_unsuccessful_images, 0).detach().cpu().numpy()
+            with torch.no_grad():
+                self.make_adversarial_examples(batch_idx, images.cuda(), true_labels.cuda(), target_labels, args, target_model)
 
         log.info('{} is attacked finished ({} images)'.format(arch_name, self.total_images))
         log.info('        avg correct: {:.4f}'.format(self.correct_all.mean().item()))
@@ -135,18 +158,26 @@ class NesAttacker(object):
             log.info('  avg not_done_loss: {:.4f}'.format(self.not_done_loss_all[self.not_done_all.byte()].mean().item()))
             log.info('  avg not_done_prob: {:.4f}'.format(self.not_done_prob_all[self.not_done_all.byte()].mean().item()))
         log.info('Saving results to {}'.format(result_dump_path))
+        query_all_ = self.query_all.detach().cpu().numpy().astype(np.int32)
+        not_done_all_ = self.not_done_all.detach().cpu().numpy().astype(np.int32)
+        query_threshold_success_rate, query_success_rate = success_rate_and_query_coorelation(query_all_, not_done_all_)
+        success_rate_to_avg_query = success_rate_avg_query(query_all_, not_done_all_)
+
         meta_info_dict = {"avg_correct": self.correct_all.mean().item(), "avg_not_done": self.not_done_all.mean().item(),
                           "mean_query": self.success_query_all[self.success_all.byte()].mean().item(),
                           "median_query": self.success_query_all[self.success_all.byte()].median().item(),
                           "max_query": self.success_query_all[self.success_all.byte()].max().item(),
+                          "correct_all": self.correct_all.detach().cpu().numpy().astype(np.int32).tolist(),
+                          "not_done_all": self.not_done_all.detach().cpu().numpy().astype(np.int32).tolist(),
+                          "query_all": self.query_all.detach().cpu().numpy().astype(np.int32).tolist(),
+                          "query_threshold_success_rate_dict": query_threshold_success_rate,
+                          "success_rate_to_avg_query": success_rate_to_avg_query,
+                          "query_success_rate_dict": query_success_rate,
                           "not_done_loss": self.not_done_loss_all[self.not_done_all.byte()].mean().item(),
-                          "not_done_prob": self.not_done_prob_all[self.not_done_all.byte()].mean().item()}
-        meta_info_dict['args'] = vars(args)
+                          "not_done_prob": self.not_done_prob_all[self.not_done_all.byte()].mean().item(),
+                          'args': vars(args)}
         with open(result_dump_path, "w") as result_file_obj:
-            json.dump(meta_info_dict, result_file_obj, indent=4, sort_keys=True)
-        save_npy_path = os.path.dirname(result_dump_path) + "/{}_attack_not_success_images.npy".format(arch_name)
-        if attack_unsuccessful_images:
-            np.save(save_npy_path, attack_unsuccessful_images)
+            json.dump(meta_info_dict, result_file_obj,  sort_keys=True)
         log.info("done, write stats info to {}".format(result_dump_path))
 
 
@@ -209,20 +240,30 @@ class NesAttacker(object):
         last_ls = []
         true_labels = true_labels.repeat(batch_size)  # for noise sampling points
         queries_per_iter = args.samples_per_draw
-        max_iters = int(np.ceil(args.max_queries // queries_per_iter))
+        max_iters = int(np.ceil(args.max_queries / queries_per_iter))
 
         loss_fn = self.partial_info_loss if k < self.num_classes else self.xent_loss  # 若非paritial_information模式，k = num_classes
         image_step = self.l2_image_step if args.norm == 'l2' else self.linf_step
         proj_maker = self.l2_proj if args.norm == 'l2' else self.linf_proj  # 调用proj_maker返回的是一个函数
         proj_step = proj_maker(images, args.epsilon)
+        if not not_done.byte().any() and epsilon <= goal_epsilon:  # the case the original image is classified incorrectly
+            with torch.no_grad():
+                adv_logit = target_model(adv_images)
+            adv_pred = adv_logit.argmax(dim=1)  # shape = (1, )
+            adv_prob = F.softmax(adv_logit, dim=1)
+            adv_loss, _ = loss_fn(adv_logit, None, true_labels[0].unsqueeze(0), target_labels, top_k=k)
+            success = (1 - not_done) * correct  # correct = 0 and 1-not_done = 1 --> success = 0
+            success_query = success * query
+            not_done_loss = adv_loss * not_done
+            not_done_prob = adv_prob[0, true_labels[0].item()] * not_done
 
         for step_index in range(max_iters):
             # CHECK IF WE SHOULD STOP
             if not not_done.byte().any() and epsilon <= goal_epsilon:  # all success
-                attack_success = True
+                log.info("Attack success on {}-th image".format(batch_index))
                 break
 
-            prev_g = g
+            prev_g = g.clone()
             l, g = self.get_grad(adv_images, args.sigma, samples_per_draw, batch_size, true_labels, target_labels,
                                  target_model, loss_fn, k)
             query += samples_per_draw * not_done
@@ -266,7 +307,7 @@ class NesAttacker(object):
                     if prop_de < 2e-3:
                         prop_de = 0
                     current_lr = max_lr
-                    log.info("[log] backtracking eps to {:.3f}".format(epsilon-prop_de))
+                    log.info("[log] backtracking eps to {:.3f}".format(epsilon - prop_de))
 
             with torch.no_grad():
                 adv_logit = target_model(adv_images)
@@ -294,23 +335,19 @@ class NesAttacker(object):
             # if not_done.sum().item() > 0:
             #     log.info('  not_done_loss: {:.4f}'.format(not_done_loss[not_done.byte()].mean().item()))
             #     log.info('  not_done_prob: {:.4f}'.format(not_done_prob[not_done.byte()].mean().item()))
-
-
-        else:
-            attack_success = False
+            if target_labels is not None:
+                not_success_targets = target_labels[not_done.byte()].detach().cpu()
         for key in ['query', 'correct',  'not_done',
                     'success', 'success_query', 'not_done_loss', 'not_done_prob']:
             value_all = getattr(self, key+"_all")
             value = eval(key)
             value_all[selected] = value.detach().float().cpu()  # 由于value_all是全部图片都放在一个数组里，当前batch选择出来
-        return attack_success
-
 
 def get_exp_dir_name(dataset, norm, targeted, target_type):
     from datetime import datetime
-    dirname = datetime.now().strftime('%Y_%m_%d_%H_%M_%S')
+    # dirname = datetime.now().strftime('%Y_%m_%d_%H_%M_%S')
     target_str = "untargeted" if not targeted else "targeted_{}".format(target_type)
-    dirname = 'NES-attack-{}-{}-{}-'.format(dataset, norm, target_str) + dirname
+    dirname = 'NES-attack-{}-{}-{}'.format(dataset, norm, target_str)
     return dirname
 
 
@@ -333,15 +370,10 @@ if __name__ == "__main__":
     parser.add_argument("--gpu", type=int, required=True)
     parser.add_argument('--samples-per-draw', type=int, default=50)
     parser.add_argument('--batch-size', type=int, default=50)
-    parser.add_argument('--target-class', type=int, help='negative => untargeted')
-    parser.add_argument('--orig-class', type=int)
     parser.add_argument('--sigma', type=float, default=1e-3)
-    parser.add_argument('--epsilon', type=float, default=0.05)
+    parser.add_argument('--epsilon', type=float, default=None)
     parser.add_argument('--lr', type=float, default=1e-2)
-    parser.add_argument('--img-path', type=str)
-    parser.add_argument('--img-index', type=int)
     parser.add_argument('--log-iters', type=int, default=1)
-    parser.add_argument('--restore', type=str, help='restore path of img')
     parser.add_argument('--momentum', type=float, default=0.9)
     parser.add_argument('--max-queries', type=int, default=10000)
     parser.add_argument('--save-iters', type=int, default=50)
@@ -361,66 +393,79 @@ if __name__ == "__main__":
     parser.add_argument('--zero-iters', type=int, default=100, help="how many points to use for the proxy score, which is still on developing")
     parser.add_argument('--label-only-sigma', type=float, default=1e-3, help="distribution width for proxy score, which is still on developing")
 
-    parser.add_argument('--starting-eps', type=float, default=1.0)
-    parser.add_argument('--starting-delta-eps', type=float, default=0.5)
+    parser.add_argument('--starting-eps', type=float, default=None)
+    parser.add_argument('--starting-delta-eps', type=float, default=None)
     parser.add_argument('--min-delta-eps', type=float, default=0.1)
     parser.add_argument('--conservative', type=int, default=2,
                         help="How conservative we should be in epsilon decay; increase if no convergence")
     parser.add_argument('--exp-dir', default='logs', type=str,
                         help='directory to save results and logs')
     parser.add_argument('--dataset', type=str, required=True,
-                        choices=['CIFAR-10', 'ImageNet', "FashionMNIST", "MNIST", "TinyImageNet"],help='which dataset to use')
-    parser.add_argument('--norm', type=str, default="linf", choices=["linf","l2"], help='Which lp constraint to update image [linf|l2]')
-    parser.add_argument('--arch', default='', type=str, help='network architecture')
-    parser.add_argument('--test-archs', action="store_true")
+                        choices=['CIFAR-10','CIFAR-100', 'ImageNet', "FashionMNIST", "MNIST", "TinyImageNet"],help='which dataset to use')
+    parser.add_argument('--norm', type=str, required=True, choices=["linf","l2"], help='Which lp constraint to update image [linf|l2]')
+    parser.add_argument('--arch', default=None, type=str, help='network architecture')
+    parser.add_argument('--test_archs', action="store_true")
     parser.add_argument('--targeted', action="store_true")
-    parser.add_argument('--target_type', type=str, default='random', choices=["random", "least_likely"])
-    parser.add_argument("--total-images", type=int, default=1000)
+    parser.add_argument('--target_type', type=str, default='increment', choices=["random", "least_likely","increment"])
+    parser.add_argument('--json_config', type=str,
+                        default='/home1/machen/meta_perturbations_black_box_attack/configures/NES_attack_conf.json',
+                        help='a configures file to be passed in instead of arguments')
+    # parser.add_argument("--total-images", type=int, default=1000)
     parser.add_argument('--seed', default=0, type=int, help='random seed')
     args = parser.parse_args()
     os.environ["CUDA_DEVICE_ORDER"] = "PCI_BUS_ID"
     os.environ['CUDA_VISIBLE_DEVICES'] = str(args.gpu)
     os.environ['CUDA_VISIBLE_DEVICE'] = str(args.gpu)
-
+    json_conf = json.load(open(args.json_config))[args.dataset][args.norm]
+    args = vars(args)
+    json_conf = {k: v for k, v in json_conf.items() if k not in args or args[k] is None}
+    args.update(json_conf)
+    args = SimpleNamespace(**args)
     if args.targeted:
-        args.max_queries = 50000
+        if args.dataset == "ImageNet":
+            args.max_queries = 50000
     args.exp_dir = os.path.join(args.exp_dir, get_exp_dir_name(args.dataset, args.norm, args.targeted, args.target_type))  # 随机产生一个目录用于实验
     os.makedirs(args.exp_dir, exist_ok=True)
     set_log_file(os.path.join(args.exp_dir, 'run.log'))
     DataLoaderMaker.setup_seed(args.seed)
-    archs = [args.arch]
+    archs = []
+    dataset = args.dataset
     if args.test_archs:
-        archs = []
-        if args.dataset == "CIFAR-10" or args.dataset == "CIFAR-100":
-            for arch in CIFAR_ALL_MODELS:
+        if dataset == "CIFAR-10" or dataset == "CIFAR-100":
+            for arch in MODELS_TEST_STANDARD[dataset]:
                 test_model_path = "{}/train_pytorch_model/real_image_model/{}-pretrained/{}/checkpoint.pth.tar".format(
                     PY_ROOT,
-                    args.dataset, arch)
+                    dataset, arch)
                 if os.path.exists(test_model_path):
                     archs.append(arch)
                 else:
                     log.info(test_model_path + " does not exists!")
         else:
-            for arch in IMAGENET_ALL_MODELS:
-                test_model_list_path = "{}/train_pytorch_model/real_image_model/{}-pretrained/checkpoints/{}*.pth.tar".format(
+            for arch in MODELS_TEST_STANDARD[dataset]:
+                test_model_list_path = "{}/train_pytorch_model/real_image_model/{}-pretrained/checkpoints/{}*.pth".format(
                     PY_ROOT,
-                    args.dataset, arch)
+                    dataset, arch)
                 test_model_list_path = list(glob.glob(test_model_list_path))
                 if len(test_model_list_path) == 0:  # this arch does not exists in args.dataset
                     continue
                 archs.append(arch)
+        args.arch = ",".join(archs)
+    else:
+        archs.append(args.arch)
     args.arch = ", ".join(archs)
     log.info('Command line is: {}'.format(' '.join(sys.argv)))
     log.info("using GPU {}".format(args.gpu))
     log.info("Log file is written in {}".format(os.path.join(args.exp_dir, 'run.log')))
     log.info('Called with args:')
     print_args(args)
-    attacker = NesAttacker(args.dataset, args.total_images, args.targeted)
+    attacker = NesAttacker(args.dataset,  args.targeted)
     for arch in archs:
+        save_result_path = args.exp_dir + "/{}_result.json".format(arch)
+        if os.path.exists(save_result_path):
+            continue
         model = StandardModel(args.dataset, arch, no_grad=True)
         model.cuda()
         model.eval()
-        save_result_path = args.exp_dir + "/{}_result.json".format(arch)
         log.info("Begin attack {} on {}, result will be saved to {}".format(arch, args.dataset, save_result_path))
         attacker.attack_all_images(args, arch, model, save_result_path)
         model.cpu()

@@ -9,7 +9,7 @@ import os
 import os.path as osp
 import numpy as np
 from cifar_models_myself import *
-from config import IMAGE_SIZE, PY_ROOT, MODELS_TRAIN_STANDARD, ALL_MODELS, MODELS_TEST, IMAGE_DATA_ROOT, CLASS_NUM, \
+from config import IMAGE_SIZE, PY_ROOT, MODELS_TRAIN_STANDARD, IMAGE_DATA_ROOT, CLASS_NUM, \
     MODELS_TEST_STANDARD
 import glog as log
 from dataset.model_constructor import StandardModel
@@ -147,7 +147,7 @@ if __name__ == "__main__":
         images.requires_grad_()
         logits = model(images)
         assert logits.size(1) == CLASS_NUM[dataset]
-        loss = negative_cw_loss(logits,labels).mean()
+        loss = negative_cw_loss(logits, labels).mean()
         model.zero_grad()
         loss.backward()
         grad_image = images.grad

@@ -1,5 +1,8 @@
 import glob
 import sys
+
+from utils.statistics_toolkit import success_rate_and_query_coorelation, success_rate_avg_query
+
 sys.path.append("/home1/machen/meta_perturbations_black_box_attack")
 import argparse
 import json
@@ -12,7 +15,7 @@ import glog as log
 import numpy as np
 import torch
 from torch.nn import functional as F
-from config import CLASS_NUM, PY_ROOT, CIFAR_ALL_MODELS, IMAGENET_ALL_MODELS, IN_CHANNELS, MODELS_TEST_STANDARD
+from config import CLASS_NUM, PY_ROOT, IN_CHANNELS, MODELS_TEST_STANDARD
 from dataset.dataset_loader_maker import DataLoaderMaker
 from torch import nn
 from meta_grad_regression_auto_encoder.network.autoencoder import AutoEncoder
@@ -21,7 +24,7 @@ from optimizer.radam import RAdam
 
 class MetaNESGradAttack(object):
     def __init__(self, auto_encoder, args):
-        self.dataset_loader = DataLoaderMaker.get_img_label_data_loader(args.dataset, args.batch_size, False)
+        self.dataset_loader = DataLoaderMaker.get_test_attacked_data(args.dataset, args.batch_size)
         self.total_images = args.total_images
         self.query_all = torch.zeros(self.total_images)
         self.correct_all = torch.zeros_like(self.query_all)  # number of images
@@ -128,20 +131,25 @@ class MetaNESGradAttack(object):
         if args.targeted:
             if args.target_type == 'random':
                 target_labels = torch.randint(low=0, high=CLASS_NUM[args.dataset], size=true_labels.size()).long().cuda()
+                invalid_target_index = target_labels.eq(true_labels)
+                while invalid_target_index.sum().item() > 0:
+                    target_labels[invalid_target_index] = torch.randint(low=0, high=logit.shape[1],
+                                                                        size=target_labels[
+                                                                            invalid_target_index].shape).long().cuda()
+                    invalid_target_index = target_labels.eq(true_labels)
             elif args.target_type == 'least_likely':
                 target_labels = logit.argmin(dim=1)
-            invalid_target_index = target_labels.eq(true_labels)
-            while invalid_target_index.sum().item() > 0:
-                target_labels[invalid_target_index] = torch.randint(low=0, high=logit.shape[1],
-                                                             size=target_labels[invalid_target_index].shape).long().cuda()
-                invalid_target_index = target_labels.eq(true_labels)
+            elif args.target_type == "increment":
+                target_labels = torch.fmod(true_labels + 1, CLASS_NUM[args.dataset])
+            else:
+                raise NotImplementedError('Unknown target_type: {}'.format(args.target_type))
+
         else:
             target_labels = None
         proj_maker = self.l2_proj if args.norm == 'l2' else self.linf_proj  # 调用proj_maker返回的是一个函数
         proj_step = proj_maker(images, args.epsilon)
         # Loss function
         adv_images = images.clone()
-        not_success_images = None
         query_count = 0
         t = 0
         while query_count <= args.max_queries:
@@ -196,8 +204,6 @@ class MetaNESGradAttack(object):
 
             if not not_done.byte().any(): # all success
                 break
-        else:
-            not_success_images = images[not_done.byte()].detach().cpu()
 
         for key in ['query', 'correct',  'not_done',
                     'success', 'success_query', 'not_done_loss', 'not_done_prob']:
@@ -205,22 +211,19 @@ class MetaNESGradAttack(object):
             value = eval(key)
             value_all[selected] = value.detach().float().cpu()  # 由于value_all是全部图片都放在一个数组里，当前batch选择出来
 
-        return not_success_images
 
     def attack_all_images(self, args, arch_name, target_model, result_dump_path):
-
-        not_success_images_list = []
         batch_size = args.batch_size
         for batch_idx, (images, true_labels) in enumerate(self.dataset_loader):
             if batch_idx * batch_size >= self.total_images:
                 break
             batch_size = images.size(0)
-            not_success_images = self.make_adversarial_examples(batch_idx, images.cuda(), true_labels.cuda(), args, target_model)
-            if not_success_images is not None:
-                not_success_images_list.append(not_success_images)
-        if not_success_images_list:
-            all_not_success_images = torch.cat(not_success_images_list, 0).detach().cpu().numpy()
+            self.make_adversarial_examples(batch_idx, images.cuda(), true_labels.cuda(), args, target_model)
 
+        query_all_ = self.query_all.detach().cpu().numpy().astype(np.int32)
+        not_done_all_ = self.not_done_all.detach().cpu().numpy().astype(np.int32)
+        query_threshold_success_rate, query_success_rate = success_rate_and_query_coorelation(query_all_, not_done_all_)
+        success_rate_to_avg_query = success_rate_avg_query(query_all_, not_done_all_)
         log.info('{} is attacked finished ({} images)'.format(arch_name, self.total_images))
         log.info('        avg correct: {:.4f}'.format(self.correct_all.mean().item()))
         log.info('       avg not_done: {:.4f}'.format(self.not_done_all.mean().item()))  # 有多少图没做完
@@ -237,14 +240,17 @@ class MetaNESGradAttack(object):
                           "mean_query": self.success_query_all[self.success_all.byte()].mean().item(),
                           "median_query": self.success_query_all[self.success_all.byte()].median().item(),
                           "max_query": self.success_query_all[self.success_all.byte()].max().item(),
+                          "correct_all": self.correct_all.detach().cpu().numpy().tolist(),
+                          "not_done_all": self.not_done_all.detach().cpu().numpy().tolist(),
+                          "query_all": self.query_all.detach().cpu().numpy().tolist(),
+                          "query_threshold_success_rate_dict": query_threshold_success_rate,
+                          "query_success_rate_dict": query_success_rate,
+                          "success_rate_to_avg_query": success_rate_to_avg_query,
                           "not_done_loss": self.not_done_loss_all[self.not_done_all.byte()].mean().item(),
-                          "not_done_prob": self.not_done_prob_all[self.not_done_all.byte()].mean().item()}
-        meta_info_dict['args'] = vars(args)
+                          "not_done_prob": self.not_done_prob_all[self.not_done_all.byte()].mean().item(),
+                          "args":vars(args)}
         with open(result_dump_path, "w") as result_file_obj:
-            json.dump(meta_info_dict, result_file_obj, indent=4, sort_keys=True)
-        save_npy_path = os.path.dirname(result_dump_path) + "/{}_attack_not_success_images.npy".format(arch)
-        if not_success_images_list:
-            np.save(save_npy_path, all_not_success_images)
+            json.dump(meta_info_dict, result_file_obj, sort_keys=True)
         log.info("done, write stats info to {}".format(result_dump_path))
 
 def get_exp_dir_name(dataset, method, norm, targeted, target_type):
@@ -282,9 +288,9 @@ if __name__ == "__main__":
                         help='\delta, parameterizes the exploration to be done around the prior')
     parser.add_argument("--meta-interval", type=int, required=True)
     parser.add_argument("--samples-per-draw", type=int, default=50)
-    parser.add_argument('--json-config', type=str,
+    parser.add_argument('--json-configures', type=str,
                         default='/home1/machen/meta_perturbations_black_box_attack/meta_gradient_attack_conf.json',
-                        help='a config file to be passed in instead of arguments')
+                        help='a configures file to be passed in instead of arguments')
     parser.add_argument('--epsilon', type=float, help='the lp perturbation bound')
     parser.add_argument('--batch-size', type=int, help='batch size for bandits')
     parser.add_argument('--dataset', type=str, required=True,
@@ -294,7 +300,7 @@ if __name__ == "__main__":
     parser.add_argument('--test-archs', action="store_true")
     parser.add_argument("--total-images",type=int)
     parser.add_argument('--targeted', action="store_true")
-    parser.add_argument('--target_type',type=str, default='random', choices=["random", "least_likely"])
+    parser.add_argument('--target_type',type=str, default='increment', choices=["random", "least_likely","increment"])
     parser.add_argument("--confidence", default=0, type=float, help="the attack confidence")
     parser.add_argument('--exp-dir', default='logs', type=str,
                         help='directory to save results and logs')
@@ -316,7 +322,7 @@ if __name__ == "__main__":
         args = SimpleNamespace(**defaults)
 
     if args.targeted:
-        args.max_queries = 50000
+        args.max_queries = 20000
     args.exp_dir = osp.join(args.exp_dir, get_exp_dir_name(args.dataset, args.method, args.norm, args.targeted, args.target_type))  # 随机产生一个目录用于实验
     os.makedirs(args.exp_dir, exist_ok=True)
     set_log_file(osp.join(args.exp_dir, 'run.log'))
@@ -333,13 +339,15 @@ if __name__ == "__main__":
                 test_model_path = "{}/train_pytorch_model/real_image_model/{}-pretrained/{}/checkpoint.pth.tar".format(
                     PY_ROOT,
                     args.dataset, arch)
+                if os.path.exists(test_model_path):
+                    archs.append(arch)
             elif args.dataset == "ImageNet":
                 test_model_list_path = "{}/train_pytorch_model/real_image_model/{}-pretrained/checkpoints/{}-*.pth.tar".format(
                     PY_ROOT,
                     args.dataset, arch)
                 test_model_path = list(glob.glob(test_model_list_path))
-            if test_model_path and os.path.exists(test_model_path):
-                archs.append(arch)
+                if test_model_path and os.path.exists(test_model_path[0]):
+                    archs.append(arch)
     args.arch = ", ".join(archs)
     log.info('Command line is: {}'.format(' '.join(sys.argv)))
     log.info("Log file is written in {}".format(osp.join(args.exp_dir, 'run.log')))

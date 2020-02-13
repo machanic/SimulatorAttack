@@ -80,12 +80,14 @@ class Codec(nn.Module):
             self.decoder.append(nn.UpsamplingBilinear2d(img_size))
         self.decoder.append(nn.Conv2d(16, in_channels, 3, stride=1, padding=1))
         self.decoder.output_shape = (working_img_size, working_img_size)
+        assert working_img_size == img_size if resize is None else resize
         self.encoder.forward = self.forward_encoder
         self.decoder.forward = self.forward_decoder
 
     def forward(self, x):
         for idx, m in enumerate(self.encoder):
             x = m(x)
+        assert x.size(-1) == self.encoder.output_shape[-1]
         for idx, m in enumerate(self.decoder):
             x = m(x)
         return x

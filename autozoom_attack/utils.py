@@ -83,9 +83,9 @@ def load_codec(codec_prefix, print_summary=False):
     _, encode_H, encode_W, numChannels = encoder.output_shape
 
     # the workaround
-    # use config to construct the decoder model
+    # use configures to construct the decoder model
     # and then load the weights for each layer
-    # Note that the information in config[0::] is the sequential model for encoder
+    # Note that the information in configures[0::] is the sequential model for encoder
     # thus, we need to exclude the first element
 
     config = decoder_temp.get_config()

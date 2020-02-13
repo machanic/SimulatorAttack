@@ -602,8 +602,8 @@ if __name__ == '__main__':
     log.info('Called with args:')
     print_args()
 
-    # dump config.json
-    with open(osp.join(args.exp_dir, 'config.json'), 'w') as f:
+    # dump configures.json
+    with open(osp.join(args.exp_dir, 'configures.json'), 'w') as f:
         json.dump(vars(args), f, sort_keys=True, indent=4)
 
     # 2. make global variables

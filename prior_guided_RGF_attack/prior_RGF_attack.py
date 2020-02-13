@@ -1,35 +1,38 @@
-import glob
-import os
-import random
 import sys
-import numpy as np
+sys.path.append("/home1/machen/meta_perturbations_black_box_attack")
 import argparse
+import glob
+import json
+import os
+
+from types import SimpleNamespace
+
 import glog as log
-from torchvision.transforms import transforms
-
-from config import IMAGE_SIZE, IN_CHANNELS, PY_ROOT
+import numpy as np
 import torch
-from torch.nn import functional as F
 from torch import nn
+from torch.nn import functional as F
 
-from dataset_loader_maker import DataLoaderMaker
-from model_constructor import MetaLearnerModelBuilder
+from config import IMAGE_SIZE, IN_CHANNELS, PY_ROOT, MODELS_TEST_STANDARD
+from dataset.dataset_loader_maker import DataLoaderMaker
+from dataset.model_constructor import StandardModel
+from utils.statistics_toolkit import success_rate_and_query_coorelation, success_rate_avg_query
+
 
 class PriorRGFAttack(object):
     # 目前只能一张图一张图做对抗样本
-    def __init__(self, dataset_name, model, surrogate_model):
+    def __init__(self, dataset_name, model, surrogate_model, targeted, target_type):
         self.dataset_name = dataset_name
+        self.data_loader = DataLoaderMaker.get_test_attacked_data(args.dataset, 1)
         self.image_height = IMAGE_SIZE[self.dataset_name][0]
         self.image_width =IMAGE_SIZE[self.dataset_name][1]
         self.in_channels = IN_CHANNELS[self.dataset_name]
         self.model = model
         self.surrogate_model = surrogate_model
-        self.model.eval()
-        self.surrogate_model.eval()
-        self.targeted = False # only support untargeted attack now
-        self.normalize = transforms.Normalize(mean=[0.485, 0.456, 0.406],
-                                     std=[0.229, 0.224, 0.225])
-
+        self.model.cuda().eval()
+        self.surrogate_model.cuda().eval()
+        self.targeted = targeted # only support untargeted attack now
+        self.target_type = target_type
         self.clip_min = 0.0
         self.clip_max = 1.0
 
@@ -53,67 +56,82 @@ class PriorRGFAttack(object):
             logits = model(x)
         return logits.max(1)[1]
 
-    def normalized_image(self, x):
-        x_copy = x.clone()
-        x_copy = torch.stack([self.normalize(x_copy[i]) for i in range(x.size(0))])
-        return x_copy
 
-    def attack_dataset(self, args, dataset_loader):
-        if args.norm == 'l2':
-            epsilon = 1e-3
-            eps = np.sqrt(epsilon * self.image_height * self.image_width * 3)
-            learning_rate = 2.0 / 299 / 1.7320508
-        else:
-            epsilon = 0.05
-            eps= epsilon
-            learning_rate = 0.005
+    def attack_dataset(self, args, arch, result_dump_path):
+
         success = 0
         queries = []
+        not_done = []
+        correct_all = []
         total = 0
-        for batch_idx, (image_id, images, true_labels) in enumerate(dataset_loader):
-            if batch_idx * args.batch_size >= args.number_images:
-                break
+        for batch_idx, data_tuple in enumerate(self.data_loader):
+            if args.dataset == "ImageNet":
+                if self.model.input_size[-1] >= 299:
+                    images, true_labels = data_tuple[1], data_tuple[2]
+                else:
+                    images, true_labels = data_tuple[0], data_tuple[2]
+            else:
+                images, true_labels = data_tuple[0], data_tuple[1]
+
+            if images.size(-1) != self.model.input_size[-1]:
+                images = F.interpolate(images, size=self.model.input_size[-1], mode='bilinear')
+            self.image_height = images.size(2)
+            self.image_width = images.size(3)
+
+            if args.norm == 'l2':
+                # epsilon = 1e-3
+                # eps = np.sqrt(epsilon * model.input_size[-1] * model.input_size[-1] * self.in_channels)  # 1.752
+                eps = 4.6
+                learning_rate = 2.0 / np.sqrt(self.image_height * self.image_width * self.in_channels)
+            else:
+                epsilon = 0.031372
+                if args.dataset == "ImageNet":
+                    epsilon = 0.05
+                eps = epsilon
+                learning_rate = 0.005
+
             images = images.cuda()
             true_labels = true_labels.cuda()
+
+            with torch.no_grad():
+                logits = self.model(images)
+                pred = logits.argmax(dim=1)
+                correct = pred.eq(true_labels).detach().cpu().numpy().astype(np.int32)
+                correct_all.append(correct)
+                if correct[0].item() == 0:
+                    queries.append(0)
+                    not_done.append(0)  # 原本就分类错了，not_done = 0
+                    log.info("The {}-th image is already classified incorrectly.")
+                    continue
+
+
             total += images.size(0)
             sigma = args.sigma
             np.random.seed(0)
             torch.manual_seed(0)
             torch.cuda.manual_seed(0)
-            adv_images = images.clone()
+            adv_images = images.clone().cuda()
             assert images.size(0) == 1
-            if self.dataset_name == "ImageNet":
-                logits_real_images = self.model(self.normalized_image(images))
-            else:
-                logits_real_images = self.model(images)
+            logits_real_images = self.model(images)
             l = self.xent_loss(logits_real_images, true_labels)  # 按照元素论文来写的，好奇怪
-            lr = learning_rate
+            lr = float(learning_rate)
             total_q = 0
             ite = 0
             while total_q <= args.max_queries:
                 total_q += 1
-                if self.dataset_name == "ImageNet":
-                    true = torch.squeeze(self.get_grad(self.model, self.normalized_image(adv_images), true_labels))  # C,H,W
-                else:
-                    true = torch.squeeze(self.get_grad(self.model, adv_images, true_labels))  # C,H,W
+                true = torch.squeeze(self.get_grad(self.model, adv_images, true_labels))  # C,H,W
                 log.info("Grad norm : {:.3f}".format(torch.sqrt(torch.sum(true * true)).item()))
 
                 if ite % 2 == 0 and sigma != args.sigma:
                     log.info("checking if sigma could be set to be 1e-4")
                     rand = torch.randn_like(adv_images)
                     rand = torch.div(rand, torch.clamp(torch.sqrt(torch.mean(torch.mul(rand, rand))), min=1e-12))
-                    if self.dataset_name == "ImageNet":
-                        logits_1 = self.model(self.normalized_image(adv_images + args.sigma * rand))
-                    else:
-                        logits_1 = self.model(adv_images + args.sigma * rand)
+                    logits_1 = self.model(adv_images + args.sigma * rand)
                     rand_loss = self.xent_loss(logits_1, true_labels)  # shape = (batch_size,)
                     total_q += 1
                     rand =  torch.randn_like(adv_images)
                     rand = torch.div(rand, torch.clamp(torch.sqrt(torch.mean(torch.mul(rand, rand))), min=1e-12))
-                    if self.dataset_name == "ImageNet":
-                        logits_2 = self.model(self.normalized_image(adv_images + args.sigma * rand))
-                    else:
-                        logits_2 = self.model(adv_images + args.sigma * rand)
+                    logits_2 = self.model(adv_images + args.sigma * rand)
                     rand_loss2= self.xent_loss(logits_2, true_labels) # shape = (batch_size,)
                     total_q += 1
                     if (rand_loss - l)[0].item() != 0 and (rand_loss2 - l)[0].item() != 0:
@@ -121,10 +139,7 @@ class PriorRGFAttack(object):
                         log.info("set sigma back to 1e-4, sigma={:.4f}".format(sigma))
 
                 if args.method != "uniform":
-                    if self.dataset_name == "ImageNet":
-                        prior = torch.squeeze(self.get_grad(self.surrogate_model, self.normalized_image(adv_images), true_labels))  # C,H,W
-                    else:
-                        prior = torch.squeeze(self.get_grad(self.surrogate_model, adv_images, true_labels))  # C,H,W
+                    prior = torch.squeeze(self.get_grad(self.surrogate_model, adv_images, true_labels))  # C,H,W
                     alpha = torch.sum(true * prior) / torch.clamp(torch.sqrt(torch.sum(true * true) * torch.sum(prior * prior)), min=1e-12)
                     log.info("alpha = {:.3}".format(alpha))
                     prior = prior / torch.clamp(torch.sqrt(torch.mean(torch.mul(prior, prior))),min=1e-12)
@@ -142,17 +157,11 @@ class PriorRGFAttack(object):
                         eval_points =  adv_images + sigma * pert # broadcast, because tensor shape doesn't match exactly
                         # eval_points shape = (10,C,H,W) reshape to (10*1, C, H, W)
                         eval_points = eval_points.view(-1, adv_images.size(1), adv_images.size(2), adv_images.size(3))
-                        if self.dataset_name == "ImageNet":
-                            losses = self.xent_loss(self.model(self.normalized_image(eval_points)), true_labels.repeat(s))  # shape = (10*B,)
-                        else:
-                            losses = self.xent_loss(self.model(eval_points), true_labels.repeat(s))  # shape = (10*B,)
+                        losses = self.xent_loss(self.model(eval_points), true_labels.repeat(s))  # shape = (10*B,)
                         total_q += s
                         norm_square = torch.mean(((losses - l) / sigma) ** 2) # scalar
                     while True:
-                        if self.dataset_name == "ImageNet":
-                            logits_for_prior_loss = self.model(self.normalized_image(adv_images + sigma * prior))  # prior may be C,H,W
-                        else:
-                            logits_for_prior_loss = self.model(adv_images + sigma* prior) # prior may be C,H,W
+                        logits_for_prior_loss = self.model(adv_images + sigma* prior) # prior may be C,H,W
                         prior_loss = self.xent_loss(logits_for_prior_loss, true_labels)  # shape = (batch_size,)
                         total_q += 1
                         diff_prior = (prior_loss - l)[0].item()   # FIXME batch模式下是否[0]?
@@ -215,10 +224,7 @@ class PriorRGFAttack(object):
                             pert[i] = pert[i] / torch.clamp(torch.sqrt(torch.mean(torch.mul(pert[i], pert[i]))),min=1e-12)
                     while True:
                         eval_points = adv_images + sigma * pert  # (1,C,H,W)  pert=(q,C,H,W)
-                        if self.dataset_name == "ImageNet":
-                            logits_ = self.model(self.normalized_image(eval_points))
-                        else:
-                            logits_ = self.model(eval_points)
+                        logits_ = self.model(eval_points)
                         losses = self.xent_loss(logits_, true_labels.repeat(q))  # shape = (q,)
                         total_q += q
                         grad = (losses - l).view(-1, 1, 1, 1) * pert  # (q,1,1,1) * (q,C,H,W)
@@ -235,10 +241,7 @@ class PriorRGFAttack(object):
                         length = [1e-4, 1e-3]
                         les = []
                         for ss in length:
-                            if self.dataset_name == "ImageNet":
-                                logits_p = model(self.normalized_image(adv_images + ss * direction))
-                            else:
-                                logits_p = model(adv_images + ss * direction)
+                            logits_p = model(adv_images + ss * direction)
                             loss_p = self.xent_loss(logits_p, true_labels)
                             les.append((loss_p - l)[0].item())
                         log.info("losses: ".format(les))
@@ -246,14 +249,10 @@ class PriorRGFAttack(object):
                     if args.show_loss:
                         if args.method == 'biased' or args.method == 'fixed_biased':
                             show_input = adv_images + lr * prior
-                            if self.dataset_name == "ImageNet":
-                                show_input = self.normalized_image(show_input)
                             logits_show = self.model(show_input)
                             lprior = self.xent_loss(logits_show, true_labels) - l
                             print_loss(self.model, prior)
                             show_input_2 = adv_images + lr * grad
-                            if self.dataset_name == "ImageNet":
-                                show_input_2 = self.normalized_image(show_input_2)
                             logits_show2 = self.model(show_input_2)
                             lgrad = self.xent_loss(logits_show2, true_labels) - l
                             print_loss(self.model, grad)
@@ -271,13 +270,8 @@ class PriorRGFAttack(object):
                     adv_images = adv_images + lr * torch.sign(grad)
                     adv_images = torch.min(torch.max(adv_images, images - eps), images + eps)
                 adv_images = torch.clamp(adv_images, self.clip_min, self.clip_max)
-                if self.dataset_name == "ImageNet":
-                    adv_labels = self.get_pred(self.model, self.normalized_image(adv_images))
-                    logits_ = self.model(self.normalized_image(adv_images))
-                else:
-                    adv_labels = self.get_pred(self.model, adv_images)
-                    logits_ = self.model(adv_images)
-
+                adv_labels = self.get_pred(self.model, adv_images)
+                logits_ = self.model(adv_images)
                 l = self.xent_loss(logits_, true_labels)
                 log.info('queries:', total_q, 'loss:', l, 'learning rate:', lr, 'sigma:', sigma, 'prediction:', adv_labels,
                       'distortion:', torch.max(torch.abs(adv_images - images)).item(), torch.norm(adv_images - images).item())
@@ -285,26 +279,42 @@ class PriorRGFAttack(object):
                 if adv_labels[0].item() != true_labels[0].item():
                     log.info("Stop at queries : {}".format(total_q))
                     success += 1
+                    not_done.append(0)
                     queries.append(total_q)
                     break
             else:
-                # images converts to H,W,C
-                np.save(args.exp_dir + "/failed_images/{}.npy".format(image_id[0].item(),
-                                                                      np.transpose(images[0].detach().cpu().numpy(),axes=(1,2,0))))
-                log.info("Failed at image id {}, save image to {}".format(image_id[0].item(),
-                                                                    args.exp_dir + "/failed_images/{}.npy".format(image_id[0].item())))
+                not_done.append(1)
+                queries.append(args.max_queries) # 因此不能用np.mean(queries)来计算，平均query次数
 
-        log.info('Success rate: {:.3f} Queries_mean: {:.3f} Queries_median: {:.3f}'.format(success/total,
+
+
+        log.info('Attack {} success rate: {:.3f} Queries_mean: {:.3f} Queries_median: {:.3f}'.format(arch, success/total,
                                                                                            np.mean(queries), np.median(queries)))
+        correct_all = np.concatenate(correct_all, axis=0).astype(np.int32)
+        query_all = np.array(queries).astype(np.int32)
+        not_done_all = np.array(not_done).astype(np.int32)
+        success = (1 - not_done_all) * correct_all
+        success_query = success * query_all
+        query_threshold_success_rate, query_success_rate = success_rate_and_query_coorelation(query_all, not_done_all)
+        success_rate_to_avg_query = success_rate_avg_query(query_all, not_done_all)
+        meta_info_dict = {"query_all":query_all.tolist(),"not_done_all":not_done_all.tolist(),
+                          "correct_all":correct_all.tolist(),
+                          "mean_query": np.mean(success_query[np.nonzero(success)[0]]).item(),
+                          "max_query":np.max(success_query[np.nonzero(success)[0]]).item(),
+                          "median_query": np.median(success_query[np.nonzero(success)[0]]).item(),
+                          "query_threshold_success_rate_dict": query_threshold_success_rate,
+                          "query_success_rate_dict": query_success_rate,
+                          "success_rate_to_avg_query": success_rate_to_avg_query}
+        with open(result_dump_path, "w") as result_file_obj:
+            json.dump(meta_info_dict, result_file_obj, sort_keys=True)
+        log.info("done, write stats info to {}".format(result_dump_path))
 
 
-def get_random_dir_name(dataset, arch, surrogate_arch, norm):
-    import string
+def get_expr_dir_name(dataset, method, surrogate_arch, norm, targeted, target_type):
     from datetime import datetime
-    dirname = datetime.now().strftime('%Y-%m-%d_%H-%M-%S_')
-    vocab = string.ascii_uppercase + string.ascii_lowercase + string.digits
-    dirname = 'P-RGF_attack_{}_arch_{}_surrogate_arch_{}_attack_'.format(dataset, arch,surrogate_arch,norm)\
-              + dirname + ''.join(random.choice(vocab) for _ in range(8))
+    # dirname = datetime.now().strftime('%Y-%m-%d_%H-%M-%S')
+    target_str = "untargeted" if not targeted else "targeted_{}".format(target_type)
+    dirname = 'P-RGF_{}_attack_{}_surrogate_arch_{}_{}_{}'.format(method, dataset,surrogate_arch,norm,target_str)
     return dirname
 
 def set_log_file(fname):
@@ -335,62 +345,84 @@ if __name__ == "__main__":
     parser.add_argument('--exp-dir', default='logs', type=str,
                         help='directory to save results and logs')
     parser.add_argument('--dataset', type=str, required=True,
-                        choices=['CIFAR-10', 'ImageNet', "FashionMNIST", "MNIST", "TinyImageNet"],help='which dataset to use')
+                        choices=['CIFAR-10', 'CIFAR-100', 'ImageNet', "FashionMNIST", "MNIST", "TinyImageNet"],help='which dataset to use')
     parser.add_argument("--batch_size",type=int,default=1)
     parser.add_argument('--targeted', action="store_true")
-    parser.add_argument('--target_type', type=str, default='random', choices=["random", "least_likely"])
-    parser.add_argument("--arch", type=str, required=True, help='The architecture of target model, '
+    parser.add_argument('--target-type', default='increment', type=str, choices=['random', 'least_likely', "increment"],
+                        help='how to choose target class for targeted attack, could be random or least_likely')
+    parser.add_argument("--arch", type=str, help='The architecture of target model, '
                                                                 'in original paper it is inception-v3')
-    parser.add_argument("--surrogate_arch", type=str, required=True, help="The architecture of surrogate model,"
+    parser.add_argument("--test_archs",action="store_true")
+    parser.add_argument("--surrogate_arch", type=str, default="resnet-110", help="The architecture of surrogate model,"
                                                                           " in original paper it is resnet152")
-    parser.add_argument("--norm",type=str,default="l2", choices=["l2", "linf"], help='The norm used in the attack.')
-    parser.add_argument("--method",type=str,default="biased", choices=['uniform', 'biased', 'fixed_biased'], help='Methods used in the attack.')
-    parser.add_argument("--dataprior", action="store_true", help="Whether to use data prior in the attack.")
+    parser.add_argument("--norm",type=str, required=True, choices=["l2", "linf"], help='The norm used in the attack.')
+    parser.add_argument("--method",type=str,default="biased", choices=['uniform', 'biased', 'fixed_biased'],
+                        help='Methods used in the attack. uniform: RGF, biased: P-RGF (\lambda^*), fixed_biased: P-RGF (\lambda=0.5)')
+    parser.add_argument("--dataprior", default=None, action="store_true", help="Whether to use data prior in the attack.")
+    parser.add_argument('--json-config', type=str,
+                        default='/home1/machen/meta_perturbations_black_box_attack/configures/prior_RGF_attack_conf.json',
+                        help='a configures file to be passed in instead of arguments')
     parser.add_argument("--show_loss", action="store_true", help="Whether to print loss in some given step sizes.")
     parser.add_argument("--samples_per_draw",type=int, default=50, help="Number of samples to estimate the gradient.")
     parser.add_argument("--sigma", type=float,default=1e-4, help="Sampling variance.")
-    parser.add_argument("--number_images", type=int, default=100000,  help='Number of images for evaluation.')
+    # parser.add_argument("--number_images", type=int, default=100000,  help='Number of images for evaluation.')
     parser.add_argument("--max_queries", type=int, default=10000, help="Maximum number of queries.")
     args = parser.parse_args()
     os.environ["CUDA_DEVICE_ORDER"] = "PCI_BUS_ID"
     os.environ['CUDA_VISIBLE_DEVICES'] = str(args.gpu)
     os.environ['CUDA_VISIBLE_DEVICE'] = str(args.gpu)
     assert args.batch_size == 1, 'The code does not support batch_size > 1 yet.'
-    args.exp_dir = os.path.join(args.exp_dir, get_random_dir_name(args.dataset, args.arch, args.surrogate_arch, args.norm))  # 随机产生一个目录用于实验
-    os.makedirs(args.exp_dir + "/failed_images/", exist_ok=True)
+    args.exp_dir = os.path.join(args.exp_dir, get_expr_dir_name(args.dataset, args.method, args.surrogate_arch, args.norm,
+                                                                args.targeted, args.target_type))
+    os.makedirs(args.exp_dir, exist_ok=True)
     set_log_file(os.path.join(args.exp_dir, 'run.log'))
+    defaults = json.load(open(args.json_config))[args.dataset]
+    arg_vars = vars(args)
+    arg_vars = {k: arg_vars[k] for k in arg_vars if arg_vars[k] is not None}
+    defaults.update(arg_vars)
+    args = SimpleNamespace(**defaults)
+
+
+    if args.targeted:
+        if args.dataset == "ImageNet":
+            args.max_queries = 50000
+
+    torch.backends.cudnn.deterministic = True
+    surrogate_model = StandardModel(args.dataset, args.surrogate_arch, False)
+
+    if args.test_archs:
+        archs = []
+        for arch in MODELS_TEST_STANDARD[args.dataset]:
+            if args.dataset == "CIFAR-10" or args.dataset == "CIFAR-100":
+                test_model_path = "{}/train_pytorch_model/real_image_model/{}-pretrained/{}/checkpoint.pth.tar".format(
+                    PY_ROOT,
+                    args.dataset, arch)
+                if os.path.exists(test_model_path):
+                    archs.append(arch)
+            elif args.dataset == "ImageNet":
+                test_model_list_path = "{}/train_pytorch_model/real_image_model/{}-pretrained/checkpoints/{}-*.pth".format(
+                    PY_ROOT,
+                    args.dataset, arch)
+                test_model_path = list(glob.glob(test_model_list_path))
+                if test_model_path and os.path.exists(test_model_path[0]):
+                    archs.append(arch)
+    else:
+        archs = [args.arch]
+    args.arch = ", ".join(archs)
     log.info("using GPU {}".format(args.gpu))
     log.info('Command line is: {}'.format(' '.join(sys.argv)))
     log.info('Called with args:')
     print_args(args)
-    torch.backends.cudnn.deterministic = True
-    if args.dataset in ["CIFAR-10", "MNIST", "FashionMNIST"]:
-        model = MetaLearnerModelBuilder.construct_cifar_model(args.arch, args.dataset)
-        surrogate_model = MetaLearnerModelBuilder.construct_cifar_model(args.surrogate_arch, args.dataset)
-    elif args.dataset == "TinyImageNet":
-        model = MetaLearnerModelBuilder.construct_tiny_imagenet_model(args.arch, args.dataset)
-        surrogate_model = MetaLearnerModelBuilder.construct_tiny_imagenet_model(args.surrogate_arch, args.dataset)
-    elif args.dataset == "ImageNet":
-        model = MetaLearnerModelBuilder.construct_imagenet_model(args.arch)
-        surrogate_model = MetaLearnerModelBuilder.construct_imagenet_model(args.surrogate_arch)
-
-    if args.dataset != "ImageNet":
-        target_model_path = "{root}/train_pytorch_model/real_image_model/{dataset}@{arch}*.pth.tar".format(root=PY_ROOT, dataset=args.dataset,
-                                                                                                        arch=args.arch)
-        surrogate_model_path = "{root}/train_pytorch_model/real_image_model/{dataset}@{arch}*.pth.tar".format(root=PY_ROOT,
-                                                                                                           dataset=args.dataset,
-                                                                                                           arch=args.surrogate_arch)
-        target_model_path = list(glob.glob(target_model_path))[0]
-        surrogate_model_path = list(glob.glob(surrogate_model_path))[0]
-        model.load_state_dict(torch.load(target_model_path, map_location=lambda storage, location: storage)["state_dict"])
-        surrogate_model.load_state_dict(torch.load(surrogate_model_path,
-                                                   map_location=lambda storage, location: storage)["state_dict"])
-    model.cuda()
-    surrogate_model.cuda()
-    phase = "validation" if "ImageNet" in args.dataset else "test"
-    data_loader = DataLoaderMaker.get_imgid_img_label_data_loader(args.dataset, args.batch_size, False)
-    attacker = PriorRGFAttack(args.dataset, model, surrogate_model)
-    with torch.no_grad():
-        attacker.attack_dataset(args, data_loader)
-    log.info("Construct target model {} and surrogate model {} done. Now attacking {}!".format(args.arch, args.surrogate_arch, args.dataset))
-
+    for arch in archs:
+        save_result_path = args.exp_dir + "/{}_result.json".format(arch)
+        if os.path.exists(save_result_path):
+            continue
+        model = StandardModel(args.dataset, arch, no_grad=False)
+        model.cuda()
+        model.eval()
+        log.info("Begin attack {} on {}, result will be saved to {}".format(arch, args.dataset, save_result_path))
+        attacker = PriorRGFAttack(args.dataset, model, surrogate_model, args.targeted, args.target_type)
+        with torch.no_grad():
+            attacker.attack_dataset(args, arch, save_result_path)
+        attacker.model.cpu()
+        log.info("Attack {} with surrogate model {} done!".format(arch, args.surrogate_arch))

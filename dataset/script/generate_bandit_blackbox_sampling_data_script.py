@@ -11,8 +11,7 @@ import os.path as osp
 import numpy as np
 from torch.nn.modules import Upsample
 from cifar_models_myself import *
-from config import IN_CHANNELS, IMAGE_SIZE, CLASS_NUM, PY_ROOT, CIFAR_ALL_MODELS, IMAGENET_ALL_MODELS, \
-    MODELS_TRAIN_STANDARD, MODELS_TRAIN_TEST_STANDARD
+from config import IN_CHANNELS, IMAGE_SIZE, CLASS_NUM, PY_ROOT, MODELS_TRAIN_STANDARD
 import glog as log
 from dataset.model_constructor import StandardModel
 from collections import defaultdict, deque
@@ -207,7 +206,7 @@ class BanditAttack(object):
             ## Logging stuff
             success_mask = (1 - not_dones_mask) * correct_classified_mask
             num_success = success_mask.sum()
-            current_success_rate = (num_success / correct_classified_mask.detach().cpu().sum()).cpu().item()
+            current_success_rate = (num_success.detach().cpu() / correct_classified_mask.detach().cpu().sum()).cpu().item()
             if num_success == 0:
                 success_queries = 0
             else:
@@ -475,7 +474,7 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--gpu",type=int, required=True)
     parser.add_argument('--json-config-file', default="/home1/machen/meta_perturbations_black_box_attack/bandits_attack_conf.json",
-                        type=str, help='a config file to be passed in instead of arguments')
+                        type=str, help='a configures file to be passed in instead of arguments')
     parser.add_argument("--dataset", type=str, choices=["CIFAR-10","CIFAR-100","MNIST","FashionMNIST","TinyImageNet","ImageNet"])
     parser.add_argument("--batch-size", type=int,default=100)
     parser.add_argument("--total-images",type=int,default=100000)

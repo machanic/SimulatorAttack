@@ -5,7 +5,7 @@ import pretrainedmodels
 import torch
 from torch import nn
 from torchvision import models as torch_models
-
+import os.path as osp
 import cifar_models as models
 from cifar_models_myself import Conv3, DenseNet121, DenseNet169, DenseNet201, GoogLeNet, MobileNet, MobileNetV2, \
     ResNet18, \
@@ -17,6 +17,7 @@ from cifar_models_myself.miscellaneous import Identity
 from config import pretrained_cifar_model_conf, IN_CHANNELS, IMAGE_SIZE, CLASS_NUM, PY_ROOT
 from tiny_imagenet_models.densenet import densenet161, densenet121, densenet169, densenet201
 from tiny_imagenet_models.resnext import resnext101_32x4d, resnext101_64x4d
+import torchvision.models as vision_models
 
 
 class StandardModel(nn.Module):
@@ -24,11 +25,26 @@ class StandardModel(nn.Module):
     A StandardModel object wraps a cnn model.
     This model always accept standard image: in [0, 1] range, RGB order, un-normalized, NCHW format
     """
-    def __init__(self, dataset, arch, no_grad=True):
+    def __init__(self, dataset, arch, no_grad=True,
+                 is_subspace_attack_ref_arch=False, ref_arch_train_data=None, ref_arch_epoch=None):
         super(StandardModel, self).__init__()
         # init cnn model
         self.in_channels = IN_CHANNELS[dataset]
-        trained_model_path = "{root}/train_pytorch_model/real_image_model/{dataset}-pretrained/{arch}/checkpoint.pth.tar".format(root=PY_ROOT, dataset=dataset, arch=arch)
+        self.dataset = dataset
+        if is_subspace_attack_ref_arch:
+            trained_model_path = self.get_subspace_attack_reference_model_path(ref_arch_train_data, ref_arch_epoch, arch)
+        else:
+            if dataset != "ImageNet":
+                trained_model_path = "{root}/train_pytorch_model/real_image_model/{dataset}-pretrained/{arch}/checkpoint.pth.tar".format(root=PY_ROOT, dataset=dataset, arch=arch)
+                assert os.path.exists(trained_model_path), "{} does not exist!".format(trained_model_path)
+            else:
+                trained_model_path = "{root}/train_pytorch_model/real_image_model/{dataset}-pretrained/checkpoints/{arch}*.pth".format(
+                    root=PY_ROOT, dataset=dataset, arch=arch)
+                trained_model_path_ls = list(glob.glob(trained_model_path))
+                assert trained_model_path_ls,  "{} does not exist!".format(trained_model_path)
+                trained_model_path = trained_model_path_ls[0]
+
+        self.is_subspace_attack_ref_arch = is_subspace_attack_ref_arch
         self.cnn = self.make_model(dataset, arch, self.in_channels, CLASS_NUM[dataset], trained_model_path=trained_model_path)
         # init cnn model meta-information
         self.mean = torch.FloatTensor(self.cnn.mean).view(1, self.in_channels, 1, 1).cuda()
@@ -37,6 +53,7 @@ class StandardModel(nn.Module):
         self.input_range = self.cnn.input_range  # [0, 1] or [0, 255]
         self.input_size = self.cnn.input_size
         self.no_grad = no_grad
+
 
     @staticmethod
     def check_arch(arch, dataset):
@@ -80,6 +97,46 @@ class StandardModel(nn.Module):
             new_key = key.replace('module.', '')
             state_dict[new_key] = val
         model.load_state_dict(state_dict)
+
+    def get_subspace_attack_reference_model_path(self, ref_arch_train_data, ref_arch_epoch, ref_arch):
+        if ref_arch_train_data == "CIFAR-10.1":
+            prefix = 'subspace_attack_ref_model/cifar10.1-models'
+            if ref_arch_epoch == "final":
+                suffix = "final.pth"
+            elif ref_arch_epoch == "best":
+                suffix = "model_best.pth"
+            else:
+                raise NotImplementedError('Unknown epoch {} for train data {}'.format(ref_arch_epoch, ref_arch_train_data))
+        elif ref_arch_train_data == "CIFAR-100.1":
+            prefix = 'subspace_attack_ref_model/cifar100.1-models'
+            if ref_arch_epoch == "final":
+                suffix = "final.pth"
+            elif ref_arch_epoch == "best":
+                suffix = "model_best.pth"
+            else:
+                raise NotImplementedError('Unknown epoch {} for train data {}'.format(ref_arch_epoch, ref_arch_train_data))
+        elif ref_arch_train_data == "ImageNetv2-val":
+            prefix = "subspace_attack_ref_model/imagenetv2-v1val45000-models"
+            if ref_arch_epoch == 'final':
+                suffix = 'checkpoint.pth.tar'
+            elif ref_arch_epoch == 'best':
+                suffix = 'model_best.pth.tar'
+            else:
+                raise NotImplementedError('Unknown epoch {} for train data {}'.format(
+                    ref_arch_epoch, ref_arch_train_data))
+        elif ref_arch_train_data in ["CIFAR-10","CIFAR-100"]:
+            return  "{root}/train_pytorch_model/real_image_model/{dataset}-pretrained/{arch}/checkpoint.pth.tar".format(root=PY_ROOT,
+                                                                                        dataset=self.dataset, arch=ref_arch)
+        elif ref_arch_train_data == "ImageNet":
+            trained_model_path = "{root}/train_pytorch_model/real_image_model/{dataset}-pretrained/checkpoints/{arch}*.pth".format(
+                root=PY_ROOT, dataset=self.dataset, arch=ref_arch)
+            trained_model_path_ls = list(glob.glob(trained_model_path))
+            assert trained_model_path_ls, "{} does not exist!".format(trained_model_path)
+            return trained_model_path_ls[0]
+        else:
+            raise NotImplementedError('Unknown train data {}'.format(ref_arch_train_data))
+        model_path = osp.join(PY_ROOT, "train_pytorch_model", prefix, ref_arch, suffix)
+        return model_path
 
     def construct_cifar_model(self, arch, dataset, num_classes):
         conf = pretrained_cifar_model_conf[dataset][arch]
@@ -126,7 +183,7 @@ class StandardModel(nn.Module):
         :return: model (in cpu and training mode)
         """
         if dataset in ['CIFAR-10',"CIFAR-100", "MNIST","FashionMNIST"]:
-            assert trained_model_path is not None and os.path.exists(trained_model_path), trained_model_path
+            assert trained_model_path is not None and os.path.exists(trained_model_path), "Pretrained weight model file {} does not exist!".format(trained_model_path)
             if arch == 'gdas':
                 model = models.gdas(in_channel, num_classes)
                 model.mean = [125.3 / 255, 123.0 / 255, 113.9 / 255]
@@ -242,8 +299,8 @@ class MetaLearnerModelBuilder(object):
 
     @staticmethod
     def construct_imagenet_model(arch):
-        os.environ["TORCH_HOME"] = "{}/train_pytorch_model/real_image_model/ImageNet-pretrained".format(PY_ROOT)
-        model = pretrainedmodels.__dict__[arch](num_classes=1000, pretrained="imagenet")
+        # os.environ["TORCH_HOME"] = "{}/train_pytorch_model/real_image_model/ImageNet-pretrained".format(PY_ROOT)
+        model = vision_models.__dict__[arch](pretrained=False)
         return model
 
     @staticmethod

@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+import glob
 import sys
 sys.path.append("/home1/machen/meta_perturbations_black_box_attack")
 import os
@@ -8,12 +9,15 @@ import argparse
 import json
 import random
 from collections import OrderedDict
+from types import SimpleNamespace
 
 import torch
 import torch.nn.functional as F
 import numpy as np
-from target_models.standard_model import StandardModel
+from dataset.model_constructor import StandardModel
 from dataset.dataset_loader_maker import DataLoaderMaker
+from config import PY_ROOT, MODELS_TEST_STANDARD, CLASS_NUM
+from utils.statistics_toolkit import success_rate_and_query_coorelation, success_rate_avg_query
 
 
 def parse_args():
@@ -21,68 +25,65 @@ def parse_args():
     Parse input arguments
     """
     parser = argparse.ArgumentParser(description='')
-    parser.add_argument('--exp-dir', default='output/debug', type=str,
+    parser.add_argument('--exp-dir', default='logs', type=str,
                         help='directory to save results and logs')
-    parser.add_argument('--dataset', default='CIFAR-10', type=str, choices=['cifar10', 'imagenet'],
+    parser.add_argument('--dataset', required=True, type=str, choices=['CIFAR-10',"CIFAR-100","ImageNet"],
                         help='which dataset to use')
     parser.add_argument('--save-every-step', action='store_true',
                         help='save meta-information every PGD step to disk')
     parser.add_argument('--batch-size', default=100, type=int,
                         help='batch size')
-    parser.add_argument('--phase', default='validation', type=str, choices=['validation', 'test'],
-                        help='train_simulate_grad_mode, val, test')
-    parser.add_argument('--num-image', default=1000, type=int,
-                        help='how many images to compute')
-    parser.add_argument('--gpu', type=int, default=0)
-    parser.add_argument('--delta-size', default=0, type=int,
+    parser.add_argument('--gpu', type=int, required=True)
+    parser.add_argument('--json-config', type=str,
+                        default='/home1/machen/meta_perturbations_black_box_attack/configures/subspace_attack_conf.json',
+                        help='a configures file to be passed in instead of arguments')
+    parser.add_argument('--delta-size',  type=int,
                         help='size (width/height) of delta. if not equal to image shape, we resize delta to the image'
                              'shape and then add the resized delta to image. set this to 0 to disable resizing')
-    parser.add_argument('--arch', default='wrn-28-10-drop', type=str,
+    parser.add_argument('--arch', default=None, type=str,
                         help='network architecture')
-    parser.add_argument('--ref-arch', nargs='*', default=[],
+    parser.add_argument('--test_archs', action="store_true")
+    parser.add_argument('--ref-arch', nargs='*', default=None,
                         help='reference architectures for gradient subspace computation')
-    parser.add_argument('--ref-arch-train-data', default='full', type=str,
-                        choices=['full', 'cifar10.1', 'imagenetv2-val'],
-                        help='ref target_models are trained on which training set')
-    parser.add_argument('--ref-arch-epoch', default='final', type=str,
+    parser.add_argument('--ref-arch-train-data', type=str, help='ref target_models are trained on which training set')
+    parser.add_argument('--ref-arch-epoch', type=str,
                         help='use ref target_models at which epoch, could be final, best, or a epoch number')
-    parser.add_argument('--ref-arch-init-drop', default=0.0, type=float,
+    parser.add_argument('--ref-arch-init-drop', type=float,
                         help='for dropout probability for ref model')
-    parser.add_argument('--ref-arch-max-drop', default=0.5, type=float,
+    parser.add_argument('--ref-arch-max-drop', type=float,
                         help='maximum allowed dropout probability')
-    parser.add_argument('--ref-arch-drop-grow-iter', default=10, type=int,
+    parser.add_argument('--ref-arch-drop-grow-iter', type=int,
                         help='increase dropout probability at this iteration')
-    parser.add_argument('--ref-arch-drop-gamma', default=0.01, type=float,
+    parser.add_argument('--ref-arch-drop-gamma', type=float,
                         help='control dropout probability increasing speed')
     parser.add_argument('--fix-grad', action='store_true',
                         help='fix gradient from dL/dv to dl/dv')
-    parser.add_argument('--loss', default='cw', type=str, choices=['xent', 'cw'],
+    parser.add_argument('--loss', required=True, type=str, choices=['xent', 'cw'],
                         help='loss function, could be cw or xent')
-    parser.add_argument('--exploration', default=0.1, type=float,
+    parser.add_argument('--exploration', type=float,
                         help='exploration for finite difference prior')
-    parser.add_argument('--fd-eta', default=0.1, type=float,
+    parser.add_argument('--fd-eta',  type=float,
                         help='finite difference eta')
-    parser.add_argument('--image-lr', default=1./255, type=float,
+    parser.add_argument('--image-lr', type=float,
                         help='learning rate for image')
-    parser.add_argument('--prior-lr', default=1.0, type=float,
+    parser.add_argument('--prior-lr',  type=float,
                         help='learning rate for prior')
-    parser.add_argument('--prior-update', default='momentum', choices=['eg', 'gd', 'momentum'], type=str,
+    parser.add_argument('--prior-update', choices=['eg', 'gd', 'momentum'], type=str,
                         help='update method of prior')
-    parser.add_argument('--eg-clip', default=3.0, type=float,
+    parser.add_argument('--eg-clip', default=1.0, type=float,
                         help='clip for eg update')
     parser.add_argument('--num-fix-direction', default=0, type=int,
                         help='fix normal direction for illustration experiments')   # fix normal direction
     parser.add_argument('--fix-direction-seed', default=1234, type=int,
                         help='seed for fix direction generation')
-    parser.add_argument('--norm-type', default='linf', type=str, choices=['l2', 'linf'],
+    parser.add_argument('--norm-type', required=True, type=str, choices=['l2', 'linf'],
                         help='l_p norm type, could be l2 or linf')
-    parser.add_argument('--epsilon', default=8./255, type=float,
+    parser.add_argument('--epsilon', type=float,
                         help='allowed l_p perturbation size')
-    parser.add_argument('--max-query', default=10000, type=int,
+    parser.add_argument('--max-queries', type=int,
                         help='maximum allowed queries for each image')
-    parser.add_argument('--attack-type', default='untargeted', choices=['untargeted', 'targeted'],
-                        help='type of attack, could be targeted or untargeted')
-    parser.add_argument('--target-type', default='random', type=str, choices=['random', 'least_likely'],
+    parser.add_argument('--targeted', action="store_true")
+    parser.add_argument('--target-type', default='increment', type=str, choices=['random', 'least_likely',"increment"],
                         help='how to choose target class for targeted attack, could be random or least_likely')
     parser.add_argument('--seed', default=1234, type=int,
                         help='random seed')
@@ -95,9 +96,12 @@ def parse_args():
     os.environ["CUDA_DEVICE_ORDER"] = "PCI_BUS_ID"
     os.environ['CUDA_VISIBLE_DEVICES'] = str(args.gpu)
     print("using GPU :{}".format(args.gpu))
+    json_conf = json.load(open(args.json_config))[args.dataset][args.norm_type]
+    args = vars(args)
+    json_conf = {k: v for k, v in json_conf.items() if k not in args or args[k] is None}
+    args.update(json_conf)
+    args = SimpleNamespace(**args)
     return args
-
-
 
 
 def norm(t, p=2):
@@ -174,10 +178,9 @@ def xent_loss(logit, label, target=None):
         return F.cross_entropy(logit, label, reduction='none')
 
 
-def main():
+def main(target_model,  result_dump_path, args):
     # make model(s)
     log.info('Initializing target model {} on {}'.format(args.arch, args.dataset))
-    model = StandardModel(args.dataset, args.arch, no_grad=True, train_data='full', epoch='final').eval()
 
     ref_models = OrderedDict()
     for i, ref_arch in enumerate(args.ref_arch):
@@ -186,12 +189,13 @@ def main():
         params['epoch'] = args.ref_arch_epoch
         log.info('Initializing ref model {} on {} ({} of {}), params: {}'.format(
             ref_arch, args.dataset, i + 1, len(args.ref_arch), params))
-        ref_models[ref_arch] = StandardModel(args.dataset, ref_arch, no_grad=False, **params).eval()
+        ref_models[ref_arch] = StandardModel(args.dataset, ref_arch, no_grad=False, is_subspace_attack_ref_arch=True,
+                                             ref_arch_train_data=args.ref_arch_train_data, ref_arch_epoch=args.ref_arch_epoch).cuda().eval()
     log.info('All target_models have been initialized, including 1 target model and {} ref target_models'.format(len(args.ref_arch)))
 
     # make loader
-    loader = DataLoaderMaker.get_imgid_img_label_data_loader(args.dataset, args.batch_size, False, args.seed)
-
+    loader = DataLoaderMaker.get_test_attacked_data(args.dataset, args.batch_size)
+    total_images = len(loader.dataset)
     # make operators
 
     prior_step = eval('{}_prior_step'.format(args.prior_update))
@@ -200,7 +204,7 @@ def main():
 
     if args.delta_size > 0:
         # resize
-        upsampler = lambda x: F.interpolate(x, size=model.input_size[-1], mode='bilinear', align_corners=True)  # 这就是低维度的sub space放大回来
+        upsampler = lambda x: F.interpolate(x, size=target_model.input_size[-1], mode='bilinear', align_corners=True)  # 这就是低维度的sub space放大回来
         downsampler = lambda x: F.interpolate(x, size=args.delta_size, mode='bilinear', align_corners=True)
     else:
         # no resize, upsampler = downsampler = identity
@@ -210,7 +214,7 @@ def main():
     loss_func = eval('{}_loss'.format(args.loss))
 
     # init arrays for saving results
-    query_all = torch.zeros(args.num_image)
+    query_all = torch.zeros(total_images)
     correct_all = torch.zeros_like(query_all)
     not_done_all = torch.zeros_like(query_all)  # always set to 0 if the original image is misclassified
     success_all = torch.zeros_like(query_all)
@@ -229,7 +233,7 @@ def main():
             assert args.dataset == 'CIFAR-10'
             state = np.random.get_state()
             np.random.seed(args.fix_direction_seed)
-            fix_direction = np.random.randn(3072, *model.input_size)[:args.num_fix_direction]
+            fix_direction = np.random.randn(3072, *target_model.input_size)[:args.num_fix_direction]
             np.random.set_state(state)
             fix_direction = np.ascontiguousarray(fix_direction)
             fix_direction = torch.FloatTensor(fix_direction).to(device)
@@ -237,35 +241,48 @@ def main():
             # fixed gradient direction (calculated at clean inputs)
             assert args.num_fix_direction == len(args.ref_arch)
 
-    for batch_index, (image_id, image, label) in enumerate(loader):
+    for batch_index, data_tuple in enumerate(loader):
+        if args.dataset == "ImageNet":
+            if target_model.input_size[-1] >= 299:
+                image, label = data_tuple[1], data_tuple[2]
+            else:
+                image, label = data_tuple[0], data_tuple[2]
+        else:
+            image, label = data_tuple[0], data_tuple[1]
+
+        if image.size(-1) != target_model.input_size[-1]:
+            image = F.interpolate(image, size=target_model.input_size[-1], mode='bilinear')
         assert image.max().item() <= 1
         assert image.min().item() >= 0
 
         # move image and label to device
-        image_id = image_id.to(device)
         image = image.to(device)
         label = label.to(device)
         adv_image = image.clone()
 
         # get logit and prob
-        logit = model(image)
+        logit = target_model(image)
         adv_logit = logit.clone()
         pred = logit.argmax(dim=1)
 
         # choose target classes for targeted attack
-        if args.attack_type == 'targeted':
+        if args.targeted:
             if args.target_type == 'random':
                 target = torch.randint(low=0, high=logit.shape[1], size=label.shape).long().to(device)
+                # make sure target is not equal to label for any example
+                invalid_target_index = target.eq(label)
+                while invalid_target_index.sum().item() > 0:
+                    target[invalid_target_index] = torch.randint(low=0, high=logit.shape[1],
+                                                                 size=target[invalid_target_index].shape).long().to(
+                        device)
+                    invalid_target_index = target.eq(label)
             elif args.target_type == 'least_likely':
                 target = logit.argmin(dim=1)
+            elif args.target_type == "increment":
+                target = torch.fmod(label+1, CLASS_NUM[args.dataset])
             else:
                 raise NotImplementedError('Unknown target_type: {}'.format(args.target_type))
-            # make sure target is not equal to label for any example
-            invalid_target_index = target.eq(label)
-            while invalid_target_index.sum().item() > 0:
-                target[invalid_target_index] = torch.randint(low=0, high=logit.shape[1],
-                                                             size=target[invalid_target_index].shape).long().to(device)
-                invalid_target_index = target.eq(label)
+
         else:
             target = None
 
@@ -277,12 +294,12 @@ def main():
 
         # init prior
         if args.delta_size > 0:
-            prior = torch.zeros(args.batch_size, model.input_size[0], args.delta_size, args.delta_size).to(device)
+            prior = torch.zeros(args.batch_size, target_model.input_size[0], args.delta_size, args.delta_size).to(device)
         else:
-            prior = torch.zeros(args.batch_size, *model.input_size).to(device)
+            prior = torch.zeros(args.batch_size, *target_model.input_size).to(device)
 
         # perform attack
-        for step_index in range(args.max_query // 2):
+        for step_index in range(args.max_queries // 2):
             # increase query counts
             query = query + 2 * not_done  # not_done = 预测与gt label相等的图片个数
 
@@ -327,7 +344,7 @@ def main():
 
                     # backward ref model using logit_grad from the victim model
                     ref_grad_ = torch.autograd.grad(ref_logit_, [adv_image_], grad_outputs=[logit_grad])[0]
-                    ref_grad_ = downsampler(ref_grad_)  # 高维度缩小， subspace的精髓
+                    ref_grad_ = downsampler(ref_grad_)  # 高维度缩小
 
                     # compute dl/dv
                     if args.fix_grad:
@@ -369,14 +386,10 @@ def main():
             # normalize search direction
             direction = direction / norm(direction)  #这个方向是用随机选择一个model，估计出来的梯度，可以换成用meta预测方向。ground truth用prior来给最终loss，由于meta训练已知模型的话梯度非常好给，所以可以用梯度累积后的prior做ground truth
 
-            # 第一个初步的想法，用MAML，输入图像，预测这个direction，然后继续向后算出l1和l2，最后算出grad，监督的ground truth用真正的对图像求导的梯度来监督. 这就把原本的随机exp_noise变成有预测的了,反向传播，算出这个direction是否合理，其中后一个model的参数固定
-            # 更好地想法，以往Meta Learning没有考虑时序关系，但是这个prior很明显是有时序关系的，因此可以用ConvLSTM
-            # 采用基于ConvLSTM的MAML模型，ConvLSTM的输入和输出都是T,N,C,H,W，然后每个时间步可以用梯度放入监督信号，为了简便起见，训练的时候输入的x用PGD更新过的N个步骤x'作为输入。
-            # 然后分成K个task，最后的query set用干净的未经修改的图输入，而输出是T个时间步的扰动的累积，或者压根不要query set了
             q1 = upsampler(prior + args.exploration * direction)  # 这两个upsampler和downsampler，使用在ImageNet大图起作用
             q2 = upsampler(prior - args.exploration * direction)  # 方向来自于随机选取的model，可以改为meta learning设计一下
-            l1 = loss_func(model(adv_image + args.fd_eta * q1 / norm(q1)), label, target)  # 需要查询
-            l2 = loss_func(model(adv_image + args.fd_eta * q2 / norm(q2)), label, target)
+            l1 = loss_func(target_model(adv_image + args.fd_eta * q1 / norm(q1)), label, target)  # 需要查询
+            l2 = loss_func(target_model(adv_image + args.fd_eta * q2 / norm(q2)), label, target)
             grad = (l1 - l2) / (args.fd_eta * args.exploration)  # 需要2次查询，grad是论文Alg1第11行左边那个Delta_t，用于更新梯度的一个量
             # 这段抄袭的bandit attack，但是把原来的exp_noise换成了direction
             grad = grad.view(-1, 1, 1, 1) * direction     # grad.shape == direction.shape == prior.shape ?= image.shape 这就是精髓所在
@@ -394,11 +407,11 @@ def main():
 
             # update statistics
             with torch.no_grad():
-                adv_logit = model(adv_image)
+                adv_logit = target_model(adv_image)
             adv_pred = adv_logit.argmax(dim=1)
             adv_prob = F.softmax(adv_logit, dim=1)
             adv_loss = loss_func(adv_logit, label, target)
-            if args.attack_type == 'targeted':
+            if args.targeted:
                 not_done = not_done * (1 - adv_pred.eq(target)).float()
             else:
                 not_done = not_done * adv_pred.eq(label).float()
@@ -406,11 +419,10 @@ def main():
             success_query = success * query
             not_done_loss = adv_loss * not_done
             not_done_prob = adv_prob[torch.arange(args.batch_size), label] * not_done
-
             # log
             log.info('Attacking image {} - {} / {}, step {}, max query {}'.format(
                 batch_index * args.batch_size, (batch_index + 1) * args.batch_size,
-                args.num_image, step_index + 1, int(query.max().item())
+                total_images, step_index + 1, int(query.max().item())
             ))
             log.info('        correct: {:.4f}'.format(correct.mean().item()))
             log.info('       not_done: {:.4f}'.format(not_done.mean().item()))
@@ -423,15 +435,6 @@ def main():
                 log.info('  not_done_loss: {:.4f}'.format(not_done_loss[not_done.byte()].mean().item()))
                 log.info('  not_done_prob: {:.4f}'.format(not_done_prob[not_done.byte()].mean().item()))
 
-            if args.save_every_step and batch_index == 0 and step_index <= 500:
-                # save meta-info in each step to disk for further analysis
-                for single_image_index, single_image_id in enumerate(image_id.cpu().numpy().astype(np.int)[:30]):
-                    result_fname = osp.join(result_dirname, 'step-results', str(single_image_id),
-                                            'step-{}.pth'.format(step_index))
-                    os.makedirs(osp.dirname(result_fname), exist_ok=True)
-                    torch.save({'adv_loss': adv_loss[single_image_index].item(),
-                                'not_done': not_done[single_image_index].item(),
-                                'adv_logit': adv_logit[single_image_index].cpu()}, result_fname)
 
             # early break if all succeed
             if not not_done.byte().any():
@@ -442,32 +445,14 @@ def main():
 
         # save results to arrays
         # 下面这段代码统计最终的统计量，比如success_query_all
-        for key in ['query', 'image_id', 'label', 'logit', 'correct', 'adv_logit', 'adv_loss', 'not_done',
+        for key in ['query', 'correct', 'not_done',
                     'success', 'success_query', 'not_done_loss', 'not_done_prob']:
             value_all = eval('{}_all'.format(key))
             value = eval(key)
             value_all[selected] = value.detach().float().cpu()
 
-        # save image and adv_image to disk
-        for single_image_index, single_image_id in enumerate(image_id.cpu().numpy().astype(np.int)):
-            # index is the position in current batch
-            # id (defined in data_loader_maker.py) is the identifier in the whole dataset
-            # save image
-            result_fname = osp.join(result_dirname, 'images', str(single_image_id), 'image.pth')
-            os.makedirs(osp.dirname(result_fname), exist_ok=True)
-            torch.save(image[single_image_index].cpu(), result_fname)
-
-            # save adv_image
-            result_fname = osp.join(result_dirname, 'images', str(single_image_id), 'adv_image.pth')
-            os.makedirs(osp.dirname(result_fname), exist_ok=True)
-            torch.save(adv_image[single_image_index].cpu(), result_fname)
-
-        # break if we've already attacked args.num_image images
-        if (batch_index + 1) * args.batch_size >= args.num_image:
-            break
-
-    # log statistics for args.num_image images
-    log.info('Attack finished ({} images)'.format(args.num_image))
+    # log statistics for $total_images images
+    log.info('Attack finished ({} images)'.format(total_images))
     log.info('        avg correct: {:.4f}'.format(correct_all.mean().item()))
     log.info('       avg not_done: {:.4f}'.format(not_done_all.mean().item()))
     if success_all.sum().item() > 0:
@@ -476,16 +461,28 @@ def main():
     if not_done_all.sum().item() > 0:
         log.info('  avg not_done_loss: {:.4f}'.format(not_done_loss_all[not_done_all.byte()].mean().item()))
         log.info('  avg not_done_prob: {:.4f}'.format(not_done_prob_all[not_done_all.byte()].mean().item()))
-
+    log.info('Saving results to {}'.format(result_dump_path))
+    query_all_ = query_all.detach().cpu().numpy().astype(np.int32)
+    not_done_all_ = not_done_all.detach().cpu().numpy().astype(np.int32)
+    query_threshold_success_rate, query_success_rate = success_rate_and_query_coorelation(query_all_, not_done_all_)
+    success_rate_to_avg_query = success_rate_avg_query(query_all_, not_done_all_)
+    meta_info_dict = {"avg_correct": correct_all.mean().item(),
+                      "avg_not_done": not_done_all.mean().item(),
+                      "mean_query": success_query_all[success_all.byte()].mean().item(),
+                      "median_query": success_query_all[success_all.byte()].median().item(),
+                      "max_query": success_query_all[success_all.byte()].max().item(),
+                      "correct_all": correct_all.detach().cpu().numpy().astype(np.int32).tolist(),
+                      "not_done_all": not_done_all.detach().cpu().numpy().astype(np.int32).tolist(),
+                      "query_all": query_all.detach().cpu().numpy().astype(np.int32).tolist(),
+                      "query_threshold_success_rate_dict": query_threshold_success_rate,
+                      "success_rate_to_avg_query": success_rate_to_avg_query,
+                      "query_success_rate_dict": query_success_rate,
+                      "not_done_loss": not_done_loss_all[not_done_all.byte()].mean().item(),
+                      "not_done_prob": not_done_prob_all[not_done_all.byte()].mean().item(),
+                      "args":vars(args)}
+    with open(result_dump_path, "w") as result_file_obj:
+            json.dump(meta_info_dict, result_file_obj, sort_keys=True)
     # save results to disk
-    log.info('Saving results to {}'.format(result_dirname))
-    for key in ['query', 'image_id', 'label', 'logit', 'correct', 'adv_logit', 'adv_loss', 'not_done',
-                'success', 'success_query', 'not_done_loss', 'not_done_prob']:
-        value_all = eval('{}_all'.format(key))
-        result_fname = osp.join(result_dirname, '{}_all.pth'.format(key))
-        torch.save(value_all.cpu(), result_fname)
-        log.info('{}_all saved to {}'.format(key, result_fname))
-
     log.info('Done')
 
 
@@ -504,7 +501,7 @@ def set_log_file(fname):
     os.dup2(tee.stdin.fileno(), sys.stderr.fileno())
 
 
-def print_args():
+def print_args(args):
     keys = sorted(vars(args).keys())
     max_len = max([len(key) for key in keys])
     for key in keys:
@@ -512,46 +509,25 @@ def print_args():
         log.info('{:s}: {}'.format(prefix, args.__getattribute__(key)))
 
 
-def get_random_dir_name():
-    import string
+def get_exp_dir_name(dataset, loss, norm, targeted, target_type):
     from datetime import datetime
-    dirname = datetime.now().strftime('%Y-%m-%d_%H-%M-%S')
-    vocab = string.ascii_uppercase + string.ascii_lowercase + string.digits
-    dirname = dirname + '-' + ''.join(random.choice(vocab) for _ in range(8))
+    dirname = datetime.now().strftime('%Y_%m_%d_%H_%M_%S')
+    target_str = "untargeted" if not targeted else "targeted_{}".format(target_type)
+    dirname = 'subspace_attack-{}-{}_loss-{}-{}-'.format(dataset, loss, norm, target_str) + dirname
     return dirname
+
 
 
 if __name__ == '__main__':
     # before going to the attack function, we do following things:
-    # 1. setup output directory
-    # 2. make global variables: args, model (on cpu), loaders and device
 
-    # 1. setup output directory
     args = parse_args()
 
-    args.exp_dir = osp.join(args.exp_dir, get_random_dir_name())  # 随机产生一个目录用于实验
-    if not osp.exists(args.exp_dir):
-        os.makedirs(args.exp_dir)
+    args.exp_dir = osp.join(args.exp_dir, get_exp_dir_name(args.dataset, args.loss, args.norm_type, args.targeted, args.target_type))
+    os.makedirs(args.exp_dir, exist_ok=True)
 
     # set log file
     set_log_file(osp.join(args.exp_dir, 'run.log'))
-
-    log.info('Command line is: {}'.format(' '.join(sys.argv)))
-    log.info('Called with args:')
-    print_args()
-
-    # dump config.json
-    with open(osp.join(args.exp_dir, 'config.json'), 'w') as f:
-        json.dump(vars(args), f, sort_keys=True, indent=4)
-
-    # backup scripts
-    fname = __file__
-    if fname.endswith('pyc'):
-        fname = fname[:-1]
-    os.system('cp {} {}'.format(fname, args.exp_dir))
-    os.system('cp -r *.py target_models {}'.format(args.exp_dir))
-
-    # 2. make global variables
 
     # check device
     device = torch.device('cuda')
@@ -563,6 +539,39 @@ if __name__ == '__main__':
     torch.manual_seed(args.seed)
     if torch.cuda.device_count() > 1:
         torch.cuda.manual_seed_all(args.seed)
+    archs = [args.arch]
+    if args.test_archs:
+        archs = []
+        if args.dataset == "CIFAR-10" or args.dataset == "CIFAR-100":
+            for arch in MODELS_TEST_STANDARD[args.dataset]:
+                test_model_path = "{}/train_pytorch_model/real_image_model/{}-pretrained/{}/checkpoint.pth.tar".format(PY_ROOT,
+                                                                                        args.dataset,  arch)
+                if os.path.exists(test_model_path):
+                    archs.append(arch)
+                else:
+                    log.info(test_model_path + " does not exists!")
+        else:
+            for arch in MODELS_TEST_STANDARD[args.dataset]:
+                test_model_list_path = "{}/train_pytorch_model/real_image_model/{}-pretrained/checkpoints/{}*.pth".format(
+                    PY_ROOT,
+                    args.dataset, arch)
+                print(test_model_list_path)
+                test_model_list_path = list(glob.glob(test_model_list_path))
+                if len(test_model_list_path) == 0:  # this arch does not exists in args.dataset
+                    continue
+                archs.append(arch)
+    args.arch = ", ".join(archs)
+    if args.targeted:
+        args.max_queries = 50000
+    log.info('Command line is: {}'.format(' '.join(sys.argv)))
+    log.info('Called with args:')
+    print_args(args)
+    for arch in archs:
+        model = StandardModel(args.dataset, arch, no_grad=True)
+        model.cuda()
+        model.eval()
+        save_result_path = args.exp_dir + "/{}_result.json".format(arch)
+        log.info("Begin attack {} on {}, result will be saved to {}".format(arch, args.dataset, save_result_path))
+        log.info("Target model {} input size {}".format(arch, model.input_size[-1]))
+        main(model, save_result_path, args)
 
-    # do the business
-    main()

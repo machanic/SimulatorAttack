@@ -4,7 +4,7 @@ import sys
 sys.path.append("/home1/machen/meta_perturbations_black_box_attack")
 from dataset.model_constructor import MetaLearnerModelBuilder
 import os
-from config import PY_ROOT, ALL_MODELS
+from config import PY_ROOT
 from torch.optim import Adam
 from torch.utils.data import DataLoader
 from dataset.meta_img_grad_dataset import MetaImgOnlineGradTaskDataset

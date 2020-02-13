@@ -1,0 +1,20 @@
+
+{
+  "CIFAR-10": {
+    "resize": false,
+    "lr": 1e-2,
+    "use_tanh": false
+  },
+  "CIFAR-100": {
+    "resize": false,
+    "use_tanh": false,
+    "lr": 1e-2
+  },
+  "ImageNet": {
+      "resize": true,
+      "use_tanh": true,
+      "lr": 2e-3
+  }
+
+
+}

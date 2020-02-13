@@ -22,10 +22,11 @@ class NpzDataset(data.Dataset):
 
     def __getitem__(self, index):
         if self.dataset == "ImageNet":
-            image_big = self.images_big[index]
-            image_small =self.images_small[index]
+            # image_big = self.images_big[index]
+            image_big =self.images_big[index]
+            image_small = self.images_small[index]
             label = self.labels[index]
-            return torch.from_numpy(image_big), torch.from_numpy(image_small), label
+            return torch.from_numpy(image_small),torch.from_numpy(image_big), label # 只返回224x224的图
         else:
             image = self.images[index]
             label = self.labels[index]

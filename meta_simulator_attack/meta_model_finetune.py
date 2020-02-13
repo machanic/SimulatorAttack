@@ -5,7 +5,6 @@ import re
 import glog as log
 import torch
 from torch import nn
-from torch.optim import SGD, Adam
 from torchvision import models as torch_models
 
 from cifar_models_myself import ResNet34

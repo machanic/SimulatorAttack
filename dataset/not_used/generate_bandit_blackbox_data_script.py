@@ -308,7 +308,7 @@ class BanditAttack(object):
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--gpu",type=int, required=True)
-    parser.add_argument('--json-config-file', type=str, help='a config file to be passed in instead of arguments')
+    parser.add_argument('--json-config-file', type=str, help='a configures file to be passed in instead of arguments')
     parser.add_argument("--dataset", type=str, choices=["CIFAR-10","CIFAR-100","MNIST","FashionMNIST","TinyImageNet","ImageNet"])
     parser.add_argument('--log-progress', action='store_true')
     parser.add_argument("--batch-size", type=int,default=500)

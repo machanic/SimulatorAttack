@@ -2,6 +2,7 @@ from copy import deepcopy
 
 import torch
 from torch import nn
+from torch.optim import Adam
 from torch.utils.data import DataLoader
 
 from config import IN_CHANNELS
@@ -23,7 +24,7 @@ class MetaLearner(object):
         trn_dataset = MetaImgOfflineGradTaskDataset(tot_num_tasks, dataset, inner_batch_size, protocol)
         self.train_loader = DataLoader(trn_dataset, batch_size=meta_batch_size, shuffle=True, num_workers=0, pin_memory=True)
         self.mse_loss = nn.MSELoss(reduction="mean").cuda()
-        self.optimizer = RAdam(self.network.parameters(), lr=inner_step_size, betas=(0, 0.999))
+        self.optimizer = Adam(self.network.parameters(), lr=inner_step_size, betas=(0, 0.999))
 
     def inner_train_step(self, model, task_images, task_grads):
         """

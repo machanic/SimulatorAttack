@@ -7,7 +7,7 @@ import torch
 from torch.utils import data
 from torchvision.datasets import CIFAR10, CIFAR100, MNIST, FashionMNIST, ImageFolder
 
-from config import IMAGE_SIZE, ALL_MODELS, MODELS_TEST, IMAGE_DATA_ROOT, MODELS_TRAIN_STANDARD, PY_ROOT, IN_CHANNELS, \
+from config import IMAGE_SIZE, IMAGE_DATA_ROOT, MODELS_TRAIN_STANDARD, PY_ROOT, IN_CHANNELS, \
     MODELS_TEST_STANDARD
 from constant_enum import SPLIT_DATA_PROTOCOL
 from dataset.dataset_loader_maker import DataLoaderMaker
