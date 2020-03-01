@@ -200,7 +200,7 @@ class ZOOAttack(object):
 
     def resize_op(self, resize_input, resize_size_x, resize_size_y):
         resize_input = torch.from_numpy(resize_input)
-        return F.interpolate(resize_input, (resize_size_y, resize_size_x), mode='bilinear').detach().numpy()
+        return F.interpolate(resize_input, (resize_size_y, resize_size_x), mode='bilinear',align_corners=True).detach().numpy()
 
     def resize_img(self, small_x, small_y, reset_only = False):
         self.small_x = small_x
@@ -265,7 +265,7 @@ class ZOOAttack(object):
 
     def get_newimg(self, timg, modifier):
         if self.resize:
-            scaled_modifier = F.interpolate(modifier, self.image_size, mode="bilinear")
+            scaled_modifier = F.interpolate(modifier, self.image_size, mode="bilinear",align_corners=True)
 
         else:
             scaled_modifier = modifier

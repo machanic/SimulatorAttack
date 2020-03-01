@@ -1,18 +1,26 @@
 
 { "CIFAR-10": {
-    "dataprior": false
-},
-
+    "dataprior": false,
+    "linf_epsilon": 0.031372
+  },
   "CIFAR-100": {
-    "dataprior": false
+    "dataprior": false,
+     "linf_epsilon": 0.031372
   },
   "MNIST": {
-       "dataprior": false
+       "dataprior": false,
+     "linf_epsilon": 0.031372
   },
-    "FashionMNIST": {
-        "dataprior": false
+  "FashionMNIST": {
+      "dataprior": false,
+     "linf_epsilon": 0.031372
   },
-    "ImageNet": {
-       "dataprior": true
-    }
+  "ImageNet": {
+    "dataprior": true,
+     "linf_epsilon": 0.05
+  },
+  "TinyImageNet": {
+    "dataprior": false,
+    "linf_epsilon": 0.031372
+  }
 }

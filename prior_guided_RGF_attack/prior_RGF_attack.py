@@ -13,7 +13,7 @@ import torch
 from torch import nn
 from torch.nn import functional as F
 
-from config import IMAGE_SIZE, IN_CHANNELS, PY_ROOT, MODELS_TEST_STANDARD
+from config import IMAGE_SIZE, IN_CHANNELS, PY_ROOT, MODELS_TEST_STANDARD, CLASS_NUM
 from dataset.dataset_loader_maker import DataLoaderMaker
 from dataset.model_constructor import StandardModel
 from utils.statistics_toolkit import success_rate_and_query_coorelation, success_rate_avg_query
@@ -37,17 +37,17 @@ class PriorRGFAttack(object):
         self.clip_max = 1.0
 
 
-    def xent_loss(self, logit, true_label, target=None):
+    def xent_loss(self, logit, true_labels, target_labels=None):
         if self.targeted:
-            return -F.cross_entropy(logit, target, reduction='none')
+            return -F.cross_entropy(logit, target_labels, reduction='none')
         else:
-            return F.cross_entropy(logit, true_label, reduction='none')
+            return F.cross_entropy(logit, true_labels, reduction='none')
 
-    def get_grad(self, model, x, labels):
+    def get_grad(self, model, x, true_labels, target_labels):
         with torch.enable_grad():
             x.requires_grad_()
             logits = model(x)
-            loss = F.cross_entropy(logits, labels)
+            loss = self.xent_loss(logits, true_labels, target_labels).mean()
             gradient = torch.autograd.grad(loss, x)[0]
         return gradient
 
@@ -55,7 +55,6 @@ class PriorRGFAttack(object):
         with torch.no_grad():
             logits = model(x)
         return logits.max(1)[1]
-
 
     def attack_dataset(self, args, arch, result_dump_path):
 
@@ -74,24 +73,20 @@ class PriorRGFAttack(object):
                 images, true_labels = data_tuple[0], data_tuple[1]
 
             if images.size(-1) != self.model.input_size[-1]:
-                images = F.interpolate(images, size=self.model.input_size[-1], mode='bilinear')
+                images = F.interpolate(images, size=self.model.input_size[-1], mode='bilinear', align_corners=True)
             self.image_height = images.size(2)
             self.image_width = images.size(3)
-
+            eps = args.epsilon
             if args.norm == 'l2':
                 # epsilon = 1e-3
                 # eps = np.sqrt(epsilon * model.input_size[-1] * model.input_size[-1] * self.in_channels)  # 1.752
-                eps = 4.6
                 learning_rate = 2.0 / np.sqrt(self.image_height * self.image_width * self.in_channels)
             else:
-                epsilon = 0.031372
-                if args.dataset == "ImageNet":
-                    epsilon = 0.05
-                eps = epsilon
                 learning_rate = 0.005
 
             images = images.cuda()
             true_labels = true_labels.cuda()
+
 
             with torch.no_grad():
                 logits = self.model(images)
@@ -104,6 +99,24 @@ class PriorRGFAttack(object):
                     log.info("The {}-th image is already classified incorrectly.")
                     continue
 
+            if self.targeted:
+                if self.target_type == 'random':
+                    target_labels = torch.randint(low=0, high=CLASS_NUM[args.dataset],
+                                                  size=true_labels.size()).long().cuda()
+                    invalid_target_index = target_labels.eq(true_labels)
+                    while invalid_target_index.sum().item() > 0:
+                        target_labels[invalid_target_index] = torch.randint(low=0, high=logits.shape[1],
+                                  size=target_labels[invalid_target_index].shape).long().cuda()     
+                        invalid_target_index = target_labels.eq(true_labels)
+                elif args.target_type == 'least_likely':
+                    target_labels = logits.argmin(dim=1)
+                elif args.target_type == "increment":
+                    target_labels = torch.fmod(true_labels + 1, CLASS_NUM[args.dataset])
+                else:
+                    raise NotImplementedError('Unknown target_type: {}'.format(args.target_type))
+            else:
+                target_labels = None
+
 
             total += images.size(0)
             sigma = args.sigma
@@ -113,13 +126,13 @@ class PriorRGFAttack(object):
             adv_images = images.clone().cuda()
             assert images.size(0) == 1
             logits_real_images = self.model(images)
-            l = self.xent_loss(logits_real_images, true_labels)  # 按照元素论文来写的，好奇怪
+            l = self.xent_loss(logits_real_images, true_labels, target_labels)  # 按照元素论文来写的，好奇怪
             lr = float(learning_rate)
             total_q = 0
             ite = 0
             while total_q <= args.max_queries:
                 total_q += 1
-                true = torch.squeeze(self.get_grad(self.model, adv_images, true_labels))  # C,H,W
+                true = torch.squeeze(self.get_grad(self.model, adv_images, true_labels, target_labels))  # C,H,W, # 其实没啥用，只是为了看看估计的准不准
                 log.info("Grad norm : {:.3f}".format(torch.sqrt(torch.sum(true * true)).item()))
 
                 if ite % 2 == 0 and sigma != args.sigma:
@@ -127,19 +140,19 @@ class PriorRGFAttack(object):
                     rand = torch.randn_like(adv_images)
                     rand = torch.div(rand, torch.clamp(torch.sqrt(torch.mean(torch.mul(rand, rand))), min=1e-12))
                     logits_1 = self.model(adv_images + args.sigma * rand)
-                    rand_loss = self.xent_loss(logits_1, true_labels)  # shape = (batch_size,)
+                    rand_loss = self.xent_loss(logits_1, true_labels, target_labels)  # shape = (batch_size,)
                     total_q += 1
                     rand =  torch.randn_like(adv_images)
                     rand = torch.div(rand, torch.clamp(torch.sqrt(torch.mean(torch.mul(rand, rand))), min=1e-12))
                     logits_2 = self.model(adv_images + args.sigma * rand)
-                    rand_loss2= self.xent_loss(logits_2, true_labels) # shape = (batch_size,)
+                    rand_loss2= self.xent_loss(logits_2, true_labels, target_labels) # shape = (batch_size,)
                     total_q += 1
                     if (rand_loss - l)[0].item() != 0 and (rand_loss2 - l)[0].item() != 0:
                         sigma = args.sigma
                         log.info("set sigma back to 1e-4, sigma={:.4f}".format(sigma))
 
                 if args.method != "uniform":
-                    prior = torch.squeeze(self.get_grad(self.surrogate_model, adv_images, true_labels))  # C,H,W
+                    prior = torch.squeeze(self.get_grad(self.surrogate_model, adv_images, true_labels, target_labels))  # C,H,W
                     alpha = torch.sum(true * prior) / torch.clamp(torch.sqrt(torch.sum(true * true) * torch.sum(prior * prior)), min=1e-12)
                     log.info("alpha = {:.3}".format(alpha))
                     prior = prior / torch.clamp(torch.sqrt(torch.mean(torch.mul(prior, prior))),min=1e-12)
@@ -157,12 +170,15 @@ class PriorRGFAttack(object):
                         eval_points =  adv_images + sigma * pert # broadcast, because tensor shape doesn't match exactly
                         # eval_points shape = (10,C,H,W) reshape to (10*1, C, H, W)
                         eval_points = eval_points.view(-1, adv_images.size(1), adv_images.size(2), adv_images.size(3))
-                        losses = self.xent_loss(self.model(eval_points), true_labels.repeat(s))  # shape = (10*B,)
+                        target_labels_s = None
+                        if target_labels is not None:
+                            target_labels_s = target_labels.repeat(s)
+                        losses = self.xent_loss(self.model(eval_points), true_labels.repeat(s), target_labels_s)  # shape = (10*B,)
                         total_q += s
                         norm_square = torch.mean(((losses - l) / sigma) ** 2) # scalar
                     while True:
                         logits_for_prior_loss = self.model(adv_images + sigma* prior) # prior may be C,H,W
-                        prior_loss = self.xent_loss(logits_for_prior_loss, true_labels)  # shape = (batch_size,)
+                        prior_loss = self.xent_loss(logits_for_prior_loss, true_labels, target_labels)  # shape = (batch_size,)
                         total_q += 1
                         diff_prior = (prior_loss - l)[0].item()   # FIXME batch模式下是否[0]?
                         if diff_prior == 0:
@@ -173,9 +189,9 @@ class PriorRGFAttack(object):
                     est_alpha = diff_prior / sigma / torch.clamp(torch.sqrt(torch.sum(torch.mul(prior,prior)) * norm_square), min=1e-12)
                     est_alpha = est_alpha.item()
                     log.info("Estimated alpha = {:.3f}".format(est_alpha))
-                    alpha = est_alpha
+                    alpha = est_alpha   # alpha描述了替代模型的梯度是否有用，alpha越大λ也越大，λ=1表示相信这个prior
                     if alpha < 0:
-                        prior = -prior
+                        prior = -prior  # v = -v , negative the transfer gradient
                         alpha = -alpha
                 q = args.samples_per_draw
                 n = self.image_height * self.image_width * self.in_channels
@@ -225,7 +241,10 @@ class PriorRGFAttack(object):
                     while True:
                         eval_points = adv_images + sigma * pert  # (1,C,H,W)  pert=(q,C,H,W)
                         logits_ = self.model(eval_points)
-                        losses = self.xent_loss(logits_, true_labels.repeat(q))  # shape = (q,)
+                        target_labels_q = None
+                        if target_labels is not None:
+                            target_labels_q = target_labels.repeat(q)
+                        losses = self.xent_loss(logits_, true_labels.repeat(q), target_labels_q)  # shape = (q,)
                         total_q += q
                         grad = (losses - l).view(-1, 1, 1, 1) * pert  # (q,1,1,1) * (q,C,H,W)
                         grad = torch.mean(grad,dim=0,keepdim=True)  # 1,C,H,W
@@ -242,7 +261,7 @@ class PriorRGFAttack(object):
                         les = []
                         for ss in length:
                             logits_p = model(adv_images + ss * direction)
-                            loss_p = self.xent_loss(logits_p, true_labels)
+                            loss_p = self.xent_loss(logits_p, true_labels, target_labels)
                             les.append((loss_p - l)[0].item())
                         log.info("losses: ".format(les))
 
@@ -250,11 +269,11 @@ class PriorRGFAttack(object):
                         if args.method == 'biased' or args.method == 'fixed_biased':
                             show_input = adv_images + lr * prior
                             logits_show = self.model(show_input)
-                            lprior = self.xent_loss(logits_show, true_labels) - l
+                            lprior = self.xent_loss(logits_show, true_labels, target_labels) - l
                             print_loss(self.model, prior)
                             show_input_2 = adv_images + lr * grad
                             logits_show2 = self.model(show_input_2)
-                            lgrad = self.xent_loss(logits_show2, true_labels) - l
+                            lgrad = self.xent_loss(logits_show2, true_labels, target_labels) - l
                             print_loss(self.model, grad)
                             log.info(lprior, lgrad)
                 else:
@@ -272,11 +291,13 @@ class PriorRGFAttack(object):
                 adv_images = torch.clamp(adv_images, self.clip_min, self.clip_max)
                 adv_labels = self.get_pred(self.model, adv_images)
                 logits_ = self.model(adv_images)
-                l = self.xent_loss(logits_, true_labels)
+                l = self.xent_loss(logits_, true_labels, target_labels)
                 log.info('queries:', total_q, 'loss:', l, 'learning rate:', lr, 'sigma:', sigma, 'prediction:', adv_labels,
                       'distortion:', torch.max(torch.abs(adv_images - images)).item(), torch.norm(adv_images - images).item())
                 ite += 1
-                if adv_labels[0].item() != true_labels[0].item():
+
+                if (self.targeted and adv_labels[0].item() == target_labels[0].item()) \
+                        or (not self.targeted and adv_labels[0].item() != true_labels[0].item()):
                     log.info("Stop at queries : {}".format(total_q))
                     success += 1
                     not_done.append(0)
@@ -302,9 +323,11 @@ class PriorRGFAttack(object):
                           "mean_query": np.mean(success_query[np.nonzero(success)[0]]).item(),
                           "max_query":np.max(success_query[np.nonzero(success)[0]]).item(),
                           "median_query": np.median(success_query[np.nonzero(success)[0]]).item(),
+                          "avg_not_done": np.mean(not_done_all.astype(np.float32)).item(),
                           "query_threshold_success_rate_dict": query_threshold_success_rate,
                           "query_success_rate_dict": query_success_rate,
-                          "success_rate_to_avg_query": success_rate_to_avg_query}
+                          "success_rate_to_avg_query": success_rate_to_avg_query,
+                          "args": vars(args)}
         with open(result_dump_path, "w") as result_file_obj:
             json.dump(meta_info_dict, result_file_obj, sort_keys=True)
         log.info("done, write stats info to {}".format(result_dump_path))
@@ -364,6 +387,7 @@ if __name__ == "__main__":
                         help='a configures file to be passed in instead of arguments')
     parser.add_argument("--show_loss", action="store_true", help="Whether to print loss in some given step sizes.")
     parser.add_argument("--samples_per_draw",type=int, default=50, help="Number of samples to estimate the gradient.")
+    parser.add_argument("--epsilon", type=float, default=4.6, help='Default of epsilon is L2 epsilon')
     parser.add_argument("--sigma", type=float,default=1e-4, help="Sampling variance.")
     # parser.add_argument("--number_images", type=int, default=100000,  help='Number of images for evaluation.')
     parser.add_argument("--max_queries", type=int, default=10000, help="Maximum number of queries.")
@@ -375,13 +399,17 @@ if __name__ == "__main__":
     args.exp_dir = os.path.join(args.exp_dir, get_expr_dir_name(args.dataset, args.method, args.surrogate_arch, args.norm,
                                                                 args.targeted, args.target_type))
     os.makedirs(args.exp_dir, exist_ok=True)
-    set_log_file(os.path.join(args.exp_dir, 'run.log'))
+    if args.test_archs:
+        set_log_file(os.path.join(args.exp_dir, 'run.log'))
+    else:
+        set_log_file(os.path.join(args.exp_dir, 'run_{}.log'.format(args.arch)))
     defaults = json.load(open(args.json_config))[args.dataset]
     arg_vars = vars(args)
     arg_vars = {k: arg_vars[k] for k in arg_vars if arg_vars[k] is not None}
     defaults.update(arg_vars)
     args = SimpleNamespace(**defaults)
-
+    if args.norm == "linf":
+        args.epsilon = defaults["linf_epsilon"]
 
     if args.targeted:
         if args.dataset == "ImageNet":
@@ -398,6 +426,11 @@ if __name__ == "__main__":
                     PY_ROOT,
                     args.dataset, arch)
                 if os.path.exists(test_model_path):
+                    archs.append(arch)
+            elif args.dataset == "TinyImageNet":
+                test_model_list_path = "{root}/train_pytorch_model/real_image_model/{dataset}@{arch}*.pth.tar".format(root=PY_ROOT, dataset=args.dataset, arch=arch)
+                test_model_path = list(glob.glob(test_model_list_path))
+                if test_model_path and os.path.exists(test_model_path[0]):
                     archs.append(arch)
             elif args.dataset == "ImageNet":
                 test_model_list_path = "{}/train_pytorch_model/real_image_model/{}-pretrained/checkpoints/{}-*.pth".format(

@@ -473,7 +473,7 @@ def set_log_file(fname):
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--gpu",type=int, required=True)
-    parser.add_argument('--json-config-file', default="/home1/machen/meta_perturbations_black_box_attack/bandits_attack_conf.json",
+    parser.add_argument('--json-config-file', default="/home1/machen/meta_perturbations_black_box_attack/configures/bandits_attack_conf.json",
                         type=str, help='a configures file to be passed in instead of arguments')
     parser.add_argument("--dataset", type=str, choices=["CIFAR-10","CIFAR-100","MNIST","FashionMNIST","TinyImageNet","ImageNet"])
     parser.add_argument("--batch-size", type=int,default=100)

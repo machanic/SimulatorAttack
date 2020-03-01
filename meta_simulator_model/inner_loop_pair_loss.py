@@ -10,18 +10,18 @@ class InnerLoopPairLoss(nn.Module):
     The forward method updates weights with gradient steps on training data, 
     then computes and returns a meta-gradient w.r.t. validation data
     '''
-    def __init__(self, network, num_updates, step_size, meta_batch_size, loss_type):
+    def __init__(self, network, num_updates, step_size, meta_batch_size, loss_type, use_softmax):
         super(InnerLoopPairLoss, self).__init__()
         self.network = copy.deepcopy(network)
         # Number of updates to be taken
         self.num_updates = num_updates
         # Step size for the updates
         self.step_size = step_size
-        self.huber_loss = nn.SmoothL1Loss(reduction="mean")
         self.meta_batch_size = meta_batch_size
         self.pair_wise_distance = nn.PairwiseDistance(p=2)
         self.mse_loss = nn.MSELoss(reduction="mean")
         self.softmax = nn.Softmax(dim=1)
+        self.use_softmax = use_softmax
         self.loss_type = loss_type    # pair_mse, mse
 
     def copy_weights(self, net):
@@ -37,10 +37,11 @@ class InnerLoopPairLoss(nn.Module):
         imgs_2 = imgs_2.cuda()
         out_1 = self.net_forward(imgs_1, weights)
         out_2 = self.net_forward(imgs_2, weights)
-        out_1 = self.softmax(out_1)
-        out_2 = self.softmax(out_2)
-        target_1 = self.softmax(target_1)
-        target_2 = self.softmax(target_2)
+        if self.use_softmax:
+            out_1 = self.softmax(out_1)
+            out_2 = self.softmax(out_2)
+            target_1 = self.softmax(target_1)
+            target_2 = self.softmax(target_2)
         diff_loss1 = self.mse_loss(out_1, target_1)
         diff_loss2 = self.mse_loss(out_2, target_2)
         if self.loss_type == "pair_mse":
@@ -60,7 +61,10 @@ class InnerLoopPairLoss(nn.Module):
         query_output = self.net_forward(query_images, weights)
         query_predict = query_output.max(1)[1]
         accuracy = query_target_labels.eq(query_predict.long()).sum() / float(query_targets.size(0))
-        mse_error = self.mse_loss(self.softmax(query_output), self.softmax(query_targets))
+        if self.use_softmax:
+            query_output =self.softmax(query_output)
+            query_targets = self.softmax(query_targets)
+        mse_error = self.mse_loss(query_output, query_targets)
         accuracy = accuracy.detach().cpu()
         mse_error = mse_error.detach().cpu()
         return accuracy, mse_error
@@ -71,12 +75,13 @@ class InnerLoopPairLoss(nn.Module):
         for i in range(self.num_updates):
             if i==0:
                 loss = self.forward_pass(task_support_images_1, task_support_images_2, task_support_target_1, task_support_target_2)
-                grads = torch.autograd.grad(loss, self.parameters() )
+                grads = torch.autograd.grad(loss, self.parameters())
             else:
                 loss = self.forward_pass(task_support_images_1, task_support_images_2, task_support_target_1, task_support_target_2,
-                                            fast_weights)
+                                         fast_weights)
                 grads = torch.autograd.grad(loss, fast_weights.values())
-            fast_weights = OrderedDict((name, param - self.step_size*grad) for ((name, param), grad) in zip(fast_weights.items(), grads))
+            fast_weights = OrderedDict((name, param - self.step_size * grad)
+                                     for ((name, param), grad) in zip(fast_weights.items(), grads))
         # Compute the meta gradient and return it
         loss = self.forward_pass(task_query_images_1, task_query_images_2, task_query_target_1, task_query_target_2, fast_weights)
         loss = loss / self.meta_batch_size   # normalize loss

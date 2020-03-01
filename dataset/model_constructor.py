@@ -15,10 +15,11 @@ from cifar_models_myself import Conv3, DenseNet121, DenseNet169, DenseNet201, Go
     wideresnet40, carlinet, wideresnet28drop, wideresnet34drop, wideresnet40drop
 from cifar_models_myself.miscellaneous import Identity
 from config import pretrained_cifar_model_conf, IN_CHANNELS, IMAGE_SIZE, CLASS_NUM, PY_ROOT
+from cifar_models_myself.efficient_densenet import EfficientDenseNet
 from tiny_imagenet_models.densenet import densenet161, densenet121, densenet169, densenet201
 from tiny_imagenet_models.resnext import resnext101_32x4d, resnext101_64x4d
 import torchvision.models as vision_models
-
+from tiny_imagenet_models.inception import inception_v3
 
 class StandardModel(nn.Module):
     """
@@ -34,9 +35,14 @@ class StandardModel(nn.Module):
         if is_subspace_attack_ref_arch:
             trained_model_path = self.get_subspace_attack_reference_model_path(ref_arch_train_data, ref_arch_epoch, arch)
         else:
-            if dataset != "ImageNet":
+            if dataset.startswith("CIFAR"):
                 trained_model_path = "{root}/train_pytorch_model/real_image_model/{dataset}-pretrained/{arch}/checkpoint.pth.tar".format(root=PY_ROOT, dataset=dataset, arch=arch)
                 assert os.path.exists(trained_model_path), "{} does not exist!".format(trained_model_path)
+            elif dataset == "TinyImageNet":
+                trained_model_path = "{root}/train_pytorch_model/real_image_model/{dataset}@{arch}@*.pth.tar".format(root=PY_ROOT, dataset=dataset, arch=arch)
+                trained_model_path_list = list(glob.glob(trained_model_path))
+                assert len(trained_model_path_list)>0, "{} does not exist!".format(trained_model_path)
+                trained_model_path = trained_model_path_list[0]
             else:
                 trained_model_path = "{root}/train_pytorch_model/real_image_model/{dataset}-pretrained/checkpoints/{arch}*.pth".format(
                     root=PY_ROOT, dataset=dataset, arch=arch)
@@ -59,6 +65,11 @@ class StandardModel(nn.Module):
     def check_arch(arch, dataset):
         if dataset == "ImageNet":
             return arch in pretrainedmodels.__dict__
+        elif dataset == "TinyImageNet":
+            trained_model_path = "{root}/train_pytorch_model/real_image_model/{dataset}@{arch}@*.pth.tar".format(
+                root=PY_ROOT, dataset=dataset, arch=arch)
+            trained_model_path_list = list(glob.glob(trained_model_path))
+            return len(trained_model_path_list) > 0
         else:
             trained_model_path = "{root}/train_pytorch_model/real_image_model/{dataset}-pretrained/{arch}*".format(
                 root=PY_ROOT, dataset=dataset, arch=arch)
@@ -80,8 +91,7 @@ class StandardModel(nn.Module):
         if max(self.input_range) == 255:
             x = x * 255
         # normalization
-        x = (x - self.mean) / self.std
-
+        x = (x - self.mean.to(x.device)) / self.std.to(x.device)
         if self.no_grad:
             with torch.no_grad():
                 x = self.cnn(x)
@@ -206,6 +216,14 @@ class StandardModel(nn.Module):
                 model.input_range = [0, 1]
                 model.input_size = [in_channel, IMAGE_SIZE[dataset][0], IMAGE_SIZE[dataset][1]]
             self.load_weight_from_pth_checkpoint(model, trained_model_path)
+        elif dataset == "TinyImageNet":
+            model = MetaLearnerModelBuilder.construct_tiny_imagenet_model(arch, dataset)
+            model.input_space = 'RGB'
+            model.input_range = [0, 1]
+            model.mean = [0,0,0]
+            model.std = [1,1,1]
+            model.input_size = [in_channel,IMAGE_SIZE[dataset][0], IMAGE_SIZE[dataset][1]]
+            model.load_state_dict(torch.load(trained_model_path, map_location=lambda storage, location: storage)["state_dict"])
         elif dataset == 'ImageNet':
             os.environ["TORCH_HOME"] = "{}/train_pytorch_model/real_image_model/ImageNet-pretrained".format(PY_ROOT)
             model = pretrainedmodels.__dict__[arch](num_classes=1000, pretrained="imagenet")
@@ -295,35 +313,46 @@ class MetaLearnerModelBuilder(object):
             network = wideresnet40drop(IN_CHANNELS[dataset], CLASS_NUM[dataset])
         elif arch == "carlinet":
             network = carlinet(IN_CHANNELS[dataset], CLASS_NUM[dataset])
+        elif arch == 'efficient_densenet':
+            depth = 40
+            block_config = [(depth - 4) // 6 for _ in range(3)]
+            network = EfficientDenseNet(IN_CHANNELS[dataset], block_config=block_config,
+                                        num_classes=CLASS_NUM[dataset], small_inputs=dataset != "ImageNet", efficient=False)
         return network
 
     @staticmethod
-    def construct_imagenet_model(arch):
-        # os.environ["TORCH_HOME"] = "{}/train_pytorch_model/real_image_model/ImageNet-pretrained".format(PY_ROOT)
+    def construct_imagenet_model(arch, dataset):
+        os.environ["TORCH_HOME"] = "{}/train_pytorch_model/real_image_model/ImageNet-pretrained".format(PY_ROOT)
+        if arch == 'efficient_densenet':
+            depth = 40
+            block_config = [(depth - 4) // 6 for _ in range(3)]
+            return EfficientDenseNet(IN_CHANNELS[dataset],block_config=block_config, num_classes=CLASS_NUM[dataset], small_inputs=False, efficient=False)
         model = vision_models.__dict__[arch](pretrained=False)
         return model
 
     @staticmethod
     def construct_tiny_imagenet_model(arch, dataset):
-        if arch in torch_models.__dict__:
-            network = torch_models.__dict__[arch](pretrained=True)
+        if not arch.startswith("densenet") and not arch.startswith("resnext") and arch in torch_models.__dict__:
+            network = torch_models.__dict__[arch](pretrained=False)
         num_classes = CLASS_NUM[dataset]
         if arch.startswith("resnet"):
             num_ftrs = network.fc.in_features
             network.fc = nn.Linear(num_ftrs, num_classes)
         elif arch.startswith("densenet"):
             if arch == "densenet161":
-                network = densenet161(pretrained=True)
+                network = densenet161(pretrained=False)
             elif arch == "densenet121":
-                network = densenet121(pretrained=True)
+                network = densenet121(pretrained=False)
             elif arch == "densenet169":
-                network = densenet169(pretrained=True)
+                network = densenet169(pretrained=False)
             elif arch == "densenet201":
-                network = densenet201(pretrained=True)
+                network = densenet201(pretrained=False)
         elif arch == "resnext32_4":
-            network = resnext101_32x4d(pretrained="imagenet")
+            network = resnext101_32x4d(pretrained=None)
         elif arch == "resnext64_4":
-            network = resnext101_64x4d(pretrained="imagenet")
+            network = resnext101_64x4d(pretrained=None)
+        elif arch.startswith("inception"):
+            network = inception_v3(pretrained=False)
         elif arch.startswith("vgg"):
             network.avgpool = Identity()
             network.classifier[0] = nn.Linear(512 * 2 * 2, 4096)  # 64 /2**5 = 2

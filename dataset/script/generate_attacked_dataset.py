@@ -1,12 +1,13 @@
 import glob
 import os
-
+import sys
+sys.path.append("/home1/machen/meta_perturbations_black_box_attack")
 import torch
 import numpy as np
 import glog as log
-from config import PY_ROOT, CIFAR_ALL_MODELS
+from config import PY_ROOT, MODELS_TRAIN_STANDARD, MODELS_TEST_STANDARD
 from dataset.dataset_loader_maker import DataLoaderMaker
-from dataset.model_constructor import StandardModel
+from dataset.model_constructor import StandardModel, MetaLearnerModelBuilder
 
 
 def generate_attacked_dataset(dataset, num_sample, models):
@@ -82,34 +83,60 @@ def save_selected_images(dataset, selected_images, selected_big_images, selected
 
 def load_models(dataset):
     archs = []
+    model_path_list = []
     if dataset == "CIFAR-10" or dataset == "CIFAR-100":
         for arch in ["resnet-110","WRN-28-10","WRN-34-10","resnext-8x64d","resnext-16x64d"]:
             test_model_path = "{}/train_pytorch_model/real_image_model/{}-pretrained/{}/checkpoint.pth.tar".format(
                 PY_ROOT, dataset, arch)
             if os.path.exists(test_model_path):
                 archs.append(arch)
+                model_path_list.append(test_model_path)
             else:
-                log.info(test_model_path + " does not exists!")
+                log.info(test_model_path + " does not exist!")
+    elif dataset == "TinyImageNet":
+        # for arch in ["vgg11_bn","resnet18","vgg16_bn","resnext64_4","densenet121"]:
+        for arch in MODELS_TEST_STANDARD[dataset]:
+            test_model_path = "{}/train_pytorch_model/real_image_model/{}@{}@*.pth.tar".format(
+                PY_ROOT, dataset, arch)
+            test_model_path = list(glob.glob(test_model_path))[0]
+            if os.path.exists(test_model_path):
+                archs.append(arch)
+                model_path_list.append(test_model_path)
+            else:
+                log.info(test_model_path + "does not exist!")
     else:
         for arch in ["inceptionv3","inceptionv4", "inceptionresnetv2","resnet101", "resnet152"]:
             test_model_list_path = "{}/train_pytorch_model/real_image_model/{}-pretrained/checkpoints/{}*.pth".format(
                 PY_ROOT, dataset, arch)
-            test_model_list_path = list(glob.glob(test_model_list_path))
-            if len(test_model_list_path) == 0:  # this arch does not exists in args.dataset
+            test_model_path = list(glob.glob(test_model_list_path))
+            if len(test_model_path) == 0:  # this arch does not exists in args.dataset
                 continue
             archs.append(arch)
+            model_path_list.append(test_model_path[0])
     models = []
     print("begin construct model")
-    for arch in archs:
-        model = StandardModel(dataset, arch, no_grad=True)
-        model.cuda()
-        model.eval()
-        models.append(model)
+    if dataset == "TinyImageNet":
+        for idx, arch in enumerate(archs):
+            model = MetaLearnerModelBuilder.construct_tiny_imagenet_model(arch, dataset)
+            model_path = model_path_list[idx]
+            model.load_state_dict(torch.load(model_path, map_location=lambda storage, location: storage)["state_dict"])
+            model.cuda()
+            model.eval()
+            models.append(model)
+    else:
+        for arch in archs:
+            model = StandardModel(dataset, arch, no_grad=True)
+            model.cuda()
+            model.eval()
+            models.append(model)
     print("end construct model")
     return models
 
 if __name__ == "__main__":
-    dataset = "ImageNet"
+    os.environ["CUDA_DEVICE_ORDER"] = "PCI_BUS_ID"
+    os.environ['CUDA_VISIBLE_DEVICES'] = "2"
+
+    dataset = "TinyImageNet"
     models = load_models(dataset)
     selected_images, selected_images_big, selected_true_labels, selected_img_id = generate_attacked_dataset(dataset, 1000, models)
     save_path = "{}/attacked_images/{}/{}_images.npz".format(PY_ROOT, dataset, dataset)

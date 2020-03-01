@@ -1,4 +1,5 @@
-IMAGE_SIZE = {"CIFAR-10":(32,32), "CIFAR-100":(32,32), "ImageNet":(224,224), "MNIST":(28, 28), "FashionMNIST":(28,28), "SVHN":(32,32), "TinyImageNet": (64,64)}
+IMAGE_SIZE = {"CIFAR-10":(32,32), "CIFAR-100":(32,32), "ImageNet":(224,224), "MNIST":(28, 28), "FashionMNIST":(28,28), "SVHN":(32,32),
+              "TinyImageNet": (64,64)}
 IN_CHANNELS = {"MNIST":1, "FashionMNIST":1, "CIFAR-10":3, "ImageNet":3, "CIFAR-100":3, "SVHN":3, "TinyImageNet":3}
 CLASS_NUM = {"MNIST":10,"FashionMNIST":10, "CIFAR-10":10, "CIFAR-100":100, "ImageNet":1000, "SVHN":10, "TinyImageNet":200}
 PY_ROOT = "/home1/machen/meta_perturbations_black_box_attack"
@@ -83,11 +84,14 @@ MODELS_TRAIN_STANDARD = {"CIFAR-10": ["alexnet", "densenet-bc-100-12", "densenet
                          "ImageNet": ["alexnet", "bninception","densenet121", "densenet161","densenet169", "densenet201","dpn68",
                                      "resnext101_32x4d","resnext101_64x4d","se_resnext101_32x4d",
                                       "se_resnext50_32x4d","squeezenet1_0","squeezenet1_1","vgg11","vgg11_bn","vgg13_bn","vgg13",
-                                      "vgg16","vgg16_bn","vgg19_bn","vgg19"]}
+                                      "vgg16","vgg16_bn","vgg19_bn","vgg19"],
+                         "TinyImageNet": ["vgg13","densenet169","vgg11_bn","resnet34","vgg19","vgg13_bn","vgg11","resnet18","vgg16",
+                                          "vgg19_bn","densenet201","resnet101","densenet161","resnet50","vgg16_bn","resnet152"]}
 
 MODELS_TEST_STANDARD = {"CIFAR-10": ["pyramidnet272", "gdas","WRN-28-10-drop","WRN-40-10-drop"],
                         "CIFAR-100":["pyramidnet272", "gdas","WRN-28-10-drop","WRN-40-10-drop"],
-                        "ImageNet": ["inceptionv3","inceptionv4","senet154","pnasnet5large","resnet101"]}
+                        "ImageNet": ["inceptionv3","inceptionv4","senet154","pnasnet5large","resnet101"],
+                        "TinyImageNet":["resnext64_4","densenet121","resnext32_4"]}
 
 
 

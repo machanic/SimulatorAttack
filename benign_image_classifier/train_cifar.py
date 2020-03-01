@@ -13,8 +13,8 @@ import torch.optim
 import torch.utils.data
 from config import IN_CHANNELS
 from optimizer.radam import RAdam
-from dataset_loader_maker import DataLoaderMaker
-from model_constructor import MetaLearnerModelBuilder
+from dataset.dataset_loader_maker import DataLoaderMaker
+from dataset.model_constructor import MetaLearnerModelBuilder
 
 class Identity(nn.Module):
     def __init__(self):
@@ -34,7 +34,7 @@ parser.add_argument('-b', '--batch-size', default=200, type=int,
                     help='mini-batch size (default: 256), this is the total '
                          'batch size of all GPUs on the current node when '
                          'using Data Parallel or Distributed Data Parallel')
-parser.add_argument("--dataset", type=str, choices=list(IN_CHANNELS.keys()), default="CIFAR-10",help="CIFAR-10")
+parser.add_argument("--dataset", type=str, choices=list(IN_CHANNELS.keys()), required=True,help="CIFAR-10")
 parser.add_argument('--lr', '--learning-rate', default=0.001, type=float,
                     metavar='LR', help='initial learning rate', dest='lr')
 parser.add_argument('--momentum', default=0.9, type=float, metavar='M',

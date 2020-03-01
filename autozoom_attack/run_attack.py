@@ -110,7 +110,7 @@ class AutoZoomAttackFramework(object):
                 images, true_labels = data_tuple[0], data_tuple[1]
 
             if images.size(-1) != target_model.input_size[-1]:
-                images = F.interpolate(images, size=target_model.input_size[-1], mode='bilinear')
+                images = F.interpolate(images, size=target_model.input_size[-1], mode='bilinear',align_corners=True)
             self.make_adversarial_examples(batch_idx, images.cuda(), true_labels.cuda(),
                                                                  args, attacker, target_model, codec)
 
@@ -235,7 +235,7 @@ if __name__ == "__main__":
     parser.add_argument('--exp_dir', default='logs', type=str,
                         help='directory to save results and logs')
     parser.add_argument('--seed', default=0, type=int, help='random seed')
-    parser.add_argument('--json-configures', type=str,
+    parser.add_argument('--json-config', type=str,
                         default='/home1/machen/meta_perturbations_black_box_attack/autozoom_attack_conf.json',
                         help='a configures file to be passed in instead of arguments')
     args = parser.parse_args()

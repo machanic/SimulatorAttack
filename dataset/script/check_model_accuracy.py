@@ -4,7 +4,7 @@ import os
 import re
 import time
 from dataset.dataset_loader_maker import DataLoaderMaker
-from model_constructor import MetaLearnerModelBuilder
+from dataset.model_constructor import MetaLearnerModelBuilder
 import argparse
 import glob
 from cifar_models_myself import *
@@ -93,18 +93,19 @@ if __name__ == "__main__":
     os.environ["CUDA_DEVICE_ORDER"] = "PCI_BUS_ID"
     os.environ['CUDA_VISIBLE_DEVICES'] = str(args.gpu)
     os.environ['CUDA_VISIBLE_DEVICE'] = str(args.gpu)
-    os.environ["TORCH_HOME"] = "/home1/machen/.cache/torch/pretrainedmodels"
-    print("using GPU {}".format(args.gpu))
+    os.environ["TORCH_HOME"] = "/home1/machen/meta_perturbations_black_box_attack/train_pytorch_model/real_image_model/ImageNet-pretrained"
+
     pattern = re.compile("(.*?)@(.*?)@.*tar")
     set_log_file(args.dir_path + "/check_{}.log".format(args.dataset))
-    print(args.dir_path + "/{}*.tar".format(args.dataset))
+    log.info("using GPU {}".format(args.gpu))
+    log.info(args.dir_path + "/{}*.tar".format(args.dataset))
+
     for abs_path in glob.glob(args.dir_path + "/{}*.tar".format(args.dataset)):
         f = os.path.basename(abs_path)
         ma = pattern.match(f)
         dataset = args.dataset
         arch = ma.group(2)
-        print(arch)
-        if dataset in ["CIFAR-10","MNIST","FashionMNIST"]:
+        if dataset in ["CIFAR-10","CIFAR-100","MNIST","FashionMNIST"]:
             model = MetaLearnerModelBuilder.construct_cifar_model(arch, dataset)
         elif dataset == "TinyImageNet":
             model = MetaLearnerModelBuilder.construct_tiny_imagenet_model(arch, dataset)
@@ -112,7 +113,7 @@ if __name__ == "__main__":
             if arch not in pretrainedmodels.__dict__:
                 print("arch {} not in pretrained models".format(arch))
                 continue
-            model = MetaLearnerModelBuilder.construct_imagenet_model(arch)
+            model = MetaLearnerModelBuilder.construct_imagenet_model(arch, dataset)
         if dataset != "ImageNet":
             model.load_state_dict(torch.load(abs_path, map_location=lambda storage, location: storage)["state_dict"])
         model.cuda()

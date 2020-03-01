@@ -1,6 +1,6 @@
+import glob
 import sys
-
-from utils.statistics_toolkit import success_rate_and_query_coorelation, success_rate_avg_query
+from collections import deque
 
 sys.path.append("/home1/machen/meta_perturbations_black_box_attack")
 import argparse
@@ -8,24 +8,20 @@ import json
 import os
 import os.path as osp
 import random
-
-import time
 from types import SimpleNamespace
-
+from dataset.model_constructor import StandardModel
 import glog as log
 import numpy as np
 import torch
 from torch.nn import functional as F
 from torch.nn.modules import Upsample
-
-from config import IMAGE_SIZE, IN_CHANNELS, CLASS_NUM
+from config import IN_CHANNELS, CLASS_NUM, PY_ROOT, MODELS_TEST_STANDARD
 from dataset.dataset_loader_maker import DataLoaderMaker
+from utils.statistics_toolkit import success_rate_and_query_coorelation, success_rate_avg_query
 from meta_simulator_attack.meta_model_finetune import MetaModelFinetune
-from target_models.standard_model import StandardModel
-from collections import deque
 
-class BanditsAttack(object):
-    def __init__(self, args):
+class SimulateBanditsAttack(object):
+    def __init__(self, args, meta_finetuner):
         self.dataset_loader = DataLoaderMaker.get_test_attacked_data(args.dataset, args.batch_size)
         self.total_images = len(self.dataset_loader.dataset)
         self.query_all = torch.zeros(self.total_images)
@@ -35,6 +31,7 @@ class BanditsAttack(object):
         self.success_query_all = torch.zeros_like(self.query_all)
         self.not_done_loss_all = torch.zeros_like(self.query_all)
         self.not_done_prob_all = torch.zeros_like(self.query_all)
+        self.meta_finetuner = meta_finetuner
 
     def norm(self, t):
         assert len(t.shape) == 4
@@ -71,7 +68,10 @@ class BanditsAttack(object):
     def l2_image_step(self, x, g, lr):
         return x + lr * g / self.norm(g)
 
-
+    ##
+    # Projection steps for l2 and linf constraints:
+    # All take the form of func(new_x, old_x, epsilon)
+    ##
     def l2_proj(self, image, eps):
         orig = image.clone()
         def proj(new_x):
@@ -112,36 +112,36 @@ class BanditsAttack(object):
             second_max_logit = logit[torch.arange(logit.shape[0]), second_max_index]
             return second_max_logit - gt_logit
 
-    def make_adversarial_examples(self, batch_index, images, true_labels, args, target_model, meta_finetuner):
+    def make_adversarial_examples(self, batch_index, images, true_labels, args, target_model):
         '''
         The attack process for generating adversarial examples with priors.
         '''
-        if args.dataset in ["CIFAR-10", "MNIST", "FashionMNIST", "TinyImageNet"]:
-            upsampler = lambda x: x
-        else:
-            upsampler = Upsample(size=(IMAGE_SIZE[args.dataset][0], IMAGE_SIZE[args.dataset][1]))
-        with torch.no_grad():
-            logit = target_model(images)
-
+        first_finetune = True
         q1_images_for_finetune = deque(maxlen=args.meta_seq_len)
         q2_images_for_finetune = deque(maxlen=args.meta_seq_len)
         q1_logits_for_finetune = deque(maxlen=args.meta_seq_len)
         q2_logits_for_finetune = deque(maxlen=args.meta_seq_len)
-
+        prior_size = target_model.input_size[-1] if not args.tiling else args.tile_size
+        assert args.tiling == (args.dataset == "ImageNet")
+        if args.tiling:
+            upsampler = Upsample(size=(target_model.input_size[-2], target_model.input_size[-1]))
+        else:
+            upsampler = lambda x: x
+        with torch.no_grad():
+            logit = target_model(images)
         pred = logit.argmax(dim=1)
         query = torch.zeros(args.batch_size).cuda()
         correct = pred.eq(true_labels).float()  # shape = (batch_size,)
         not_done = correct.clone()  # shape = (batch_size,)
         selected = torch.arange(batch_index * args.batch_size,
-                                (batch_index + 1) * args.batch_size)  # 选择这个batch的所有图片的index
+                                min((batch_index + 1) * args.batch_size, self.total_images))  # 选择这个batch的所有图片的index
         if args.targeted:
             if args.target_type == 'random':
                 target_labels = torch.randint(low=0, high=CLASS_NUM[args.dataset], size=true_labels.size()).long().cuda()
                 invalid_target_index = target_labels.eq(true_labels)
                 while invalid_target_index.sum().item() > 0:
                     target_labels[invalid_target_index] = torch.randint(low=0, high=logit.shape[1],
-                                                                        size=target_labels[
-                                                                            invalid_target_index].shape).long().cuda()
+                                                                 size=target_labels[invalid_target_index].shape).long().cuda()
                     invalid_target_index = target_labels.eq(true_labels)
             elif args.target_type == 'least_likely':
                 target_labels = logit.argmin(dim=1)
@@ -151,18 +151,15 @@ class BanditsAttack(object):
                 raise NotImplementedError('Unknown target_type: {}'.format(args.target_type))
         else:
             target_labels = None
-        prior = torch.zeros(args.batch_size, IN_CHANNELS[args.dataset], IMAGE_SIZE[args.dataset][0], IMAGE_SIZE[args.dataset][1])
-        prior = prior.cuda()
-        dim = prior.nelement() / args.batch_size
+        prior = torch.zeros(args.batch_size, IN_CHANNELS[args.dataset], prior_size, prior_size).cuda()
+        dim = prior.nelement() / args.batch_size               # nelement() --> total number of elements
         prior_step = self.gd_prior_step if args.norm == 'l2' else self.eg_step
         image_step = self.l2_image_step if args.norm == 'l2' else self.linf_step
         proj_maker = self.l2_proj if args.norm == 'l2' else self.linf_proj  # 调用proj_maker返回的是一个函数
         proj_step = proj_maker(images, args.epsilon)
-        criterion = self.cw_loss if args.loss == "cw" else self.xent_loss
+        criterion = self.cw_loss if args.data_loss == "cw" else self.xent_loss
         adv_images = images.clone()
-        query_count = 0
-        step_index = 1
-        while query_count < args.max_queries:
+        for step_index in range(1, args.max_queries // 2 + 1):
             # Create noise for exporation, estimate the gradient, and take a PGD step
             exp_noise = args.exploration * torch.randn_like(prior) / (dim ** 0.5)  # parameterizes the exploration to be done around the prior
             # Query deltas for finite difference estimator
@@ -173,7 +170,9 @@ class BanditsAttack(object):
             q1_images = adv_images + args.fd_eta * q1 / self.norm(q1)
             q2_images = adv_images + args.fd_eta * q2 / self.norm(q2)
             predict_by_target_model = False
-            if step_index <= args.warm_up_steps or (step_index - args.warm_up_steps) % args.meta_predict_steps == 0:
+            use_target_threshold = 0.04 if args.norm == "l2" else 0.1
+            if (step_index <= args.warm_up_steps or (step_index - args.warm_up_steps) % args.meta_predict_steps == 0)\
+                    or not_done.mean().item() <= use_target_threshold:
                 log.info("predict from target model")
                 predict_by_target_model = True
                 with torch.no_grad():
@@ -183,16 +182,18 @@ class BanditsAttack(object):
                 q2_images_for_finetune.append(q2_images.detach())
                 q1_logits_for_finetune.append(q1_logits.detach())
                 q2_logits_for_finetune.append(q2_logits.detach())
-                if step_index > args.warm_up_steps:
+                if step_index >= args.warm_up_steps and not_done.mean().item() > use_target_threshold:
                     q1_images_seq = torch.stack(list(q1_images_for_finetune)).permute(1, 0, 2, 3, 4).contiguous()  # B,T,C,H,W
                     q2_images_seq = torch.stack(list(q2_images_for_finetune)).permute(1, 0, 2, 3, 4).contiguous()  # B,T,C,H,W
                     q1_logits_seq = torch.stack(list(q1_logits_for_finetune)).permute(1, 0, 2).contiguous()  # B,T,#class
                     q2_logits_seq = torch.stack(list(q2_logits_for_finetune)).permute(1, 0, 2).contiguous()  # B,T,#class
-                    finetune_times = random.randint(1,3)
-                    meta_finetuner.finetune(q1_images_seq, q2_images_seq, q1_logits_seq, q2_logits_seq, finetune_times)
+                    finetune_times = args.finetune_times if first_finetune else random.randint(1, 3)
+                    self.meta_finetuner.finetune(q1_images_seq, q2_images_seq, q1_logits_seq, q2_logits_seq, finetune_times,
+                                            first_finetune)
+                    first_finetune = False
             else:
                 with torch.no_grad():
-                    q1_logits, q2_logits = meta_finetuner.predict(q1_images, q2_images)
+                    q1_logits, q2_logits = self.meta_finetuner.predict(q1_images, q2_images)
 
             l1 = criterion(q1_logits, true_labels, target_labels)
             l2 = criterion(q2_logits, true_labels, target_labels)
@@ -204,22 +205,16 @@ class BanditsAttack(object):
             prior = prior_step(prior, est_grad, args.online_lr)  # 注意，修正的是prior,这就是bandit算法的精髓
             grad = upsampler(prior)  # prior相当于梯度
             ## Update the image:
-            # take a pgd step using the prior
-            image_lr = args.image_lr
-            # if not_done.mean().item() <= 0.1:
-            #     image_lr = 0.1  # < 0.15就很难了
-            adv_images = image_step(adv_images, grad * correct.view(-1, 1, 1, 1), image_lr)  # prior放大后相当于累积的更新量，可以用来更新
+            adv_images = image_step(adv_images, grad * correct.view(-1, 1, 1, 1), args.image_lr)  # prior放大后相当于累积的更新量，可以用来更新
             adv_images = proj_step(adv_images)
             adv_images = torch.clamp(adv_images, 0, 1)
-            # check and stats
             with torch.no_grad():
                 adv_logit = target_model(adv_images)
             adv_pred = adv_logit.argmax(dim=1)
             adv_prob = F.softmax(adv_logit, dim=1)
-            adv_loss = self.xent_loss(adv_logit, true_labels, target_labels)
+            adv_loss = criterion(adv_logit, true_labels, target_labels)
             ## Continue query count
             if predict_by_target_model:
-                query_count += 2
                 query = query + 2 * not_done
             if args.targeted:
                 not_done = not_done * (1 - adv_pred.eq(target_labels)).float()  # not_done初始化为 correct, shape = (batch_size,)
@@ -236,23 +231,26 @@ class BanditsAttack(object):
             ))
             log.info('        correct: {:.4f}'.format(correct.mean().item()))
             log.info('       not_done: {:.4f}'.format(not_done.mean().item()))
-            log.info('      fd_scalar: {:.4f}'.format((l1 - l2).mean().item()))
+            log.info('      fd_scalar: {:.9f}'.format((l1 - l2).mean().item()))
             if success.sum().item() > 0:
                 log.info('     mean_query: {:.4f}'.format(success_query[success.byte()].mean().item()))
                 log.info('   median_query: {:.4f}'.format(success_query[success.byte()].median().item()))
             if not_done.sum().item() > 0:
                 log.info('  not_done_loss: {:.4f}'.format(not_done_loss[not_done.byte()].mean().item()))
                 log.info('  not_done_prob: {:.4f}'.format(not_done_prob[not_done.byte()].mean().item()))
-            step_index += 1
-            if not not_done.byte().any(): # all success
+
+            if not not_done.byte().any():  # all success
                 break
+
+
         for key in ['query', 'correct',  'not_done',
                     'success', 'success_query', 'not_done_loss', 'not_done_prob']:
             value_all = getattr(self, key+"_all")
             value = eval(key)
             value_all[selected] = value.detach().float().cpu()  # 由于value_all是全部图片都放在一个数组里，当前batch选择出来
 
-    def attack_all_images(self, args, arch, target_model, meta_finetuner, result_dump_path):
+
+    def attack_all_images(self, args, arch_name, target_model, result_dump_path):
         for batch_idx, data_tuple in enumerate(self.dataset_loader):
             if args.dataset == "ImageNet":
                 if target_model.input_size[-1] >= 299:
@@ -261,21 +259,22 @@ class BanditsAttack(object):
                     images, true_labels = data_tuple[0], data_tuple[2]
             else:
                 images, true_labels = data_tuple[0], data_tuple[1]
-
             if images.size(-1) != target_model.input_size[-1]:
-                images = F.interpolate(images, size=target_model.input_size[-1], mode='bilinear')
-            self.make_adversarial_examples(batch_idx, images.cuda(), true_labels.cuda(), args, target_model,
-                                                        meta_finetuner)
+                images = F.interpolate(images, size=target_model.input_size[-1], mode='bilinear',align_corners=True)
+
+            self.make_adversarial_examples(batch_idx, images.cuda(), true_labels.cuda(), args, target_model)
+
         query_all_ = self.query_all.detach().cpu().numpy().astype(np.int32)
         not_done_all_ = self.not_done_all.detach().cpu().numpy().astype(np.int32)
         query_threshold_success_rate, query_success_rate = success_rate_and_query_coorelation(query_all_, not_done_all_)
         success_rate_to_avg_query = success_rate_avg_query(query_all_, not_done_all_)
-        log.info('{} is attacked finished ({} images)'.format(arch, self.total_images))
+        log.info('{} is attacked finished ({} images)'.format(arch_name, self.total_images))
         log.info('        avg correct: {:.4f}'.format(self.correct_all.mean().item()))
         log.info('       avg not_done: {:.4f}'.format(self.not_done_all.mean().item()))  # 有多少图没做完
         if self.success_all.sum().item() > 0:
             log.info('     avg mean_query: {:.4f}'.format(self.success_query_all[self.success_all.byte()].mean().item()))
             log.info('   avg median_query: {:.4f}'.format(self.success_query_all[self.success_all.byte()].median().item()))
+            log.info('     max query: {}'.format(self.success_query_all[self.success_all.byte()].max().item()))
         if self.not_done_all.sum().item() > 0:
             log.info('  avg not_done_loss: {:.4f}'.format(self.not_done_loss_all[self.not_done_all.byte()].mean().item()))
             log.info('  avg not_done_prob: {:.4f}'.format(self.not_done_prob_all[self.not_done_all.byte()].mean().item()))
@@ -285,27 +284,33 @@ class BanditsAttack(object):
                           "mean_query": self.success_query_all[self.success_all.byte()].mean().item(),
                           "median_query": self.success_query_all[self.success_all.byte()].median().item(),
                           "max_query": self.success_query_all[self.success_all.byte()].max().item(),
-                          "not_done_loss": self.not_done_loss_all[self.not_done_all.byte()].mean().item(),
-                          "not_done_prob": self.not_done_prob_all[self.not_done_all.byte()].mean().item(),
                           "correct_all": self.correct_all.detach().cpu().numpy().astype(np.int32).tolist(),
                           "not_done_all": self.not_done_all.detach().cpu().numpy().astype(np.int32).tolist(),
                           "query_all": self.query_all.detach().cpu().numpy().astype(np.int32).tolist(),
                           "query_threshold_success_rate_dict": query_threshold_success_rate,
+                          "success_rate_to_avg_query": success_rate_to_avg_query,
                           "query_success_rate_dict": query_success_rate,
-                          "success_rate_to_avg_query":success_rate_to_avg_query,
-                          "args": vars(args)}
+                          "not_done_loss": self.not_done_loss_all[self.not_done_all.byte()].mean().item(),
+                          "not_done_prob": self.not_done_prob_all[self.not_done_all.byte()].mean().item(),
+                          "args":vars(args)}
         with open(result_dump_path, "w") as result_file_obj:
-            json.dump(meta_info_dict, result_file_obj, indent=4, sort_keys=True)
+            json.dump(meta_info_dict, result_file_obj, sort_keys=True)
+        log.info("done, write stats info to {}".format(result_dump_path))
+        self.query_all.fill_(0)
+        self.correct_all.fill_(0)
+        self.not_done_all.fill_(0)
+        self.success_all.fill_(0)
+        self.success_query_all.fill_(0)
+        self.not_done_loss_all.fill_(0)
+        self.not_done_prob_all.fill_(0)
 
 
-def get_exp_dir_name(dataset, norm, targeted, target_type):
-    from datetime import datetime
-    date_str = datetime.now().strftime('%Y_%m_%d_%H_%M_%S')
+def get_exp_dir_name(dataset, loss, norm, targeted, target_type, distillation_loss):
     target_str = "untargeted" if not targeted else "targeted_{}".format(target_type)
-    dir_name = 'meta_simulator_bandits_-{}-{}-{}-{}'.format( dataset, norm, target_str, date_str)
-    return dir_name
+    dirname = 'simulate_bandits_attack-{}-{}_loss-{}-{}-{}'.format(dataset, loss, norm, target_str, distillation_loss)
+    return dirname
 
-def print_args():
+def print_args(args):
     keys = sorted(vars(args).keys())
     max_len = max([len(key) for key in keys])
     for key in keys:
@@ -313,10 +318,6 @@ def print_args():
         log.info('{:s}: {}'.format(prefix, args.__getattribute__(key)))
 
 def set_log_file(fname):
-    # set log file
-    # simple tricks for duplicating logging destination in the logging module such as:
-    # logging.getLogger().addHandler(logging.FileHandler(filename))
-    # does NOT work well here, because python Traceback message (not via logging module) is not sent to the file,
     # the following solution (copied from : https://stackoverflow.com/questions/616645) is a little bit
     # complicated but simulates exactly the "tee" command in linux shell, and it redirects everything
     import subprocess
@@ -325,32 +326,6 @@ def set_log_file(fname):
     os.dup2(tee.stdin.fileno(), sys.stdout.fileno())
     os.dup2(tee.stdin.fileno(), sys.stderr.fileno())
 
-# def arange_sequence_to_meta_model(seq_id, warm_up_steps, meta_predict_steps, not_done_value):
-#     # 步骤的序列安排:
-#     # 0,1,...,19 target model; 然后finetune,之后meta model:20,21,22,23 target_model24, meta_model25,...,28,target_model 29
-#     if seq_id in list(range(warm_up_steps)):
-#        return False
-#     else:
-#         if not_done_value <= 0.16:
-#             return False  # 用target model
-#         if (seq_id - warm_up_steps + 1) % meta_predict_steps == 0:
-#             return False
-#         return True
-#
-# def check_if_finetune(seq_id, warm_up_steps, meta_predict_steps, finetune_times, not_done_value):
-#     # finetune步骤:20, 25,30
-#     seq_id = seq_id - warm_up_steps
-#     if seq_id < 0:
-#         return False, 0
-#     if not_done_value <= 0.16:
-#         return False, 0
-#     if seq_id == 0:
-#         return True, finetune_times
-#     elif seq_id % meta_predict_steps == 0:
-#         return True, random.randint(1,3)
-#     return False, 0
-
-
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--gpu",type=int, required=True)
@@ -358,40 +333,40 @@ if __name__ == "__main__":
     parser.add_argument('--fd-eta', type=float, help='\eta, used to estimate the derivative via finite differences')
     parser.add_argument('--image-lr', type=float, help='Learning rate for the image (iterative attack)')
     parser.add_argument('--online-lr', type=float, help='Learning rate for the prior')
-    parser.add_argument('--norm', type=str, help='Which lp constraint to run bandits [linf|l2]')
+    parser.add_argument('--norm', type=str, required=True, help='Which lp constraint to run bandits [linf|l2]')
     parser.add_argument('--exploration', type=float,
                         help='\delta, parameterizes the exploration to be done around the prior')
     parser.add_argument('--tile-size', type=int, help='the side length of each tile (for the tiling prior)')
-    parser.add_argument('--json-configures', type=str, help='a configures file to be passed in instead of arguments')
-    parser.add_argument('--epsilon', type=float, help='the lp perturbation bound')
-    parser.add_argument('--batch-size', type=int, help='batch size for bandits')
-    parser.add_argument('--log-progress', action='store_true')
-    parser.add_argument('--dataset', type=str, required=True,
-                        choices=['CIFAR-10', 'ImageNet', "FashionMNIST", "MNIST", "TinyImageNet"],
-                        help='which dataset to use')
     parser.add_argument('--tiling', action='store_true')
-    parser.add_argument('--arch', default='wrn-28-10-drop', type=str, help='network architecture')
+    parser.add_argument('--json-config', type=str, default='/home1/machen/meta_perturbations_black_box_attack/configures/bandits_attack_conf.json',
+                        help='a configures file to be passed in instead of arguments')
+    parser.add_argument('--epsilon', type=float, help='the lp perturbation bound')
+    parser.add_argument('--batch-size', type=int, help='batch size for bandits attack.')
+    parser.add_argument('--dataset', type=str, required=True,
+                        choices=['CIFAR-10', 'CIFAR-100', 'ImageNet', "FashionMNIST", "MNIST", "TinyImageNet"],
+                        help='which dataset to use')
+    parser.add_argument('--arch', default=None, type=str, help='network architecture')
+    parser.add_argument('--test_archs', action="store_true")
     parser.add_argument('--targeted', action="store_true")
-    parser.add_argument('--target-type', default='increment', type=str, choices=['random', 'least_likely', "increment"],
-                        help='how to choose target class for targeted attack, could be random or least_likely')
-    parser.add_argument('--exp-dir', default='logs', type=str, help='directory to save results and logs')
-
-    parser.add_argument("--meta_train_type", type=str, choices=["logits_distillation", "2q_distillation"])
-    parser.add_argument("--meta_train_data", type=str, choices=["xent", "linf", "l2"])
-    parser.add_argument("--distillation_loss", type=str, default="MSE", choices=["CSE", "MSE"])
+    parser.add_argument('--target_type',type=str, default='increment', choices=['random', 'least_likely',"increment"])
+    parser.add_argument('--exp-dir', default='logs', type=str,
+                        help='directory to save results and logs')
+    # meta-learning arguments
+    parser.add_argument("--meta_train_type", type=str, default="2q_distillation",
+                        choices=["logits_distillation", "2q_distillation"])
+    parser.add_argument("--data_loss", type=str, required=True, choices=["xent", "cw"])
+    parser.add_argument("--distillation_loss", type=str, required=True, choices=["mse", "pair_mse"])
     parser.add_argument("--finetune_times", type=int, default=20)
-    parser.add_argument('--seed', default=int(time.time()), type=int, help='random seed')
-    parser.add_argument('--phase', default='test', type=str, choices=['validation', 'test', "train"],
-                        help='train, validation, test')
-
-    parser.add_argument("--meta_predict_steps",type=int,default=60)
-    parser.add_argument("--warm_up_steps", type=int,default=20)
-    parser.add_argument("--meta_seq_len",type=int,default=20)
+    parser.add_argument('--seed', default=1398, type=int, help='random seed')
+    parser.add_argument("--meta_predict_steps", type=int, default=40)
+    parser.add_argument("--warm_up_steps", type=int, default=20)
+    parser.add_argument("--meta_seq_len", type=int, default=20)
 
     args = parser.parse_args()
     os.environ["CUDA_DEVICE_ORDER"] = "PCI_BUS_ID"
     os.environ['CUDA_VISIBLE_DEVICES'] = str(args.gpu)
     os.environ['CUDA_VISIBLE_DEVICE'] = str(args.gpu)
+    os.environ["TORCH_HOME"] = "/home1/machen/.cache/torch/pretrainedmodels"
     print("using GPU {}".format(args.gpu))
 
     args_dict = None
@@ -400,30 +375,65 @@ if __name__ == "__main__":
         args_dict = vars(args)
     else:
         # If a json file is given, use the JSON file as the base, and then update it with args
-        defaults = json.load(open(args.json_config))[args.norm]
+        defaults = json.load(open(args.json_config))[args.dataset][args.norm]
         arg_vars = vars(args)
         arg_vars = {k: arg_vars[k] for k in arg_vars if arg_vars[k] is not None}
         defaults.update(arg_vars)
         args = SimpleNamespace(**defaults)
         args_dict = defaults
-
-    args.exp_dir = osp.join(args.exp_dir, get_exp_dir_name(args.dataset, args.norm, args.targeted, args.target_type))  # 随机产生一个目录用于实验
+    if args.targeted:
+        if args.dataset == "ImageNet":
+            args.max_queries = 50000
+    args.exp_dir = osp.join(args.exp_dir, get_exp_dir_name(args.dataset, args.data_loss,
+                                                           args.norm, args.targeted, args.target_type,
+                                                           args.distillation_loss))
     os.makedirs(args.exp_dir, exist_ok=True)
     set_log_file(osp.join(args.exp_dir, 'run.log'))
+
+    meta_finetuner = MetaModelFinetune(args.dataset, args.batch_size, args.meta_train_type, args.distillation_loss,
+                                       args.data_loss, args.norm, args.targeted, args.data_loss == "xent")
+    args.meta_model_path = meta_finetuner.meta_model_path
+
 
     torch.backends.cudnn.deterministic = True
     random.seed(args.seed)
     np.random.seed(args.seed)
     torch.manual_seed(args.seed)
-
-    meta_finetuner = MetaModelFinetune(args.dataset, args.batch_size, args.meta_train_type, args.norm,
-                                       args.distillation_loss)
-    args.meta_model_path = meta_finetuner.meta_model_path
+    if args.test_archs:
+        archs = []
+        if args.dataset == "CIFAR-10" or args.dataset == "CIFAR-100":
+            for arch in MODELS_TEST_STANDARD[args.dataset]:
+                test_model_path = "{}/train_pytorch_model/real_image_model/{}-pretrained/{}/checkpoint.pth.tar".format(PY_ROOT,
+                                                                                        args.dataset,  arch)
+                if os.path.exists(test_model_path):
+                    archs.append(arch)
+                else:
+                    log.info(test_model_path + " does not exists!")
+        else:
+            for arch in MODELS_TEST_STANDARD[args.dataset]:
+                test_model_list_path = "{}/train_pytorch_model/real_image_model/{}-pretrained/checkpoints/{}*.pth".format(
+                    PY_ROOT,
+                    args.dataset, arch)
+                test_model_list_path = list(glob.glob(test_model_list_path))
+                if len(test_model_list_path) == 0:  # this arch does not exists in args.dataset
+                    continue
+                archs.append(arch)
+    else:
+        assert args.arch is not None
+        archs = [args.arch]
+    args.arch = ", ".join(archs)
     log.info('Command line is: {}'.format(' '.join(sys.argv)))
+    log.info("Log file is written in {}".format(osp.join(args.exp_dir, 'run.log')))
     log.info('Called with args:')
-    print_args()
-    target_model = StandardModel(args.dataset, args.arch, no_grad=True, train_data='full', epoch='final').eval()
-    log.info("initializing target model {} on {}".format(args.arch, args.dataset))
-    attacker = BanditsAttack(args)
-    save_result_path = args.exp_dir + "/{}_result.json".format(arch)
-    attacker.attack_all_images(args, arch, target_model, meta_finetuner, save_result_path)
+    print_args(args)
+    attacker = SimulateBanditsAttack(args, meta_finetuner)
+    for arch in archs:
+        save_result_path = args.exp_dir + "/{}_result.json".format(arch)
+        if os.path.exists(save_result_path):
+            continue
+        log.info("Begin attack {} on {}, result will be saved to {}".format(arch, args.dataset, save_result_path))
+        model = StandardModel(args.dataset, arch, no_grad=True)
+        model.cuda()
+        model.eval()
+        attacker.attack_all_images(args, arch, model, save_result_path)
+        model.cpu()

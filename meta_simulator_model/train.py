@@ -12,11 +12,11 @@ from meta_two_queries_distillation_learner import MetaTwoQueriesLearner
 def parse_args():
     parser = argparse.ArgumentParser(description='PyTorch Meta Model Training')
     parser.add_argument('--gpu', type=int, default=0, help="GPU ID to train")
-    parser.add_argument("--epoch", type=int, default=4, help="number of epochs.")
+    parser.add_argument("--epoch", type=int, default=3, help="number of epochs.")
     parser.add_argument('--meta_batch_size', type=int, default=30, help='number of tasks sampled per meta-update')
     parser.add_argument('--meta_lr', type=float, default=1e-3, help='the base learning rate')
     parser.add_argument('--inner_lr', type=float, default=1e-2, help="lr for inner update")
-    parser.add_argument('--lr_decay_itr',type=int, default=7000, help="* 1/10. the number of iteration that the meta lr should decay")
+    parser.add_argument('--lr_decay_itr',type=int, default=10000, help="* 1/10. the number of iteration that the meta lr should decay")
     parser.add_argument('--num_updates', type=int, default=12,
                         help='number of inner gradient updates(on support set) during training.')
     parser.add_argument('--tot_num_tasks', type=int, default=30000, help='the maximum number of tasks in total, which is repeatly processed in training.')
@@ -28,11 +28,9 @@ def parse_args():
     parser.add_argument("--dataset", type=str, default="CIFAR-10", help="the dataset to train")
     parser.add_argument("--split_protocol", required=True, type=SPLIT_DATA_PROTOCOL, choices=list(SPLIT_DATA_PROTOCOL),
                         help="split protocol of data")
-    parser.add_argument("--load_task_mode", default=LOAD_TASK_MODE.LOAD, type=LOAD_TASK_MODE, choices=list(LOAD_TASK_MODE),
+    parser.add_argument("--load_task_mode", default=LOAD_TASK_MODE.NO_LOAD, type=LOAD_TASK_MODE, choices=list(LOAD_TASK_MODE),
                         help="load task mode")
     parser.add_argument("--study_subject", type=str, default="meta_simulator")
-    parser.add_argument("--distill_loss", type=str, default="MSE", choices=["MSE", "CSE"])
-
     # the following args are set for choosing which npy data
     parser.add_argument("--data_loss_type", type=str, choices=["xent", "cw"], required=True)
     parser.add_argument("--loss_type", type=str, default="pair_mse", choices=["pair_mse","mse"])
@@ -72,8 +70,7 @@ def main():
                                         args.lr_decay_itr, args.epoch, args.num_updates, args.load_task_mode,
                                         args.split_protocol, args.tot_num_tasks, args.num_support, args.data_loss_type,
                                         args.loss_type,
-                                        args.adv_norm, args.targeted, args.target_type, param_prefix)
-
+                                        args.adv_norm, args.targeted, args.target_type, args.data_loss_type=='xent', param_prefix)
         resume_epoch = 0
         if os.path.exists(model_path):
             print("=> loading checkpoint '{}'".format(model_path))

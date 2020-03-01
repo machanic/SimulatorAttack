@@ -7,7 +7,8 @@ import json
 import numpy as np
 import glog as log
 import sys
-
+sys.path.append("/home1/machen/meta_perturbations_black_box_attack")
+sys.path.append("/home/machen/meta_perturbations_black_box_attack")
 import torch
 from types import SimpleNamespace
 
@@ -123,13 +124,11 @@ class ZooAttackFramework(object):
 
 
 def get_exp_dir_name(dataset, use_tanh, use_log, use_uniform_pick, targeted, target_type):
-    from datetime import datetime
-    dirname = datetime.now().strftime('%Y_%m_%d_%H_%M_%S')
     target_str = "untargeted" if not targeted else "targeted_{}".format(target_type)
     use_tanh_str = "tanh" if use_tanh else "no_tanh"
     use_log_str = "log_softmax" if use_log else "no_log"
     randomly_pick_coordinate = "randomly_sample" if use_uniform_pick else "importance_sample"
-    dirname = 'ZOO-{}-{}-{}-{}-{}-'.format(dataset, use_tanh_str, use_log_str, target_str, randomly_pick_coordinate) + dirname
+    dirname = 'ZOO-{}-{}-{}-{}-{}'.format(dataset, use_tanh_str, use_log_str, target_str, randomly_pick_coordinate)
     return dirname
 
 def set_log_file(fname):
@@ -160,6 +159,9 @@ def main(args, arch):
     save_result_path = args.exp_dir + "/data_{}@arch_{}@solver_{}@{}_result.json".format(args.dataset,
                                                                                             arch, args.solver,
                                                                                             target_str)
+    if os.path.exists(save_result_path):
+        model.cpu()
+        return
     attack_framework = ZooAttackFramework(args)
     attack_framework.attack_dataset_images(args, arch, model, save_result_path)
     model.cpu()
@@ -172,7 +174,7 @@ if __name__ == "__main__":
     parser.add_argument("-b", "--batch_size", type=int, default=128, help="the batch size for zoo, zoo_ae attack")
     parser.add_argument("-c", "--init_const", type=float, default=0.0, help="the initial setting of the constant lambda")
     parser.add_argument("-d", "--dataset", type=str, required=True,
-                        choices=["CIFAR-10", "CIFAR-100", "ImageNet", "MNIST", "FashionMNIST"])
+                        choices=["CIFAR-10", "CIFAR-100", "TinyImageNet", "ImageNet", "MNIST", "FashionMNIST"])
     parser.add_argument("-m", "--max_iterations", type=int, default=10000, help="set 0 to use the default value")
     parser.add_argument("-p", "--print_every", type=int, default=100,
                         help="print information every PRINT_EVERY iterations")
@@ -221,8 +223,11 @@ if __name__ == "__main__":
     args = SimpleNamespace(**args)
     args.exp_dir = osp.join(args.exp_dir, get_exp_dir_name(args.dataset, args.use_tanh, args.use_log, args.uniform,
                                                                  args.targeted, args.target_type))
-    os.makedirs(args.exp_dir)
-    set_log_file(osp.join(args.exp_dir, 'run.log'))
+    os.makedirs(args.exp_dir, exist_ok=True)
+    if args.test_archs:
+        set_log_file(os.path.join(args.exp_dir, 'run.log'))
+    else:
+        set_log_file(os.path.join(args.exp_dir, 'run_{}.log'.format(args.arch)))
 
     args.abort_early = True
     if args.targeted:
@@ -247,6 +252,13 @@ if __name__ == "__main__":
                     archs.append(arch)
                 else:
                     log.info(test_model_path + " does not exists!")
+        elif args.dataset == "TinyImageNet":
+            for arch in MODELS_TEST_STANDARD[args.dataset]:
+                test_model_list_path = "{root}/train_pytorch_model/real_image_model/{dataset}@{arch}*.pth.tar".format(
+                    root=PY_ROOT, dataset=args.dataset, arch=arch)
+                test_model_path = list(glob.glob(test_model_list_path))
+                if test_model_path and os.path.exists(test_model_path[0]):
+                    archs.append(arch)
         else:
             for arch in MODELS_TEST_STANDARD[dataset]:
                 test_model_list_path = "{}/train_pytorch_model/real_image_model/{}-pretrained/checkpoints/{}*.pth".format(
@@ -259,6 +271,9 @@ if __name__ == "__main__":
         args.arch = ",".join(archs)
     else:
         archs.append(args.arch)
+    log.info('Command line is: {}'.format(' '.join(sys.argv)))
+    log.info("Log file is written in {}".format(osp.join(args.exp_dir, 'run.log')))
+    log.info('Called with args:')
     print_args(args)
     for arch in archs:
         main(args, arch)

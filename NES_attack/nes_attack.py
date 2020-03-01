@@ -109,10 +109,6 @@ class NesAttacker(object):
         return losses.item(), grads
 
     def attack_all_images(self, args, arch_name, target_model, result_dump_path):
-        attack_unsuccessful_images = []
-        attack_unsuccessful_labels = []
-        attack_unsuccessful_targets = []
-        has_unsuccessful_images = False
 
         for batch_idx, data_tuple in enumerate(self.dataset_loader):
             # if batch_idx >= self.total_images:
@@ -125,7 +121,7 @@ class NesAttacker(object):
             else:
                 images, true_labels = data_tuple[0], data_tuple[1]
             if images.size(-1) != target_model.input_size[-1]:
-                images = F.interpolate(images, size=target_model.input_size[-1], mode='bilinear')
+                images = F.interpolate(images, size=target_model.input_size[-1], mode='bilinear',align_corners=True)
             if args.targeted:
                 if args.target_type == 'random':
                     target_labels = torch.randint(low=0, high=CLASS_NUM[args.dataset],
@@ -335,8 +331,6 @@ class NesAttacker(object):
             # if not_done.sum().item() > 0:
             #     log.info('  not_done_loss: {:.4f}'.format(not_done_loss[not_done.byte()].mean().item()))
             #     log.info('  not_done_prob: {:.4f}'.format(not_done_prob[not_done.byte()].mean().item()))
-            if target_labels is not None:
-                not_success_targets = target_labels[not_done.byte()].detach().cpu()
         for key in ['query', 'correct',  'not_done',
                     'success', 'success_query', 'not_done_loss', 'not_done_prob']:
             value_all = getattr(self, key+"_all")
@@ -426,7 +420,10 @@ if __name__ == "__main__":
             args.max_queries = 50000
     args.exp_dir = os.path.join(args.exp_dir, get_exp_dir_name(args.dataset, args.norm, args.targeted, args.target_type))  # 随机产生一个目录用于实验
     os.makedirs(args.exp_dir, exist_ok=True)
-    set_log_file(os.path.join(args.exp_dir, 'run.log'))
+    if args.test_archs:
+        set_log_file(os.path.join(args.exp_dir, 'run.log'))
+    else:
+        set_log_file(os.path.join(args.exp_dir, 'run_{}.log'.format(args.arch)))
     DataLoaderMaker.setup_seed(args.seed)
     archs = []
     dataset = args.dataset
@@ -440,6 +437,13 @@ if __name__ == "__main__":
                     archs.append(arch)
                 else:
                     log.info(test_model_path + " does not exists!")
+        elif args.dataset == "TinyImageNet":
+            for arch in MODELS_TEST_STANDARD[dataset]:
+                test_model_list_path = "{root}/train_pytorch_model/real_image_model/{dataset}@{arch}*.pth.tar".format(
+                    root=PY_ROOT, dataset=args.dataset, arch=arch)
+                test_model_path = list(glob.glob(test_model_list_path))
+                if test_model_path and os.path.exists(test_model_path[0]):
+                    archs.append(arch)
         else:
             for arch in MODELS_TEST_STANDARD[dataset]:
                 test_model_list_path = "{}/train_pytorch_model/real_image_model/{}-pretrained/checkpoints/{}*.pth".format(

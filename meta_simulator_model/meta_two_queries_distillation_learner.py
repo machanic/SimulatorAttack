@@ -17,7 +17,8 @@ from dataset.model_constructor import MetaLearnerModelBuilder
 class MetaTwoQueriesLearner(object):
     def __init__(self, dataset, arch, meta_batch_size, meta_step_size,
                  inner_step_size, lr_decay_itr, epoch, num_inner_updates, load_task_mode, protocol,
-                 tot_num_tasks, num_support, data_loss_type, loss_type, adv_norm, targeted, target_type, tensorboard_data_prefix):
+                 tot_num_tasks, num_support, data_loss_type, loss_type, adv_norm, targeted, target_type, use_softmax,
+                 tensorboard_data_prefix):
         super(self.__class__, self).__init__()
         self.dataset = dataset
         self.meta_batch_size = meta_batch_size
@@ -37,17 +38,17 @@ class MetaTwoQueriesLearner(object):
         self.network.cuda()
         self.num_support = num_support
         trn_dataset = TwoQueriesMetaTaskDataset(dataset, adv_norm, data_loss_type, tot_num_tasks, load_task_mode, protocol, targeted, target_type)
+        # workers = 6 if dataset == "ImageNet" else 0
         self.train_loader = DataLoader(trn_dataset, batch_size=meta_batch_size, shuffle=True, num_workers=0, pin_memory=True)
         self.tensorboard = TensorBoardWriter("{0}/tensorboard/2q_distillation".format(PY_ROOT),
                                              tensorboard_data_prefix)
         os.makedirs("{0}/tensorboard/2q_distillation".format(PY_ROOT), exist_ok=True)
         self.loss_fn = nn.MSELoss()
         self.fast_net = InnerLoopPairLoss(self.network, self.num_inner_updates,
-                                  self.inner_step_size, self.meta_batch_size, loss_type)  # 并行执行每个task
+                                  self.inner_step_size, self.meta_batch_size, loss_type, use_softmax)  # 并行执行每个task
         self.fast_net.cuda()
         self.opt = RAdam(self.network.parameters(), lr=meta_step_size)
         self.arch_pool = {}
-
 
     def construct_model(self, arch, dataset):
         if dataset in ["CIFAR-10", "CIFAR-100","MNIST","FashionMNIST"]:
@@ -55,7 +56,7 @@ class MetaTwoQueriesLearner(object):
         elif dataset == "TinyImageNet":
             network = MetaLearnerModelBuilder.construct_tiny_imagenet_model(arch, dataset)
         elif dataset == "ImageNet":
-            network = MetaLearnerModelBuilder.construct_imagenet_model(arch)
+            network = MetaLearnerModelBuilder.construct_imagenet_model(arch, dataset)
         return network
 
     def forward_pass(self, network, input, target):
@@ -95,10 +96,6 @@ class MetaTwoQueriesLearner(object):
                 itr = epoch * len(self.train_loader) + i
                 self.adjust_learning_rate(itr, self.meta_step_size, self.lr_decay_itr)
                 grads = []
-                # q1_images = q1_images.cuda()
-                # q2_images = q2_images.cuda()
-                # q1_logits = q1_logits.cuda()
-                # q2_logits = q2_logits.cuda()
                 seq_len = q1_images.size(1)
                 support_index_list = sorted(random.sample(range(seq_len // 2), self.num_support))
                 query_index_list = np.arange(seq_len // 2, seq_len).tolist()
@@ -110,8 +107,6 @@ class MetaTwoQueriesLearner(object):
                 support_q2_logits = q2_logits[:, support_index_list, :]  # (Task_num, T, #class)
                 query_q1_logits = q1_logits[:, query_index_list, :]
                 query_q2_logits = q2_logits[:, query_index_list,:]  # (Task_num, T, #class)
-                # all_tasks_accuracy = []
-                # all_tasks_mse_error = []
                 for task_idx in range(q1_images.size(0)):  # 每个task的teacher model不同，所以
                     task_support_q1 = support_q1_images[task_idx].cuda() # T, C, H, W
                     task_support_q2 = support_q2_images[task_idx].cuda()
@@ -122,13 +117,10 @@ class MetaTwoQueriesLearner(object):
                     task_query_q1_logits = query_q1_logits[task_idx].cuda()
                     task_query_q2_logits = query_q2_logits[task_idx].cuda()
                     self.fast_net.copy_weights(self.network)
-                    # fast_net only forward one task's data
                     g = self.fast_net.forward(task_support_q1, task_support_q2, task_query_q1, task_query_q2,
                                               task_support_q1_logits, task_support_q2_logits,
                                               task_query_q1_logits, task_query_q2_logits)
                     grads.append(g)
-                    # all_tasks_accuracy.append(accuracy)
-                    # all_tasks_mse_error.append(mse_error)
                     support_q1_images[task_idx].cpu()  # T, C, H, W
                     support_q2_images[task_idx].cpu()
                     query_q1_images[task_idx].cpu()
@@ -138,10 +130,16 @@ class MetaTwoQueriesLearner(object):
                     query_q1_logits[task_idx].cpu()
                     query_q2_logits[task_idx].cpu()
                 # Perform the meta update
-                dummy_query_images = support_q1_images[0]
-                dummy_query_targets = support_q1_logits[0]
+                dummy_query_images = query_q1_images[0]
+                dummy_query_targets = query_q1_logits[0]
                 self.meta_update(grads, dummy_query_images, dummy_query_targets)
                 grads.clear()
+                # if itr % 1000 == 0 and itr > 0:
+                #     torch.save({
+                #         'epoch': epoch + 1,
+                #         'state_dict': self.network.state_dict(),
+                #         'optimizer': self.opt.state_dict(),
+                #     }, model_path)
                 # if itr % 100 == 0 and itr > 0:
                 #     self.tensorboard.record_trn_query_loss(torch.stack(all_tasks_mse_error).float().mean().detach().cpu(), itr)
                     # self.tensorboard.record_trn_query_acc(torch.stack(all_tasks_accuracy).float().mean().detach().cpu(), itr)

@@ -10,6 +10,11 @@
     "use_tanh": false,
     "lr": 1e-2
   },
+    "TinyImageNet": {
+    "resize": false,
+    "lr": 1e-2,
+    "use_tanh": false
+  },
   "ImageNet": {
       "resize": true,
       "use_tanh": true,
