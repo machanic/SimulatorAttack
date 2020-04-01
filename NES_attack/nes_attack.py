@@ -15,7 +15,7 @@ import torch
 from torch.nn import functional as F
 
 from config import CLASS_NUM, PY_ROOT, MODELS_TEST_STANDARD
-from dataset.model_constructor import StandardModel
+from dataset.standard_model import StandardModel
 from dataset.dataset_loader_maker import DataLoaderMaker
 from utils.statistics_toolkit import success_rate_and_query_coorelation, success_rate_avg_query
 
@@ -25,19 +25,22 @@ class NesAttacker(object):
         self.dataset_name = dataset_name
         self.num_classes = CLASS_NUM[self.dataset_name]
         self.dataset_loader = DataLoaderMaker.get_test_attacked_data(dataset_name, 1)
-        self.dataset = self.dataset_loader.dataset
+
         log.info("label index dict data build begin")
+        if self.dataset_name == "TinyImageNet":
+            self.candidate_loader = DataLoaderMaker.get_candidate_attacked_data(dataset_name, 1)
+            self.dataset = self.candidate_loader.dataset
+        else:
+            self.dataset = self.dataset_loader.dataset
         self.label_data_index_dict = self.get_label_dataset(self.dataset)
         log.info("label index dict data build over!")
-        self.total_images = len(self.dataset)
+        self.total_images = len(self.dataset_loader.dataset)
         self.targeted = targeted
         self.query_all = torch.zeros(self.total_images)
         self.correct_all = torch.zeros_like(self.query_all)  # number of images
         self.not_done_all = torch.zeros_like(self.query_all)  # always set to 0 if the original image is misclassified
         self.success_all = torch.zeros_like(self.query_all)
         self.success_query_all = torch.zeros_like(self.query_all)
-        self.not_done_loss_all = torch.zeros_like(self.query_all)
-        self.not_done_prob_all = torch.zeros_like(self.query_all)
 
     def get_label_dataset(self, dataset):
         label_index = defaultdict(list)
@@ -45,21 +48,39 @@ class NesAttacker(object):
             label_index[label].append(index)
         return label_index
 
-    def get_image_of_class(self, target_labels, dataset):
+    def get_image_of_class(self, target_labels, dataset, target_model):
         images = []
         for label in target_labels:  # length of target_labels is 1
+
             index = random.choice(self.label_data_index_dict[label.item()])
             image, label_ = dataset[index]
+            with torch.no_grad():
+                logits = target_model(image.unsqueeze(0).cuda())
+            while logits.max(1)[1].item() != label.item():
+                index = random.choice(self.label_data_index_dict[label.item()])
+                image, label_ = dataset[index]
+                with torch.no_grad():
+                    logits = target_model(image.unsqueeze(0).cuda())
+
             assert label_ == label.item()
             images.append(image)
         return torch.stack(images).cuda()  # B,C,H,W
 
+    # def xent_loss(self, logits, noise, true_labels, target_labels, top_k):
+    #     if self.targeted:
+    #         return -F.cross_entropy(logits, target_labels, reduction='none'), noise
+    #     else:
+    #         assert target_labels is None, "target label must set to None in untargeted attack"
+    #         return F.cross_entropy(logits, true_labels, reduction='none'), noise
+
     def xent_loss(self, logits, noise, true_labels, target_labels, top_k):
         if self.targeted:
-            return -F.cross_entropy(logits, target_labels, reduction='none'), noise
+            return F.cross_entropy(logits, target_labels, reduction='none'), noise  # FIXME 修改测试
         else:
             assert target_labels is None, "target label must set to None in untargeted attack"
             return F.cross_entropy(logits, true_labels, reduction='none'), noise
+
+
 
     def partial_info_loss(self, logits, noise, true_labels, target_labels, top_k):
         # logit 是融合了batch_size of noise 的, shape = (batch_size, num_classes)
@@ -74,7 +95,13 @@ class NesAttacker(object):
 
     #  STEP CONDITION (important for partial-info attacks)
     def robust_in_top_k(self, target_model, adv_images, target_labels, top_k):
-        if top_k == self.num_classes:
+        # 我自己增加的代码
+        if self.targeted:  # FIXME 作者默认targeted模式top_k < num_classes
+            eval_logits = target_model(adv_images)
+            t = target_labels[0].item()
+            pred = eval_logits.max(1)[1][0].item()
+            return pred == t
+        if top_k == self.num_classes:   #
             return True
         eval_logits = target_model(adv_images)
         t = target_labels[0].item()
@@ -143,6 +170,8 @@ class NesAttacker(object):
             with torch.no_grad():
                 self.make_adversarial_examples(batch_idx, images.cuda(), true_labels.cuda(), target_labels, args, target_model)
 
+
+
         log.info('{} is attacked finished ({} images)'.format(arch_name, self.total_images))
         log.info('        avg correct: {:.4f}'.format(self.correct_all.mean().item()))
         log.info('       avg not_done: {:.4f}'.format(self.not_done_all.mean().item()))  # 有多少图没做完
@@ -150,27 +179,31 @@ class NesAttacker(object):
             log.info('     avg mean_query: {:.4f}'.format(self.success_query_all[self.success_all.byte()].mean().item()))
             log.info('   avg median_query: {:.4f}'.format(self.success_query_all[self.success_all.byte()].median().item()))
             log.info('     max query: {}'.format(self.success_query_all[self.success_all.byte()].max().item()))
-        if self.not_done_all.sum().item() > 0:
-            log.info('  avg not_done_loss: {:.4f}'.format(self.not_done_loss_all[self.not_done_all.byte()].mean().item()))
-            log.info('  avg not_done_prob: {:.4f}'.format(self.not_done_prob_all[self.not_done_all.byte()].mean().item()))
         log.info('Saving results to {}'.format(result_dump_path))
-        query_all_ = self.query_all.detach().cpu().numpy().astype(np.int32)
-        not_done_all_ = self.not_done_all.detach().cpu().numpy().astype(np.int32)
-        query_threshold_success_rate, query_success_rate = success_rate_and_query_coorelation(query_all_, not_done_all_)
-        success_rate_to_avg_query = success_rate_avg_query(query_all_, not_done_all_)
 
-        meta_info_dict = {"avg_correct": self.correct_all.mean().item(), "avg_not_done": self.not_done_all.mean().item(),
-                          "mean_query": self.success_query_all[self.success_all.byte()].mean().item(),
-                          "median_query": self.success_query_all[self.success_all.byte()].median().item(),
-                          "max_query": self.success_query_all[self.success_all.byte()].max().item(),
+        query_all_np = self.query_all.detach().cpu().numpy().astype(np.int32)
+        not_done_all_np = self.not_done_all.detach().cpu().numpy().astype(np.int32)
+        correct_all_np = self.correct_all.detach().cpu().numpy().astype(np.int32)
+        out_of_bound_indexes = np.where(query_all_np > args.max_queries)[0]
+        if len(out_of_bound_indexes) > 0:
+            not_done_all_np[out_of_bound_indexes] = 1
+        success_all_np = (1 - not_done_all_np) * correct_all_np
+        success_query_all_np = success_all_np * query_all_np
+        success_indexes = np.nonzero(success_all_np)[0]
+
+        query_threshold_success_rate, query_success_rate = success_rate_and_query_coorelation(query_all_np, not_done_all_np)
+        success_rate_to_avg_query = success_rate_avg_query(query_all_np, not_done_all_np)
+
+        meta_info_dict = {"avg_correct": self.correct_all.mean().item(), "avg_not_done": np.mean(not_done_all_np).item(),
+                          "mean_query": np.mean(success_query_all_np[success_indexes]).item(),
+                          "median_query": np.median(success_query_all_np[success_indexes]).item(),
+                          "max_query": np.max(success_query_all_np[success_indexes]).item(),
                           "correct_all": self.correct_all.detach().cpu().numpy().astype(np.int32).tolist(),
-                          "not_done_all": self.not_done_all.detach().cpu().numpy().astype(np.int32).tolist(),
-                          "query_all": self.query_all.detach().cpu().numpy().astype(np.int32).tolist(),
+                          "not_done_all": not_done_all_np.tolist(),
+                          "query_all": query_all_np.tolist(),
                           "query_threshold_success_rate_dict": query_threshold_success_rate,
                           "success_rate_to_avg_query": success_rate_to_avg_query,
                           "query_success_rate_dict": query_success_rate,
-                          "not_done_loss": self.not_done_loss_all[self.not_done_all.byte()].mean().item(),
-                          "not_done_prob": self.not_done_prob_all[self.not_done_all.byte()].mean().item(),
                           'args': vars(args)}
         with open(result_dump_path, "w") as result_file_obj:
             json.dump(meta_info_dict, result_file_obj,  sort_keys=True)
@@ -184,9 +217,13 @@ class NesAttacker(object):
         return norm_vec
 
     def l2_image_step(self, x, g, lr):
+        if self.targeted:
+            return x - lr * g / self.norm(g)
         return x + lr * g / self.norm(g)
 
     def linf_step(self, x, g, lr):
+        if self.targeted:
+            return x - lr * torch.sign(g)
         return x + lr * torch.sign(g)
 
     def l2_proj(self, image, eps):
@@ -215,19 +252,22 @@ class NesAttacker(object):
         query = torch.zeros(1).cuda()
         correct = pred.eq(true_labels).float()  # shape = (1,)
         not_done = correct.clone()  # shape = (1,)
+        success = (1 - not_done) * correct  # correct = 0 and 1-not_done = 1 --> success = 0
+        success_query = success * query
+
         selected = torch.arange(batch_index, batch_index + 1)  # 选择这个batch的所有图片的index
         adv_images = images.clone()
 
         samples_per_draw = args.samples_per_draw  # samples per draw
-        epsilon = args.epsilon
+        epsilon = args.epsilon   # 最终目标的epsilon
         goal_epsilon = epsilon
         max_lr = args.max_lr
         # ----- partial info params -----
         k = args.top_k
         adv_thresh = args.adv_thresh
-        if k > 0:
+        if k > 0 or self.targeted:
             assert self.targeted, "Partial-information attack is a targeted attack."
-            adv_images = self.get_image_of_class(target_labels, self.dataset)
+            adv_images = self.get_image_of_class(target_labels, self.dataset, target_model)
             epsilon = args.starting_eps
         else:   # if we don't want to top-k paritial attack set k = -1 as the default setting
             k = self.num_classes
@@ -235,40 +275,31 @@ class NesAttacker(object):
         g = torch.zeros_like(adv_images).cuda()
         last_ls = []
         true_labels = true_labels.repeat(batch_size)  # for noise sampling points
-        queries_per_iter = args.samples_per_draw
-        max_iters = int(np.ceil(args.max_queries / queries_per_iter))
-
+        max_iters = int(np.ceil(args.max_queries / args.samples_per_draw)) if k == self.num_classes else int(np.ceil(args.max_queries / (args.samples_per_draw + 1)))
+        if self.targeted:
+            max_iters = int(np.ceil(args.max_queries / (args.samples_per_draw + 1)))
         loss_fn = self.partial_info_loss if k < self.num_classes else self.xent_loss  # 若非paritial_information模式，k = num_classes
         image_step = self.l2_image_step if args.norm == 'l2' else self.linf_step
         proj_maker = self.l2_proj if args.norm == 'l2' else self.linf_proj  # 调用proj_maker返回的是一个函数
         proj_step = proj_maker(images, args.epsilon)
-        if not not_done.byte().any() and epsilon <= goal_epsilon:  # the case the original image is classified incorrectly
-            with torch.no_grad():
-                adv_logit = target_model(adv_images)
-            adv_pred = adv_logit.argmax(dim=1)  # shape = (1, )
-            adv_prob = F.softmax(adv_logit, dim=1)
-            adv_loss, _ = loss_fn(adv_logit, None, true_labels[0].unsqueeze(0), target_labels, top_k=k)
-            success = (1 - not_done) * correct  # correct = 0 and 1-not_done = 1 --> success = 0
-            success_query = success * query
-            not_done_loss = adv_loss * not_done
-            not_done_prob = adv_prob[0, true_labels[0].item()] * not_done
-
-        for step_index in range(max_iters):
+        while query[0].item() < args.max_queries:
             # CHECK IF WE SHOULD STOP
             if not not_done.byte().any() and epsilon <= goal_epsilon:  # all success
-                log.info("Attack success on {}-th image".format(batch_index))
+                log.info("Attack success on {}-th image by using {} queries".format(batch_index, query[0].item()))
                 break
 
             prev_g = g.clone()
             l, g = self.get_grad(adv_images, args.sigma, samples_per_draw, batch_size, true_labels, target_labels,
                                  target_model, loss_fn, k)
-            query += samples_per_draw * not_done
+            query += samples_per_draw
+            # log.info("Query :{}".format(query[0].item()))
             # SIMPLE MOMENTUM
             g = args.momentum * prev_g + (1.0 - args.momentum) * g
             # PLATEAU LR ANNEALING
             last_ls.append(l)
-            last_ls = last_ls[-args.plateau_length:]
-            if last_ls[-1] > last_ls[0] and len(last_ls) == args.plateau_length:
+            last_ls = last_ls[-args.plateau_length:]  # FIXME 为何targeted的梯度会不断变大？
+            condition = last_ls[-1] > last_ls[0] # if self.targeted else last_ls[-1] > last_ls[0]
+            if condition and len(last_ls) == args.plateau_length:  # > 改成 < 号了调试，FIXME bug，原本的tf的版本里面loss不带正负号，如果loss变大，就降低lr
                 if max_lr > args.min_lr:
                     max_lr = max(max_lr / args.plateau_drop, args.min_lr)
                     log.info("[log] Annealing max_lr : {:.5f}".format(max_lr))
@@ -276,63 +307,82 @@ class NesAttacker(object):
             # SEARCH FOR LR AND EPSILON DECAY
             current_lr = max_lr
             prop_de = 0.0
-            if l < adv_thresh and epsilon > goal_epsilon:
+            # if l < adv_thresh and epsilon > goal_epsilon:
+            if epsilon > goal_epsilon:
                 prop_de = delta_epsilon
+
             while current_lr >= args.min_lr:
                 # PARTIAL INFORMATION ONLY
-                if k < self.num_classes:
+                # if k < self.num_classes: #FIXME 我认为原作者写错了，这个地方改成targeted
+                if self.targeted:
                     proposed_epsilon = max(epsilon - prop_de, goal_epsilon)
                     proj_step = proj_maker(images, proposed_epsilon)
                 # GENERAL LINE SEARCH
                 proposed_adv = image_step(adv_images, g, current_lr)
                 proposed_adv = proj_step(proposed_adv)
                 proposed_adv = torch.clamp(proposed_adv, 0, 1)
-                query += 1 * not_done  # we must query for check robust_in_top_k
+                if self.targeted or k != self.num_classes:
+                    query += 1 # we must query for check robust_in_top_k
                 if self.robust_in_top_k(target_model, proposed_adv, target_labels, k):
                     if prop_de > 0:
-                        delta_epsilon = max(prop_de, 0.1)
+                        delta_epsilon = max(prop_de, args.min_delta_eps)# FIXME 换掉
+                        # delta_epsilon = prop_de
                     adv_images = proposed_adv
-                    epsilon = max(epsilon - prop_de / args.conservative, goal_epsilon)
+                    if self.targeted:
+                        epsilon = proposed_epsilon   # FIXME 我自己增加的代码
+                    else:
+                        epsilon = max(epsilon - prop_de / args.conservative, goal_epsilon)
                     break
-                elif current_lr > args.min_lr * 2:
+                elif current_lr >= args.min_lr * 2:
                     current_lr = current_lr / 2
+                    # log.info("[log] backtracking lr to %3f" % (current_lr,))
+                    # if is_first_call:
+                    #     epsilon += 1.0
+                    # is_first_call = False
                 else:
                     prop_de = prop_de / 2
                     if prop_de == 0:
-                        raise ValueError("Did not converge.")
+                        break
                     if prop_de < 2e-3:
                         prop_de = 0
                     current_lr = max_lr
-                    log.info("[log] backtracking eps to {:.3f}".format(epsilon - prop_de))
+                    log.info("[log] backtracking eps to {:.3f}".format(epsilon - prop_de,))
+                    # if is_first_call:
+                    #     epsilon += 1.0
+                    # is_first_call = False
+                # elif proposed_epsilon > goal_epsilon and prop_de > 0:   # FIXME 这个elif 和最后一个else的顺序我自己跳闸了下
+                #     prop_de = prop_de / 2
+                #     if prop_de == 0:
+                #         break
+                #     if prop_de < 2e-3:
+                #         prop_de = 0
+                #     current_lr = max_lr
+                #     log.info("[log] backtracking eps to {:.3f}".format(epsilon - prop_de))
+                # elif current_lr > args.min_lr * 2:  # FIXME 这个elif 和最后一个else的顺序我自己跳闸了下
+                #     current_lr = current_lr / 2
+
 
             with torch.no_grad():
                 adv_logit = target_model(adv_images)
             adv_pred = adv_logit.argmax(dim=1)  # shape = (1, )
-            adv_prob = F.softmax(adv_logit, dim=1)
-            adv_loss, _ = loss_fn(adv_logit, None, true_labels[0].unsqueeze(0), target_labels, top_k=k)
+            # adv_prob = F.softmax(adv_logit, dim=1)
+            # adv_loss, _ = loss_fn(adv_logit, None, true_labels[0].unsqueeze(0), target_labels, top_k=k)
             if self.targeted:
-                not_done = not_done * (1 - adv_pred.eq(target_labels)).float()
+                not_done = (1 - adv_pred.eq(target_labels).float()).float()
             else:
-                not_done = not_done * adv_pred.eq(true_labels[0].unsqueeze(0)).float()  # 只要是跟原始label相等的，就还需要query，还没有成功
-            success = (1 - not_done) * correct
+                not_done =  adv_pred.eq(true_labels[0].unsqueeze(0)).float() # 只要是跟原始label相等的，就还需要query，还没有成功
+            success = (1 - not_done) * correct * float(epsilon <= goal_epsilon)
             success_query = success * query
-            not_done_loss = adv_loss * not_done
-            not_done_prob = adv_prob[0, true_labels[0].item()] * not_done
+        else:
+            log.info("Attack failed on {}-th image".format(batch_index))
 
-            # log.info('Attacking image {} - {} / {}, step {}, max query {}'.format(
-            #     batch_index, batch_index + 1,
-            #     self.total_images, step_index + 1, int(query.max().item())
-            # ))
-            # log.info('        correct: {:.4f}'.format(correct.mean().item()))
-            # log.info('       not_done: {:.4f}'.format(not_done.mean().item()))
-            # if success.sum().item() > 0:
-            #     log.info('     mean_query: {:.4f}'.format(success_query[success.byte()].mean().item()))
-            #     log.info('   median_query: {:.4f}'.format(success_query[success.byte()].median().item()))
-            # if not_done.sum().item() > 0:
-            #     log.info('  not_done_loss: {:.4f}'.format(not_done_loss[not_done.byte()].mean().item()))
-            #     log.info('  not_done_prob: {:.4f}'.format(not_done_prob[not_done.byte()].mean().item()))
+        if epsilon > goal_epsilon:
+            not_done.fill_(1.0)
+            success.fill_(0.0)
+            success_query = success * query
+
         for key in ['query', 'correct',  'not_done',
-                    'success', 'success_query', 'not_done_loss', 'not_done_prob']:
+                    'success', 'success_query']:
             value_all = getattr(self, key+"_all")
             value = eval(key)
             value_all[selected] = value.detach().float().cpu()  # 由于value_all是全部图片都放在一个数组里，当前batch选择出来
@@ -366,7 +416,6 @@ if __name__ == "__main__":
     parser.add_argument('--batch-size', type=int, default=50)
     parser.add_argument('--sigma', type=float, default=1e-3)
     parser.add_argument('--epsilon', type=float, default=None)
-    parser.add_argument('--lr', type=float, default=1e-2)
     parser.add_argument('--log-iters', type=int, default=1)
     parser.add_argument('--momentum', type=float, default=0.9)
     parser.add_argument('--max-queries', type=int, default=10000)
@@ -376,11 +425,12 @@ if __name__ == "__main__":
     parser.add_argument('--plateau-length', type=int, default=5)
     parser.add_argument('--imagenet-path', type=str)
     parser.add_argument('--visualize', action='store_true')
-    parser.add_argument('--max-lr', type=float, default=1e-2)
+    parser.add_argument('--max-lr', type=float, default=None)
     parser.add_argument('--min-lr', type=float, default=5e-5)
     # PARTIAL INFORMATION ARGUMENTS
     parser.add_argument('--top-k', type=int, default=-1, help="if you don't want to use the partial information mode, "
-                                                              "just leave this argument to -1 as the default setting")
+                                                              "just leave this argument to -1 as the default setting."
+                                                              "Note that top-k must be set to true class number in the targeted attack.")
     parser.add_argument('--adv-thresh', type=float, default=-1.0)
     # LABEL ONLY ARGUMENTS
     parser.add_argument('--label-only', action='store_true', help="still on developing in progress")
@@ -389,7 +439,7 @@ if __name__ == "__main__":
 
     parser.add_argument('--starting-eps', type=float, default=None)
     parser.add_argument('--starting-delta-eps', type=float, default=None)
-    parser.add_argument('--min-delta-eps', type=float, default=0.1)
+    parser.add_argument('--min-delta-eps', type=float, default=None)
     parser.add_argument('--conservative', type=int, default=2,
                         help="How conservative we should be in epsilon decay; increase if no convergence")
     parser.add_argument('--exp-dir', default='logs', type=str,
@@ -410,9 +460,10 @@ if __name__ == "__main__":
     os.environ["CUDA_DEVICE_ORDER"] = "PCI_BUS_ID"
     os.environ['CUDA_VISIBLE_DEVICES'] = str(args.gpu)
     os.environ['CUDA_VISIBLE_DEVICE'] = str(args.gpu)
-    json_conf = json.load(open(args.json_config))[args.dataset][args.norm]
+    target_str = "targeted" if args.targeted else "untargeted"
+    json_conf = json.load(open(args.json_config))[args.dataset][target_str][args.norm]
     args = vars(args)
-    json_conf = {k: v for k, v in json_conf.items() if k not in args or args[k] is None}
+    # json_conf = {k: v for k, v in json_conf.items()}
     args.update(json_conf)
     args = SimpleNamespace(**args)
     if args.targeted:

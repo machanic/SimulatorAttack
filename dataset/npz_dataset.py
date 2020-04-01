@@ -33,6 +33,19 @@ class NpzDataset(data.Dataset):
             return torch.from_numpy(image),label
 
 
+class NpzAliasDataset(NpzDataset):
+    def __init__(self, dataset):
+        super(NpzAliasDataset, self).__init__(dataset)
+        file_path = "{}/attacked_images/{}/{}_images_for_candidate.npz".format(PY_ROOT, dataset, dataset)
+        file_data = np.load(file_path)
+        self.dataset = dataset
+        if dataset == "ImageNet":
+            self.images_big = file_data["images_299x299"]
+            self.images_small = file_data["images_224x224"]
+            self.labels = file_data["labels"]
+        else:
+            self.images = file_data["images"]
+            self.labels = file_data["labels"]
 
 class NpzSubDataset(data.Dataset):
     def __init__(self, dataset, chunk_index, chunk_num):

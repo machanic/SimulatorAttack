@@ -11,7 +11,7 @@ from config import IMAGE_SIZE, IMAGE_DATA_ROOT, MODELS_TRAIN_STANDARD, PY_ROOT, 
     MODELS_TEST_STANDARD
 from constant_enum import SPLIT_DATA_PROTOCOL
 from dataset.dataset_loader_maker import DataLoaderMaker
-from dataset.model_constructor import StandardModel
+from dataset.standard_model import StandardModel
 from dataset.tiny_imagenet import TinyImageNet
 
 
@@ -53,7 +53,7 @@ class MetaImgOnlineGradTaskDataset(data.Dataset):
         elif dataset == "FashionMNIST":
             train_dataset = FashionMNIST(IMAGE_DATA_ROOT[dataset], train=is_train, transform=preprocessor)
         elif dataset == "TinyImageNet":
-            train_dataset = TinyImageNet(IMAGE_DATA_ROOT[dataset], preprocessor, is_train=is_train)
+            train_dataset = TinyImageNet(IMAGE_DATA_ROOT[dataset], preprocessor, train=is_train)
         elif dataset == "ImageNet":
             preprocessor = DataLoaderMaker.get_preprocessor(IMAGE_SIZE[dataset], is_train, center_crop=True)
             sub_folder = "/train" if is_train else "/validation"  # Note that ImageNet uses pretrainedmodels.utils.TransformImage to apply transformation

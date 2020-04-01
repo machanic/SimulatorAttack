@@ -35,7 +35,7 @@ class Meta(nn.Module):
             :batch_data : [support_x, support_y, support_label, query_x, query_y, query_label]
             :return:
         """
-        task_num = len(batch_data)  # each is [support_x, support_y, support_logits, support_label, query_x, query_y, query_logits, query_label]
+        task_num = len(batch_data)  # each is [support_x, support_y, support_label, query_x, query_y, query_label]
         _, _, c_, h, w = batch_data[0][0].size()  # shape of support_x
         losses_q = [0 for _ in range(self.update_step + 1)]  # losses_q[i] is the loss on step i
         corrects = [0 for _ in range(self.update_step + 2)]

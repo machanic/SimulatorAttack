@@ -9,7 +9,7 @@ import os
 import os.path as osp
 import random
 from types import SimpleNamespace
-from dataset.model_constructor import StandardModel
+from dataset.standard_model import StandardModel
 import glog as log
 import numpy as np
 import torch
@@ -45,7 +45,6 @@ class SimulateBanditsAttack(object):
     # eg: exponentiated gradients
     # l2/linf: projected gradient descent
     ###
-
     def eg_step(self, x, g, lr):
         real_x = (x + 1) / 2  # from [-1, 1] to [0, 1]
         pos = real_x * torch.exp(lr * g)
@@ -409,6 +408,13 @@ if __name__ == "__main__":
                     archs.append(arch)
                 else:
                     log.info(test_model_path + " does not exists!")
+        elif args.dataset == "TinyImageNet":
+            for arch in MODELS_TEST_STANDARD[args.dataset]:
+                test_model_list_path = "{root}/train_pytorch_model/real_image_model/{dataset}@{arch}*.pth.tar".format(
+                    root=PY_ROOT, dataset=args.dataset, arch=arch)
+                test_model_path = list(glob.glob(test_model_list_path))
+                if test_model_path and os.path.exists(test_model_path[0]):
+                    archs.append(arch)
         else:
             for arch in MODELS_TEST_STANDARD[args.dataset]:
                 test_model_list_path = "{}/train_pytorch_model/real_image_model/{}-pretrained/checkpoints/{}*.pth".format(

@@ -11,7 +11,7 @@ import os
 import os.path as osp
 import random
 from types import SimpleNamespace
-from dataset.model_constructor import StandardModel
+from dataset.standard_model import StandardModel
 import glog as log
 import numpy as np
 import torch
@@ -446,9 +446,9 @@ class SimulateBanditsAttackShrink(object):
 def get_exp_dir_name(study_subject, dataset, loss, norm, targeted, target_type, distillation_loss):
     target_str = "untargeted" if not targeted else "targeted_{}".format(target_type)
     if study_subject == "loss_type":
-        dirname = 'AbalationStudy_{}@{}-{}_loss-{}-{}'.format(study_subject, dataset, loss, norm, target_str)
+        dirname = 'AblationStudy_{}@{}-{}_loss-{}-{}'.format(study_subject, dataset, loss, norm, target_str)
     else:
-        dirname = 'AbalationStudy_{}@{}-{}_loss-{}-{}-{}'.format(study_subject, dataset, loss, norm, target_str, distillation_loss)
+        dirname = 'AblationStudy_{}@{}-{}_loss-{}-{}-{}'.format(study_subject, dataset, loss, norm, target_str, distillation_loss)
     return dirname
 
 def get_bandits_exp_dir_name(dataset, loss, norm, targeted, target_type):
@@ -501,7 +501,7 @@ def attack_dataset(args, gpu, save_result_path, log_file_path):
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--gpu",type=str, required=True)
-    parser.add_argument('--max-queries', type=int, default=30000)
+    parser.add_argument('--max-queries', type=int, default=10000)
     parser.add_argument('--fd-eta', type=float, help='\eta, used to estimate the derivative via finite differences')
     parser.add_argument('--image-lr', type=float, help='Learning rate for the image (iterative attack)')
     parser.add_argument('--online-lr', type=float, help='Learning rate for the prior')
@@ -526,17 +526,17 @@ if __name__ == "__main__":
     # meta-learning arguments
     parser.add_argument("--meta_train_type", type=str, default="2q_distillation",
                         choices=["logits_distillation", "2q_distillation"])
-    parser.add_argument("--data_loss", type=str, required=True, choices=["xent", "cw"])
+    parser.add_argument("--data_loss", type=str, default="cw", choices=["xent", "cw"])
     parser.add_argument("--distillation_loss", type=str, required=True, choices=["mse", "pair_mse"])
-    parser.add_argument("--finetune_times", type=int, default=20)
+    parser.add_argument("--finetune_times", type=int, default=10)
     parser.add_argument('--seed', default=1398, type=int, help='random seed')
-    parser.add_argument("--meta_predict_steps", type=int, default=40)
+    parser.add_argument("--meta_predict_steps", type=int, default=5)
     parser.add_argument("--warm_up_steps", type=int, default=None)
-    parser.add_argument("--meta_seq_len", type=int, default=20)
+    parser.add_argument("--meta_seq_len", type=int, default=10)
     parser.add_argument("--meta_arch",type=str, default="resnet34")
     parser.add_argument("--meta_mode",type=str, default="meta")
     parser.add_argument("--study_subject", type=str, choices=["warm_up", "meta_predict_steps", "meta_seq_len", "meta_or_not",
-                                                              "loss_type","meta_arch"])   # logits error 和 loss error 这两种模式在meta_or_not中
+                                                              "loss_type","meta_arch","backbone"])   # logits error 和 loss error 这两种模式在meta_or_not中
 
     args = parser.parse_args()
 
@@ -565,43 +565,45 @@ if __name__ == "__main__":
     gpus = args.gpu.split(",")
     if args.study_subject == "warm_up":
         # warm_up_steps = [5,10,15,20,25,30,35,40,45,50]
-        warm_up_steps =  [5,10,15,20,25,30,35,40,45,50]
-        # pool = mp.Pool(processes=5)
+        warm_up_steps = [args.warm_up_steps]
+        # pool = mp.Pool(processes=7)
         for idx, warm_up in enumerate(warm_up_steps):
             gpu = gpus[idx%len(gpus)]
             args.warm_up_steps = warm_up
             save_result_path = args.exp_dir + "/warmup_{}_{}_result.json".format(args.warm_up_steps, args.arch)
             log_file_path = osp.join(args.exp_dir, 'run_{}_warmup@{}.log'.format(args.arch, args.warm_up_steps))
             attack_dataset(copy.deepcopy(args), gpu, save_result_path, log_file_path)
-        #     pool.apply_async(attack_dataset, args=(copy.deepcopy(args), gpu, save_result_path, log_file_path))
+            # pool.apply_async(attack_dataset, args=(copy.deepcopy(args), gpu, save_result_path, log_file_path))
         # pool.close()
         # pool.join()
     elif args.study_subject == "meta_predict_steps":
-        meta_predict_steps = [5, 10, 20, 30, 40, 50, 60, 70]
-        # pool = mp.Pool(processes=len(meta_predict_steps))
+        meta_predict_steps = [3, 7, 5,10, 20, 30, 40, 50, 60, 70,80,90,100]
+        # pool = mp.Pool(processes=4)
         for idx, meta_step in enumerate(meta_predict_steps):
             gpu = gpus[idx % len(gpus)]
             args.meta_predict_steps = meta_step
             save_result_path = args.exp_dir + "/meta_predict_steps_{}_{}_result.json".format(meta_step, args.arch)
             log_file_path = osp.join(args.exp_dir, 'run_{}_meta_predict_steps@{}.log'.format(args.arch, meta_step))
             attack_dataset(copy.deepcopy(args), gpu, save_result_path, log_file_path)
-        #     pool.apply_async(attack_dataset, args=(copy.deepcopy(args), gpu, save_result_path, log_file_path))
+            # pool.apply_async(attack_dataset, args=(copy.deepcopy(args), gpu, save_result_path, log_file_path))
         # pool.close()
         # pool.join()
     elif args.study_subject == "meta_seq_len":
-        meta_seq_lens = [10,20,30,40,50,60]
-        # pool = mp.Pool(processes=len(meta_seq_lens))
+        # meta_seq_lens = [5,10,20,30,40,50,60,70,80,90,100]
+        meta_seq_lens = [args.meta_seq_len]
+        # pool = mp.Pool(processes=8)
         for idx, meta_seq_len in enumerate(meta_seq_lens):
             gpu = gpus[idx % len(gpus)]
             args.meta_seq_len = meta_seq_len
             save_result_path = args.exp_dir + "/meta_seq_len_{}_{}_result.json".format(meta_seq_len, args.arch)
             log_file_path = osp.join(args.exp_dir, 'run_{}_meta_seq_len@{}.log'.format(args.arch, meta_seq_len))
             attack_dataset(copy.deepcopy(args), gpu, save_result_path, log_file_path)
-        #     pool.apply_async(attack_dataset, args=(copy.deepcopy(args), gpu, save_result_path, log_file_path))
+            # pool.apply_async(attack_dataset, args=(copy.deepcopy(args), gpu, save_result_path, log_file_path))
         # pool.close()
         # pool.join()
     elif args.study_subject == "meta_or_not":
-        meta_modes = ["deep","uninitial","meta"]
+        # meta_modes = ["deep","uninitial","meta"]
+        meta_modes = [ "deep"]
         # pool = mp.Pool(processes=len(meta_modes))
         for idx, meta_mode in enumerate(meta_modes):
             gpu = gpus[idx % len(gpus)]
@@ -624,3 +626,12 @@ if __name__ == "__main__":
         #     pool.apply_async(attack_dataset, args=(copy.deepcopy(args), gpu, save_result_path, log_file_path))
         # pool.close()
         # pool.join()
+    elif args.study_subject =="backbone":
+        backbones = ["ghost_net", "resnet34"]
+        for idx, backbone in enumerate(backbones):
+            gpu = gpus[idx % len(gpus)]
+            args.meta_arch = backbone
+            save_result_path = args.exp_dir + "/backbone_{}_attack_{}_result.json".format(backbone, args.arch)
+            log_file_path = osp.join(args.exp_dir, 'run_{}_backbone@{}.log'.format(args.arch, backbone))
+            attack_dataset(copy.deepcopy(args), gpu, save_result_path, log_file_path)
+

@@ -14,7 +14,7 @@ import torch.utils.data
 from config import IN_CHANNELS
 from optimizer.radam import RAdam
 from dataset.dataset_loader_maker import DataLoaderMaker
-from dataset.model_constructor import MetaLearnerModelBuilder
+from dataset.standard_model import MetaLearnerModelBuilder
 
 class Identity(nn.Module):
     def __init__(self):

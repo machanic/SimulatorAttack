@@ -9,7 +9,7 @@ import torch
 from torch.utils.data import DataLoader
 
 from config import MODELS_TRAIN_STANDARD, PY_ROOT
-from dataset.model_constructor import StandardModel
+from dataset.standard_model import StandardModel
 from meta_grad_attacker.dataset.image_gradient_dataset import ImageGradientDataset
 from meta_grad_attacker.meta_training.meta import Meta
 def set_log_file(fname):
@@ -23,7 +23,7 @@ def set_log_file(fname):
 def get_parse_args():
     argparser = argparse.ArgumentParser()
     argparser.add_argument('--epoch', type=int, help='epoch number', default=20)
-    argparser.add_argument("--dataset", type=str, choices=["CIFAR-10","CIFAR-100","TinyImageNet", "ImageNet"])
+    argparser.add_argument("--dataset", type=str, required=True, choices=["CIFAR-10","CIFAR-100","TinyImageNet", "ImageNet"])
     argparser.add_argument('--k_spt', type=int, help='k shot for support set', default=10)
     argparser.add_argument('--k_qry', type=int, help='k shot for query set', default=10)
     # argparser.add_argument('--imgsz', type=int, help='imgsz', default=64)
@@ -93,6 +93,7 @@ def main(args):
     log_file_path = '{}/train_pytorch_model/meta_grad_regression/train_{}.log'.format(PY_ROOT, args.dataset)
     set_log_file(log_file_path)
 
+    meta_model_path = '{}/train_pytorch_model/meta_grad_regression/{}.pth.tar'.format(PY_ROOT,args.dataset)
     def save_model(model, dataset, epoch, acc):
         model_folder_path = '{}/train_pytorch_model/meta_grad_regression'.format(PY_ROOT)
         os.makedirs(model_folder_path, exist_ok=True)
@@ -100,7 +101,12 @@ def main(args):
         save_model_path = os.path.join(model_folder_path, file_name)
         torch.save({"state_dict": model.state_dict(), "accuracy": acc, "epoch":epoch}, save_model_path)
 
-    for epoch in range(args.epoch):
+    resume_epoch = 0
+    if os.path.exists(meta_model_path):
+        loaded = torch.load(meta_model_path, map_location=lambda storage, location: storage)
+        maml.load_state_dict(loaded["state_dict"])
+        resume_epoch = loaded['epoch']
+    for epoch in range(resume_epoch, args.epoch):
         minis_iter = []
         for i in range(len(minis)):
             minis_iter.append(iter(minis[i]))

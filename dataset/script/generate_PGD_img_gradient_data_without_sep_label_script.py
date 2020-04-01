@@ -132,7 +132,7 @@ def get_data_loader(datasetname, batch_size):
     elif datasetname == "FashionMNIST":
         train_dataset = FashionMNIST(IMAGE_DATA_ROOT[datasetname], train=True, transform=preprocessor)
     elif datasetname == "TinyImageNet":
-        train_dataset = TinyImageNet(IMAGE_DATA_ROOT[args.dataset], preprocessor, is_train=True)
+        train_dataset = TinyImageNet(IMAGE_DATA_ROOT[args.dataset], preprocessor, train=True)
 
     data_loader = torch.utils.data.DataLoader(train_dataset, batch_size=batch_size, shuffle=True,
         num_workers=0, pin_memory=True)

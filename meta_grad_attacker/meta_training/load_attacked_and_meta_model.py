@@ -36,9 +36,10 @@ class Meta(nn.Module):
 def load_meta_model(meta_model_path):
     # meta_model = Learner(config, 3, 32)
     meta_model = Meta()
-    pretrained_dict = torch.load(meta_model_path)["state_dict"]
+    pretrained_dict = torch.load(meta_model_path, map_location=lambda storage, location: storage)["state_dict"]
     meta_model.load_state_dict(pretrained_dict, strict=True)
     meta_model.net.eval()
+    meta_model.cuda()
     return meta_model.net.cuda()
 
 

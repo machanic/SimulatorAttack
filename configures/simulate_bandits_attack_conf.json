@@ -14,8 +14,8 @@
           "nes": false,
           "seed": 1234,
           "target_type": "random",
-          "notdone_threshold": 0.1,
-          "warm_up_steps": 20
+          "notdone_threshold": 0.0,
+          "warm_up_steps": 10
         },
       "linf": {
           "fd_eta": 0.1,
@@ -31,8 +31,8 @@
           "nes": false,
           "seed": 1234,
           "target_type": "random",
-          "notdone_threshold": 0.2,
-          "warm_up_steps": 20
+          "notdone_threshold": 0.0,
+          "warm_up_steps": 10
       }
   },
     "CIFAR-100": {
@@ -50,7 +50,7 @@
           "nes": false,
           "seed": 1234,
           "target_type": "random",
-          "notdone_threshold": 0.01,
+          "notdone_threshold": 0.0,
           "warm_up_steps": 10
         },
       "linf": {
@@ -67,8 +67,8 @@
           "nes": false,
           "seed": 1234,
           "target_type": "random",
-          "notdone_threshold": 0.2,
-          "warm_up_steps": 20
+          "notdone_threshold": 0.0,
+          "warm_up_steps": 10
       }
   },
      "TinyImageNet": {
@@ -86,8 +86,8 @@
           "nes": false,
           "seed": 1234,
           "target_type": "random",
-          "notdone_threshold": 0.1,
-          "warm_up_steps": 20
+          "notdone_threshold": 0.0,
+          "warm_up_steps": 10
         },
       "linf": {
           "fd_eta": 0.1,
@@ -103,8 +103,8 @@
           "nes": false,
           "seed": 1234,
           "target_type": "random",
-          "notdone_threshold": 0.2,
-          "warm_up_steps": 20
+          "notdone_threshold": 0.0,
+          "warm_up_steps": 10
       }
   },
 
@@ -140,7 +140,7 @@
           "nes": false,
           "seed": 1234,
           "target_type": "random",
-          "notdone_threshold": 0.15,
+          "notdone_threshold": 0.0,
           "warm_up_steps":20
       }
   },
@@ -176,7 +176,7 @@
           "nes": false,
           "seed": 1234,
           "target_type": "random",
-          "notdone_threshold": 0.15,
+          "notdone_threshold": 0.0,
           "warm_up_steps": 20
       }
   },
@@ -195,7 +195,7 @@
               "tile_size": 50,
               "target_type":"random",
               "nes": false,
-              "notdone_threshold": 0.2,
+              "notdone_threshold": 0.0,
                 "warm_up_steps": 20
         },
         "linf": {
@@ -212,7 +212,7 @@
             "tile_size": 50,
             "target_type": "random",
             "nes": false,
-            "notdone_threshold": 0.2,
+            "notdone_threshold": 0.0,
             "warm_up_steps": 20
         }
     }

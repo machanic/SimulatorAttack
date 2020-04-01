@@ -1,7 +1,5 @@
 import glob
 import sys
-from collections import deque, OrderedDict
-
 sys.path.append("/home1/machen/meta_perturbations_black_box_attack")
 import argparse
 import json
@@ -9,7 +7,7 @@ import os
 import os.path as osp
 import random
 from types import SimpleNamespace
-from dataset.model_constructor import StandardModel
+
 import glog as log
 import numpy as np
 import torch
@@ -17,8 +15,10 @@ from torch.nn import functional as F
 from torch.nn.modules import Upsample
 from config import IN_CHANNELS, CLASS_NUM, PY_ROOT, MODELS_TEST_STANDARD
 from dataset.dataset_loader_maker import DataLoaderMaker
+from dataset.standard_model import StandardModel
 from utils.statistics_toolkit import success_rate_and_query_coorelation, success_rate_avg_query
 from meta_simulator_attack.meta_model_finetune import MemoryEfficientMetaModelFinetune
+from collections import deque, OrderedDict
 
 class FinetuneQueue(object):
     def __init__(self, batch_size, meta_seq_len, img_idx_to_batch_idx):
@@ -36,10 +36,10 @@ class FinetuneQueue(object):
     def append(self, q1_images, q2_images, q1_logits, q2_logits):
         for img_idx, (q1_image, q2_image, q1_logit, q2_logit) in enumerate(zip(q1_images, q2_images, q1_logits, q2_logits)):
             batch_idx = self.img_idx_to_batch_idx[img_idx]
-            self.q1_images_for_finetune[batch_idx].append(q1_image)
-            self.q2_images_for_finetune[batch_idx].append(q2_image)
-            self.q1_logits_for_finetune[batch_idx].append(q1_logit)
-            self.q2_logits_for_finetune[batch_idx].append(q2_logit)
+            self.q1_images_for_finetune[batch_idx].append(q1_image.detach().cpu())
+            self.q2_images_for_finetune[batch_idx].append(q2_image.detach().cpu())
+            self.q1_logits_for_finetune[batch_idx].append(q1_logit.detach().cpu())
+            self.q2_logits_for_finetune[batch_idx].append(q2_logit.detach().cpu())
 
     def stack_history_track(self):
         q1_images = []
@@ -51,10 +51,10 @@ class FinetuneQueue(object):
             q2_images.append(torch.stack(list(self.q2_images_for_finetune[batch_idx])))  # T,C,H,W
             q1_logits.append(torch.stack(list(self.q1_logits_for_finetune[batch_idx])))  # T, classes
             q2_logits.append(torch.stack(list(self.q2_logits_for_finetune[batch_idx])))  #  T, classes
-        q1_images = torch.stack(q1_images)
-        q2_images = torch.stack(q2_images)
-        q1_logits = torch.stack(q1_logits)
-        q2_logits = torch.stack(q2_logits)
+        q1_images = torch.stack(q1_images).cuda()
+        q2_images = torch.stack(q2_images).cuda()
+        q1_logits = torch.stack(q1_logits).cuda()
+        q2_logits = torch.stack(q2_logits).cuda()
         return q1_images, q2_images, q1_logits, q2_logits
 
 class ImageIdxToOrigBatchIdx(object):
@@ -173,14 +173,24 @@ class SimulateBanditsAttackShrink(object):
             return_tensors.append(concatenate_tensor)
         return return_tensors
 
-    def attack_all_images(self, args, arch, skip_indexes, result_dump_path):
+    def attack_all_images(self, args, arch, tmp_dump_path, result_dump_path):
         # subset_pos用于回调函数汇报汇总统计结果
         model = StandardModel(args.dataset, arch, no_grad=True)
         model.cuda()
         model.eval()
         # 带有缩减功能的，攻击成功的图片自动删除掉
-        chunk_skip_indexes = self.chunks(skip_indexes, args.batch_size)
         for data_idx, data_tuple in enumerate(self.dataset_loader):
+            if os.path.exists(tmp_dump_path):
+                with open(tmp_dump_path, "r") as file_obj:
+                    json_content = json.load(file_obj)
+                    resume_batch_idx = int(json_content["batch_idx"])  # resume
+                    for key in ['query_all', 'correct_all', 'not_done_all',
+                                'success_all', 'success_query_all']:
+                        if key in json_content:
+                            setattr(self, key, torch.from_numpy(np.asarray(json_content[key])).float())
+                    if data_idx < resume_batch_idx:  # resume
+                        continue
+
             if args.dataset == "ImageNet":
                 if model.input_size[-1] >= 299:
                     images, true_labels = data_tuple[1], data_tuple[2]
@@ -190,22 +200,22 @@ class SimulateBanditsAttackShrink(object):
                 images, true_labels = data_tuple[0], data_tuple[1]  # TODO 缩减
             if images.size(-1) != model.input_size[-1]:
                 images = F.interpolate(images, size=model.input_size[-1], mode='bilinear',align_corners=True)
-            skip_batch_index_list = np.nonzero(np.asarray(chunk_skip_indexes[data_idx]))[0].tolist()
+            # skip_batch_index_list = np.nonzero(np.asarray(chunk_skip_indexes[data_idx]))[0].tolist()
             selected = torch.arange(data_idx * args.batch_size,
                                     min((data_idx + 1) * args.batch_size, self.total_images))  # 选择这个batch的所有图片的index
             img_idx_to_batch_idx = ImageIdxToOrigBatchIdx(args.batch_size)
-            if len(skip_batch_index_list) > 0:  # FIXME 一种用bandits失败的结果就不判断的加速手段，可以删去
-                for skip_index in skip_batch_index_list:
-                    pos = selected[skip_index]
-                    self.query_all[pos] = args.max_queries
-                    self.correct_all[pos] = 0
-                    self.not_done_all[pos] = 1
-                    self.success_all[pos] = 0 # 让其定义为分类失败
-                    self.success_query_all[pos] = 0
-                    self.not_done_loss_all[pos] = 1.0
-                    self.not_done_prob_all[pos] = 1.0
-                images, true_labels = self.delete_tensor_by_index_list(skip_batch_index_list, images, true_labels)
-                img_idx_to_batch_idx.del_by_index_list(skip_batch_index_list)
+            # if len(skip_batch_index_list) > 0:  # FIXME 一种用bandits失败的结果就不判断的加速手段，可以删去
+            #     for skip_index in skip_batch_index_list:
+            #         pos = selected[skip_index]
+            #         self.query_all[pos] = args.max_queries
+            #         self.correct_all[pos] = 0
+            #         self.not_done_all[pos] = 1
+            #         self.success_all[pos] = 0 # 让其定义为分类失败
+            #         self.success_query_all[pos] = 0
+            #         self.not_done_loss_all[pos] = 1.0
+            #         self.not_done_prob_all[pos] = 1.0
+            #     images, true_labels = self.delete_tensor_by_index_list(skip_batch_index_list, images, true_labels)
+            #     img_idx_to_batch_idx.del_by_index_list(skip_batch_index_list)
 
             images, true_labels = images.cuda(), true_labels.cuda()
             first_finetune = True
@@ -266,17 +276,24 @@ class SimulateBanditsAttackShrink(object):
                     with torch.no_grad():
                         q1_logits = model(q1_images)
                         q2_logits = model(q2_images)
+
+                        q1_logits = q1_logits/torch.norm(q1_logits,p=2,dim=-1,keepdim=True)  # 加入normalize
+                        q2_logits = q2_logits/torch.norm(q2_logits,p=2,dim=-1,keepdim=True)
+
                     finetune_queue.append(q1_images.detach(), q2_images.detach(), q1_logits.detach(), q2_logits.detach())
 
                     if (step_index >= args.warm_up_steps and len(np.where(not_done.detach().cpu().numpy().astype(np.int32) == 1)[0]) / float(args.batch_size) > args.notdone_threshold):
                         q1_images_seq, q2_images_seq, q1_logits_seq, q2_logits_seq = finetune_queue.stack_history_track()
-                        finetune_times = args.finetune_times if first_finetune else 5
+                        finetune_times = args.finetune_times if first_finetune else random.randint(3,5) # FIXME
                         self.meta_finetuner.finetune(q1_images_seq, q2_images_seq, q1_logits_seq, q2_logits_seq,
                                                      finetune_times, first_finetune, img_idx_to_batch_idx)
                         first_finetune = False
                 else:
                     with torch.no_grad():
                         q1_logits, q2_logits = self.meta_finetuner.predict(q1_images, q2_images, img_idx_to_batch_idx)
+
+                        q1_logits = q1_logits / torch.norm(q1_logits, p=2, dim=-1, keepdim=True)  # FIXME 到底加不加
+                        q2_logits = q2_logits / torch.norm(q2_logits, p=2, dim=-1, keepdim=True)
 
                 l1 = criterion(q1_logits, true_labels, target_labels)
                 l2 = criterion(q2_logits, true_labels, target_labels)
@@ -302,7 +319,7 @@ class SimulateBanditsAttackShrink(object):
                 if predict_by_target_model:
                     query = query + 2 * not_done # TODO 注意query和not_done,这几个变量都是缩减过的
                 if args.targeted:
-                    not_done = not_done * (1 - adv_pred.eq(target_labels)).float()  # not_done初始化为 correct, shape = (batch_size,)
+                    not_done = not_done * (1 - adv_pred.eq(target_labels).float()).float()  # not_done初始化为 correct, shape = (batch_size,)
                 else:
                     not_done = not_done * adv_pred.eq(true_labels).float()  # 只要是跟原始label相等的，就还需要query，还没有成功
                 success = (1 - not_done) * correct
@@ -354,24 +371,32 @@ class SimulateBanditsAttackShrink(object):
                     value_all[pos] = value # 由于value_all是全部图片都放在一个数组里，当前batch选择出来
             img_idx_to_batch_idx.proj_dict.clear()
 
+            tmp_info_dict = {"batch_idx": data_idx + 1, "batch_size":args.batch_size}
+            for key in ['query_all', 'correct_all', 'not_done_all',
+                        'success_all', 'success_query_all']:
+                value_all = getattr(self, key).detach().cpu().numpy().tolist()
+                tmp_info_dict[key] = value_all
+            with open(tmp_dump_path, "w") as result_file_obj:
+                json.dump(tmp_info_dict, result_file_obj, sort_keys=True)
+
         query_all_ = self.query_all.detach().cpu().numpy().astype(np.int32)
         not_done_all_ = self.not_done_all.detach().cpu().numpy().astype(np.int32)
         query_threshold_success_rate, query_success_rate = success_rate_and_query_coorelation(query_all_, not_done_all_)
         success_rate_to_avg_query = success_rate_avg_query(query_all_, not_done_all_)
-        log.info('{} is attacked finished ({} images)'.format(arch, self.total_images))
-        log.info('        avg correct: {:.4f}'.format(self.correct_all.mean().item()))
-        log.info('       avg not_done: {:.4f}'.format(self.not_done_all.mean().item()))  # 有多少图没做完
-        if self.success_all.sum().item() > 0:
-            log.info(
-                '     avg mean_query: {:.4f}'.format(self.success_query_all[self.success_all.byte()].mean().item()))
-            log.info(
-                '   avg median_query: {:.4f}'.format(self.success_query_all[self.success_all.byte()].median().item()))
-            log.info('     max query: {}'.format(self.success_query_all[self.success_all.byte()].max().item()))
-        if self.not_done_all.sum().item() > 0:
-            log.info(
-                '  avg not_done_loss: {:.4f}'.format(self.not_done_loss_all[self.not_done_all.byte()].mean().item()))
-            log.info(
-                '  avg not_done_prob: {:.4f}'.format(self.not_done_prob_all[self.not_done_all.byte()].mean().item()))
+        # log.info('{} is attacked finished ({} images)'.format(arch, self.total_images))
+        # log.info('        avg correct: {:.4f}'.format(self.correct_all.mean().item()))
+        # log.info('       avg not_done: {:.4f}'.format(self.not_done_all.mean().item()))  # 有多少图没做完
+        # if self.success_all.sum().item() > 0:
+        #     log.info(
+        #         '     avg mean_query: {:.4f}'.format(self.success_query_all[self.success_all.byte()].mean().item()))
+        #     log.info(
+        #         '   avg median_query: {:.4f}'.format(self.success_query_all[self.success_all.byte()].median().item()))
+        #     log.info('     max query: {}'.format(self.success_query_all[self.success_all.byte()].max().item()))
+        # if self.not_done_all.sum().item() > 0:
+        #     log.info(
+        #         '  avg not_done_loss: {:.4f}'.format(self.not_done_loss_all[self.not_done_all.byte()].mean().item()))
+        #     log.info(
+        #         '  avg not_done_prob: {:.4f}'.format(self.not_done_prob_all[self.not_done_all.byte()].mean().item()))
         log.info('Saving results to {}'.format(result_dump_path))
         meta_info_dict = {"avg_correct": self.correct_all.mean().item(),
                           "avg_not_done": self.not_done_all.mean().item(),
@@ -399,9 +424,13 @@ class SimulateBanditsAttackShrink(object):
         self.not_done_prob_all.fill_(0)
         model.cpu()
 
-def get_exp_dir_name(dataset, loss, norm, targeted, target_type, distillation_loss):
+def get_exp_dir_name(dataset, loss, norm, targeted, target_type, distillation_loss, meta_interval):
     target_str = "untargeted" if not targeted else "targeted_{}".format(target_type)
-    dirname = 'simulate_bandits_shrink_attack-{}-{}_loss-{}-{}-{}-NEW'.format(dataset, loss, norm, target_str, distillation_loss)
+    # if targeted:
+    #     dirname = 'simulate_bandits_shrink_attack-{}-{}_loss-{}-{}-{}-meta_interval-{}'.format(dataset, loss, norm, target_str,
+    #                                                                           distillation_loss, meta_interval)
+    # else:
+    dirname = 'simulate_bandits_shrink_attack-{}-{}_loss-{}-{}-{}'.format(dataset, loss, norm, target_str, distillation_loss)
     return dirname
 
 def get_bandits_exp_dir_name(dataset, loss, norm, targeted, target_type):
@@ -429,7 +458,7 @@ def set_log_file(fname):
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--gpu",type=str, required=True)
-    parser.add_argument('--max-queries', type=int, default=30000)
+    parser.add_argument('--max-queries', type=int, default=10000)
     parser.add_argument('--fd-eta', type=float, help='\eta, used to estimate the derivative via finite differences')
     parser.add_argument('--image-lr', type=float, help='Learning rate for the image (iterative attack)')
     parser.add_argument('--online-lr', type=float, help='Learning rate for the prior')
@@ -457,11 +486,11 @@ if __name__ == "__main__":
                         choices=["logits_distillation", "2q_distillation"])
     parser.add_argument("--data_loss", type=str, required=True, choices=["xent", "cw"])
     parser.add_argument("--distillation_loss", type=str, required=True, choices=["mse", "pair_mse"])
-    parser.add_argument("--finetune_times", type=int, default=20)
+    parser.add_argument("--finetune_times", type=int, default=10)
     parser.add_argument('--seed', default=1398, type=int, help='random seed')
-    parser.add_argument("--meta_predict_steps", type=int, default=40)
+    parser.add_argument("--meta_predict_steps", type=int, default=5)  # FIXME 本来设置40，对于TinyImageNet太大了
     parser.add_argument("--warm_up_steps", type=int, default=None)
-    parser.add_argument("--meta_seq_len", type=int, default=20)
+    parser.add_argument("--meta_seq_len", type=int, default=10)
     parser.add_argument("--meta_arch",type=str, required=True)
 
     args = parser.parse_args()
@@ -484,14 +513,14 @@ if __name__ == "__main__":
         args_dict = defaults
     if args.targeted:
         if args.dataset == "ImageNet":
-            args.max_queries = 100000
+            args.max_queries = 50000
 
     # bandit_expr_dir_path = osp.join(args.exp_dir, get_bandits_exp_dir_name(args.dataset, args.data_loss, args.norm, args.targeted,
     #                                                                args.target_type))
 
     args.exp_dir = osp.join(args.exp_dir, get_exp_dir_name(args.dataset, args.data_loss,
                                                            args.norm, args.targeted, args.target_type,
-                                                           args.distillation_loss))
+                                                           args.distillation_loss, args.meta_predict_steps))
 
 
     os.makedirs(args.exp_dir, exist_ok=True)
@@ -531,14 +560,14 @@ if __name__ == "__main__":
         assert args.arch is not None
         archs = [args.arch]
     args.arch = ", ".join(archs)
-    log.info('Command line is: {}'.format(' '.join(sys.argv)))
+
     if args.test_archs:
         log_file_path = osp.join(args.exp_dir, 'run.log')
         set_log_file(log_file_path)
     elif args.arch is not None:
         log_file_path = osp.join(args.exp_dir, 'run_{}.log'.format(args.arch))
         set_log_file(log_file_path)
-
+    log.info('Command line is: {}'.format(' '.join(sys.argv)))
     log.info("Log file is written in {}".format(log_file_path))
     log.info('Called with args:')
     print_args(args)
@@ -550,14 +579,14 @@ if __name__ == "__main__":
     attacker = SimulateBanditsAttackShrink(args, meta_finetuner)
     for arch in archs:
         # bandit_result_path = bandit_expr_dir_path + "/{}_result.json".format(arch)
-        tot_skip_indexes = [0 for _ in range(1000)]
         # if os.path.exists(bandit_result_path):
         #     with open(bandit_result_path, "r") as file_obj:
         #         json_data = json.load(file_obj)
         #         tot_skip_indexes = np.array(json_data["not_done_all"]).astype(np.int32)  # 出现1了表示以前就fail，跳过去
         save_result_path = args.exp_dir + "/{}_result.json".format(arch)
+        tmp_result_path = args.exp_dir + "/tmp_{}_result.json".format(arch)
         # if os.path.exists(save_result_path):
         #     continue
         log.info("Begin attack {} on {}, result will be saved to {}".format(arch, args.dataset, save_result_path))
 
-        attacker.attack_all_images(args, arch, tot_skip_indexes, save_result_path)
+        attacker.attack_all_images(args, arch,tmp_result_path, save_result_path)

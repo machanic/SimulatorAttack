@@ -46,7 +46,10 @@ class InnerLoopPairLoss(nn.Module):
         diff_loss2 = self.mse_loss(out_2, target_2)
         if self.loss_type == "pair_mse":
             predict_distance = self.pair_wise_distance(out_1, out_2)  # shape = （batch_size,)
+            normal_factor = torch.mean(predict_distance)
+            predict_distance = predict_distance / normal_factor
             target_distance = self.pair_wise_distance(target_1, target_2)  # shape = （batch_size,)
+            target_distance = target_distance / torch.mean(target_distance)
             distance_loss = self.mse_loss(predict_distance, target_distance)
             loss = distance_loss + 0.1 * diff_loss1 + 0.1 * diff_loss2
         else:

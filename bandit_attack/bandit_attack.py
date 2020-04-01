@@ -7,7 +7,7 @@ import os
 import os.path as osp
 import random
 from types import SimpleNamespace
-from dataset.model_constructor import StandardModel
+from dataset.standard_model import StandardModel
 import glog as log
 import numpy as np
 import torch

@@ -14,7 +14,7 @@ from types import SimpleNamespace
 import torch
 import torch.nn.functional as F
 import numpy as np
-from dataset.model_constructor import StandardModel
+from dataset.standard_model import StandardModel
 from dataset.dataset_loader_maker import DataLoaderMaker
 from config import PY_ROOT, MODELS_TEST_STANDARD, CLASS_NUM
 from utils.statistics_toolkit import success_rate_and_query_coorelation, success_rate_avg_query

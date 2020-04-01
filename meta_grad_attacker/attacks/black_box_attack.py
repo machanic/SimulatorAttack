@@ -37,24 +37,27 @@ def coordinate_ADAM(losses, indice, grad, hess, batch_size, mt_arr, vt_arr, real
     adam_epoch[indice] = epoch + 1.
 
 
-class MetaGradL2Attack(object):
-    def __init__(self, args, targeted=False, search_steps=None, max_steps=None, use_log=True, cuda=True, debug=False):
+class MetaGradAttack(object):
+    def __init__(self, args, norm, epsilon, targeted=False, search_steps=None, max_steps=None, use_log=True, cuda=True, debug=False):
         self.debug = debug
+        self.norm = norm
+        self.epsilon = epsilon
         self.targeted = targeted  # false
         self.num_classes = CLASS_NUM[args.dataset]
         self.confidence = 0  # FIXME need to find a good value for this, 0 value used in paper not doing much...
         self.initial_const = 0.5  # bumped up from default of .01 in reference code
         self.binary_search_steps = search_steps or 5
         self.repeat = self.binary_search_steps >= 10
-        self.max_steps = max_steps or 1000
+
         self.abort_early = True
         self.clip_min = -1
         self.clip_max = 1
         self.cuda = cuda
-        self.clamp_fn = 'tanh'  # set to something else perform a simple clamp instead of tanh
         self.init_rand = False  # an experiment, does a random starting point help?
         self.use_log = use_log
         self.use_tanh = args.use_tanh
+        if self.norm == "linf":
+            assert not self.use_tanh, "The linf norm must set use_tanh to False."
         self.batch_size = 784
         self.update_pixels = args.update_pixels
         self.GRAD_STORE =0
@@ -63,7 +66,9 @@ class MetaGradL2Attack(object):
         self.every_iter = int(float(self.update_pixels) / float(self.simba_pixel) ) * args.finetune_interval
         self.finetune_interval = args.finetune_interval
         self.max_queries = args.max_queries
+        self.max_steps = max_steps or 1000
         self.max_iter = self.max_steps * self.every_iter
+
         self.mp_count = np.zeros(3072)
         self.use_importance = True
         self.LEARNING_RATE = args.learning_rate
@@ -83,8 +88,10 @@ class MetaGradL2Attack(object):
 
         self.mt = torch.zeros(var_size, dtype=torch.float32)
         self.vt = torch.zeros(var_size, dtype=torch.float32)
+
         self.modifier_up = torch.zeros(var_size, dtype=torch.float32)
         self.modifier_down = torch.zeros(var_size, dtype=torch.float32)
+
         self.grad = torch.zeros(self.batch_size, dtype=torch.float32)
         self.hess = torch.zeros(self.batch_size, dtype=torch.float32)
         self.adam_epoch = torch.ones(var_size, dtype=torch.float32)
@@ -106,13 +113,13 @@ class MetaGradL2Attack(object):
                 output[target] -= self.confidence
             else:
                 output[target] += self.confidence
-            output = np.argmax(output)
+            output = int(np.argmax(output))
         if self.targeted:
             return output == target
         else:
             return output != target
 
-    def _loss(self, output, target, dist, scale_const):
+    def _loss(self, output, target, scale_const):
         # compute the probability of the label class versus the maximum other
         real = (target * output).sum(1)
         other = ((1. - target) * output - target * 10000.).max(1)[0]
@@ -134,22 +141,36 @@ class MetaGradL2Attack(object):
         loss = loss1 + loss2
         return loss, loss1, loss2
 
+    def normalize(self, t, p=2):
+        assert len(t.shape) == 4
+        if p == 2:
+            norm_vec = torch.sqrt(t.pow(2).sum(dim=[1, 2, 3])).view(-1, 1, 1, 1)
+        elif p == 1:
+            norm_vec = t.abs().sum(dim=[1, 2, 3]).view(-1, 1, 1, 1)
+        else:
+            raise NotImplementedError('Unknown norm p={}'.format(p))
+        norm_vec += (norm_vec == 0).float() * 1e-8
+        return norm_vec
 
-
-
+    def l2_dist_within_epsilon(self, image, adv_image, epsilon):
+        delta = adv_image - image
+        out_of_bounds_mask = (self.normalize(delta) > epsilon).byte()  # norm返回shape(N,1,1,1) > epsilone
+        return not out_of_bounds_mask.any()  # 如果全是0.返回True,表示没有一个像素超出范围外
 
     def _optimize(self, model, meta_model, step, input_var, modifier_var, target_var, scale_const_var, target,
                   indice, input_orig=None):
+        query = 0
         if self.use_tanh:
-            input_adv = (tanh_rescale(modifier_var + input_var, self.clip_min, self.clip_max) + 1)/ 2
+            input_adv = (tanh_rescale(modifier_var + input_var) + 1)/ 2
         else:
             input_adv = modifier_var + input_var
-        output = F.softmax(model(input_adv), dim=1)
+        output = F.softmax(model(input_adv), dim=1) # query model for 1 time
+        query += 1
         if input_orig is None:
             dist = l2_dist(input_adv, input_var, keepdim=True).squeeze(2).squeeze(2)
         else:
             dist = l2_dist(input_adv, input_orig, keepdim=True).squeeze(2).squeeze(2)
-        loss, loss1, loss2 = self._loss(output.data, target_var, dist, scale_const_var)
+        loss, loss1, loss2 = self._loss(output.data, target_var, scale_const_var)
         meta_optimizer = optim.Adam(meta_model.parameters(), lr=0.01)
         input_adv_copy = copy.deepcopy(input_adv.detach())
         if self.guided and step == 0:
@@ -159,7 +180,8 @@ class MetaGradL2Attack(object):
             zoo_gradients = []
             generate_grad = GradientGenerator(update_pixels=self.update_pixels,
                                               targeted=self.targeted, classes=CLASS_NUM[self.dataset])
-            zoo_grad, select_indice = generate_grad.run(model, input_adv_copy, target, indice)
+            zoo_grad, select_indice = generate_grad.run(model, input_adv_copy, target, indice)  # query for batch_size times
+            query += self.update_pixels
             zoo_gradients.append(zoo_grad)
             zoo_gradients = np.array(zoo_gradients, np.float32)
             zoo_gradients = torch.from_numpy(zoo_gradients).cuda()
@@ -185,38 +207,44 @@ class MetaGradL2Attack(object):
             grad = meta_output.reshape(-1)[indice2]
         self.solver(loss, indice2, grad, self.hess, self.batch_size, self.mt, self.vt, modifier_var,
                     self.modifier_up, self.modifier_down, self.LEARNING_RATE, self.adam_epoch, self.beta1, self.beta2,
-                    not self.use_tanh)
+                    not self.use_tanh)  # use_tanh模式，就不使用modifier_up和modifier_down
         loss_np = loss[0].item()
         loss1 = loss1[0].item()
         loss2 = loss2[0].item()
         dist_np = dist[0].data.cpu().numpy()
         output_np = output[0].unsqueeze(0).data.cpu().numpy()
-        input_adv_np = input_adv[0].unsqueeze(0).data.permute(0, 2, 3,
-                                                              1).cpu().numpy()  # back to BHWC for numpy consumption
-        return loss_np, loss1, loss2, dist_np, output_np, input_adv_np, indice
+        input_adv_np = input_adv[0].unsqueeze(0).data.permute(0, 2, 3, 1).cpu().numpy()  # back to BHWC for numpy consumption
+        return loss_np, loss1, loss2, dist_np, output_np, input_adv_np, indice, query
 
     def run(self, model, meta_model, input, target):
+        total_queries = 0
+        success_queries = 0
         batch_size, c, h, w = input.size()
         var_size = c * h * w
         lower_bound = np.zeros(batch_size)
         scale_const = np.ones(batch_size) * self.initial_const
         upper_bound = np.ones(batch_size) * 1e10
-        if not self.use_tanh:
-            self.modifier_up = 1 - input.reshape(-1)
-            self.modifier_down = 0 - input.reshape(-1)
+
+        if not self.use_tanh:  # 此时modifier_up和modifier_down起作用，可以设置为linf的攻击的eps半径
+            if self.norm == "linf":
+                self.modifier_up = torch.clamp(input.view(-1)+self.epsilon, min=0, max=1) - input.view(-1)
+                self.modifier_down = torch.clamp(input.view(-1)-self.epsilon, min=0, max=1) - input.view(-1)
+            else:
+                self.modifier_up = 1 - input.reshape(-1)  # 像素范围是0到1之间，这是修改量的范围
+                self.modifier_down = 0 - input.reshape(-1)
         # python/numpy placeholders for the overall best l2, label score, and adversarial image
         o_best_l2 = [1e10] * batch_size
         o_best_score = [-1] * batch_size
-        o_best_attack = input.permute(0, 2, 3, 1).cpu().numpy()
+        o_best_attack = input.permute(0, 2, 3, 1).cpu().numpy()  # put channel as the last dimension
         # setup input (image) variable, clamp/scale as necessary
-        if self.clamp_fn == 'tanh':
-            input_var = torch_arctanh(input * 2 - 1).detach()
+        if self.use_tanh:  # l2模式使用, linf norm使用no_tanh
+            input_var = torch_arctanh(input * 2 - 1).detach()  # arctanh接受的是-1到1
             input_var.requires_grad = False
-            input_orig = (tanh_rescale(input_var, self.clip_min, self.clip_max) + 1) / 2
+            input_orig = (tanh_rescale(input_var) + 1) / 2
         else:
             input_var = input.detach()
             input_var.requires_grad = False
-            input_orig = None
+            input_orig = input_var.clone()
         target_onehot = torch.zeros(target.size() + (self.num_classes,))
         if self.cuda:
             target_onehot = target_onehot.cuda()
@@ -229,7 +257,6 @@ class MetaGradL2Attack(object):
         self.vt = torch.zeros(var_size, dtype=torch.float32)
         self.adam_epoch = torch.ones(var_size, dtype=torch.float32)
         stage = 0
-        eval_costs = 0
         if self.init_rand:
             modifier = torch.normal(mean=modifier, std=0.001)
         if self.cuda:
@@ -242,7 +269,6 @@ class MetaGradL2Attack(object):
             self.hess = self.hess.cuda()
         modifier_var = modifier
         first_step = 0
-        total_query = 0
         for search_step in range(self.binary_search_steps):
             if self.debug:
                 log.info('Const:')
@@ -263,14 +289,11 @@ class MetaGradL2Attack(object):
             indice = np.zeros(250)
             last_loss1 = 1.0
             for step in range(self.max_steps):
-                loss, loss1, loss2, dist, output, adv_img, indice = self._optimize(
+                loss, loss1, loss2, dist, output, adv_img, indice, query = self._optimize(
                     model, meta_model, step,
                     input_var, modifier_var, target_var,
                     scale_const_var, target, indice, input_orig)
-                if self.solver_name == 'fake_zero':
-                    eval_costs += np.prod(modifier.shape)
-                else:
-                    eval_costs += self.batch_size
+                total_queries += query
                 if loss1 == 0.0 and last_loss1 != 0 and stage == 0:
                     if self.reset_adam_after_found:
                         self.mt = torch.zeros(var_size, dtype=torch.float32)
@@ -282,11 +305,9 @@ class MetaGradL2Attack(object):
                     log.info(
                         'Step: {0:>4}, loss: {1:6.4f}, loss1: {2:5f}, loss2: {3:5f}, dist: {4:8.5f}, modifier mean: {5:.5e}'.format(
                             step, loss, loss1, loss2, dist.mean(), modifier_var.mean()))
-                if self.abort_early and step % (self.max_steps // 100) == 0:
-                    if first_step !=0:
-                        log.info('Aborting early...')
-                        break
-                    prev_loss = loss
+                if self.abort_early and first_step != 0:
+                    log.info('Aborting early...')
+                    break
                 # update best result found
                 for i in range(batch_size):
                     target_label = target[i]
@@ -297,22 +318,31 @@ class MetaGradL2Attack(object):
                         if step % 100 == 0:
                             log.info('{0:>2} dist: {1:.5f}, output: {2:>3}, {3:5.3}, target {4:>3}'.format(
                                 i, di, output_label, output_logits[output_label], target_label))
-                    if di < best_l2[i] and self._compare(output_logits, target_label):
+                    if di < best_l2[i] and self._compare(output_logits, target_label.item()):
                         if self.debug:
                             log.info('{0:>2} best step,  prev dist: {1:.5f}, new dist: {2:.5f}'.format(
                                 i, best_l2[i], di))
                         best_l2[i] = di
                         best_score[i] = output_label
-                    if di < o_best_l2[i] and self._compare(output_logits, target_label):
+                    if di < o_best_l2[i] and self._compare(output_logits, target_label.item()):
                         if self.debug:
                             log.info('{0:>2} best total, prev dist: {1:.5f}, new dist: {2:.5f}'.format(
                                 i, o_best_l2[i], di))
                         o_best_l2[i] = di
                         o_best_score[i] = output_label
-                        o_best_attack[i] = adv_img[i]
-                        first_step = step
 
-                total_query += (step - 1) // self.finetune_interval * self.update_pixels * 2 + step
+                        adv_img_tensor = torch.from_numpy(adv_img[i]).unsqueeze(0).permute(0,3, 1,2) # BHWC->BCHW
+                        input_orig_tensor = input_orig[i].unsqueeze(0).cpu()
+                        assert adv_img_tensor.size() == input_orig_tensor.size()
+                        if self.norm == "l2" and self.l2_dist_within_epsilon(input_orig_tensor,
+                                                                             adv_img_tensor, self.epsilon):
+                            success_queries = total_queries
+                            o_best_attack[i] = adv_img[i]  # 找到一张图
+                            first_step = step  # 找到对抗样本的迭代次数
+                        elif self.norm == "linf":
+                            success_queries = total_queries
+                            o_best_attack[i] = adv_img[i]  # 找到一张图
+                            first_step = step  # 找到对抗样本的迭代次数
 
             # adjust the constants
             batch_failure = 0
@@ -341,8 +371,8 @@ class MetaGradL2Attack(object):
                     batch_success += 1
                 else:
                     batch_failure += 1
-            # log.info('Num failures: {0:2d}, num successes: {1:2d}.'.format(batch_failure, batch_success))
+            log.info('Num failures: {0:2d}, num successes: {1:2d}.'.format(batch_failure, batch_success))
 
         if first_step > self.max_iter:
             first_step = self.max_iter
-        return o_best_attack, scale_const, first_step
+        return o_best_attack, scale_const, first_step, success_queries

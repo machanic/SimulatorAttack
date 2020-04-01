@@ -15,7 +15,7 @@ from types import SimpleNamespace
 from ZOO_attack.zoo_attack import ZOOAttack
 from config import MODELS_TEST_STANDARD, PY_ROOT, CLASS_NUM, IN_CHANNELS, IMAGE_SIZE
 from dataset.dataset_loader_maker import DataLoaderMaker
-from dataset.model_constructor import StandardModel
+from dataset.standard_model import StandardModel
 from utils.statistics_toolkit import success_rate_and_query_coorelation, success_rate_avg_query
 
 

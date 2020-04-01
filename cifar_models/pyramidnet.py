@@ -69,7 +69,8 @@ class Bottleneck(nn.Module):
         shortcut_channel = shortcut.size()[1]
         if residual_channel != shortcut_channel:
             padding_tensor = torch.zeros(batch_size, residual_channel - shortcut_channel,
-                                           featuremap_size[0], featuremap_size[1]).to(x.device)
+                                           featuremap_size[0], featuremap_size[1]).type(shortcut.dtype).to(shortcut.device)
+            padding_tensor.requires_grad = True
             out += torch.cat((shortcut, padding_tensor), 1)
         else:
             out += shortcut

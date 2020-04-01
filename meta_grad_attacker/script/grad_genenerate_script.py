@@ -9,7 +9,7 @@ import torchvision.transforms as transforms
 from torchvision.datasets import CIFAR10, CIFAR100, ImageFolder
 
 from config import IMAGE_SIZE, IMAGE_DATA_ROOT, MODELS_TRAIN_STANDARD, PY_ROOT
-from dataset.model_constructor import StandardModel
+from dataset.standard_model import StandardModel
 from dataset.dataset_loader_maker import DataLoaderMaker
 from meta_grad_attacker.script.utils import save_gradient
 
@@ -42,7 +42,7 @@ elif dataset == "ImageNet":
     # test_preprocessor = DataLoaderMaker.get_preprocessor(IMAGE_SIZE[dataset], False, center_crop=True)
     train_dataset = ImageFolder(IMAGE_DATA_ROOT[dataset] + "/train", transform=train_preprocessor)
 elif dataset == "TinyImageNet":
-    train_dataset = TinyImageNet(IMAGE_DATA_ROOT[dataset], train_preprocessor, is_train=True)
+    train_dataset = TinyImageNet(IMAGE_DATA_ROOT[dataset], train_preprocessor, train=True)
 
 
 batch_size = args.batch_size

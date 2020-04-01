@@ -1,24 +1,23 @@
 import sys
+
+from torch.optim import Adam
+
 sys.path.append("/home1/machen/meta_perturbations_black_box_attack")
 from dataset.meta_two_queries_dataset import TwoQueriesMetaTaskDataset
-import glob
 import random
 import os
 from config import PY_ROOT
 from torch.utils.data import DataLoader
 from cifar_models_myself import *
-from meta_simulator_model.tensorboard_helper import TensorBoardWriter
 from meta_simulator_model.meta_network import MetaNetwork
 import numpy as np
 from inner_loop_pair_loss import InnerLoopPairLoss
-from optimizer.radam import RAdam
-from dataset.model_constructor import MetaLearnerModelBuilder
+from dataset.standard_model import MetaLearnerModelBuilder
 
 class MetaTwoQueriesLearner(object):
     def __init__(self, dataset, arch, meta_batch_size, meta_step_size,
                  inner_step_size, lr_decay_itr, epoch, num_inner_updates, load_task_mode, protocol,
-                 tot_num_tasks, num_support, data_loss_type, loss_type, adv_norm, targeted, target_type, use_softmax,
-                 tensorboard_data_prefix):
+                 tot_num_tasks, num_support, data_loss_type, loss_type, adv_norm, targeted, target_type, use_softmax):
         super(self.__class__, self).__init__()
         self.dataset = dataset
         self.meta_batch_size = meta_batch_size
@@ -40,14 +39,14 @@ class MetaTwoQueriesLearner(object):
         trn_dataset = TwoQueriesMetaTaskDataset(dataset, adv_norm, data_loss_type, tot_num_tasks, load_task_mode, protocol, targeted, target_type)
         # workers = 6 if dataset == "ImageNet" else 0
         self.train_loader = DataLoader(trn_dataset, batch_size=meta_batch_size, shuffle=True, num_workers=0, pin_memory=True)
-        self.tensorboard = TensorBoardWriter("{0}/tensorboard/2q_distillation".format(PY_ROOT),
-                                             tensorboard_data_prefix)
-        os.makedirs("{0}/tensorboard/2q_distillation".format(PY_ROOT), exist_ok=True)
+        # self.tensorboard = TensorBoardWriter("{0}/tensorboard/2q_distillation".format(PY_ROOT),
+        #                                      tensorboard_data_prefix)
+        # os.makedirs("{0}/tensorboard/2q_distillation".format(PY_ROOT), exist_ok=True)
         self.loss_fn = nn.MSELoss()
         self.fast_net = InnerLoopPairLoss(self.network, self.num_inner_updates,
                                   self.inner_step_size, self.meta_batch_size, loss_type, use_softmax)  # 并行执行每个task
         self.fast_net.cuda()
-        self.opt = RAdam(self.network.parameters(), lr=meta_step_size)
+        self.opt = Adam(self.network.parameters(), lr=meta_step_size)
         self.arch_pool = {}
 
     def construct_model(self, arch, dataset):
@@ -116,6 +115,11 @@ class MetaTwoQueriesLearner(object):
                     task_support_q2_logits = support_q2_logits[task_idx].cuda()
                     task_query_q1_logits = query_q1_logits[task_idx].cuda()
                     task_query_q2_logits = query_q2_logits[task_idx].cuda()
+                    task_support_q1_logits = task_support_q1_logits/torch.norm(task_support_q1_logits,p=2,dim=-1,keepdim=True)
+                    task_support_q2_logits = task_support_q2_logits/torch.norm(task_support_q2_logits,p=2,dim=-1,keepdim=True)
+                    task_query_q1_logits = task_query_q1_logits/torch.norm(task_query_q1_logits,p=2,dim=-1,keepdim=True)
+                    task_query_q2_logits = task_query_q2_logits/torch.norm(task_query_q2_logits,p=2,dim=-1,keepdim=True)
+
                     self.fast_net.copy_weights(self.network)
                     g = self.fast_net.forward(task_support_q1, task_support_q2, task_query_q1, task_query_q2,
                                               task_support_q1_logits, task_support_q2_logits,
@@ -132,6 +136,7 @@ class MetaTwoQueriesLearner(object):
                 # Perform the meta update
                 dummy_query_images = query_q1_images[0]
                 dummy_query_targets = query_q1_logits[0]
+                dummy_query_targets = dummy_query_targets/torch.norm(dummy_query_targets,p=2,dim=-1,keepdim=True)
                 self.meta_update(grads, dummy_query_images, dummy_query_targets)
                 grads.clear()
                 # if itr % 1000 == 0 and itr > 0:

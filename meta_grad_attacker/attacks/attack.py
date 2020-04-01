@@ -12,15 +12,15 @@ import torch
 from utils.statistics_toolkit import success_rate_and_query_coorelation, success_rate_avg_query
 from config import MODELS_TEST_STANDARD, PY_ROOT, CLASS_NUM
 from dataset.dataset_loader_maker import DataLoaderMaker
-from dataset.model_constructor import StandardModel
-from meta_grad_attacker.attacks.black_box_attack import MetaGradL2Attack
+from dataset.standard_model import StandardModel
+from meta_grad_attacker.attacks.black_box_attack import MetaGradAttack
 from meta_grad_attacker.attacks.options import get_parse_args
 from meta_grad_attacker.meta_training.load_attacked_and_meta_model import load_meta_model
 
-def get_expr_dir_name(dataset, targeted, target_type, use_tanh):
+def get_expr_dir_name(dataset, norm, targeted, target_type, use_tanh):
     target_str = "untargeted" if not targeted else "targeted_{}".format(target_type)
     use_tanh_str = "tanh" if use_tanh else "no_tanh"
-    dirname = 'MetaGradAttack_{}_{}_{}'.format(dataset,target_str, use_tanh_str)
+    dirname = 'MetaGradAttack_{}_{}_{}_{}'.format(dataset, norm, target_str, use_tanh_str)
     return dirname
 def set_log_file(fname):
     import subprocess
@@ -65,9 +65,9 @@ def main(args, result_dir_path):
     assert os.path.exists(meta_model_path), "{} does not exist!".format(meta_model_path)
     meta_model = load_meta_model(meta_model_path)
     log.info("Load meta model from {}".format(meta_model_path))
-    attack = MetaGradL2Attack(args,
-                              targeted=args.targeted, search_steps=args.binary_steps,
-                              max_steps=args.maxiter, use_log=not args.use_zvalue, cuda=not args.no_cuda)
+    attack = MetaGradAttack(args, norm=args.norm, epsilon=args.epsilon,
+                            targeted=args.targeted, search_steps=args.binary_steps,
+                            max_steps=args.maxiter, use_log=not args.use_zvalue, cuda=not args.no_cuda)
 
     for arch in archs:
         model = StandardModel(args.dataset, arch, no_grad=True)
@@ -107,7 +107,7 @@ def main(args, result_dir_path):
                 log.info("Skip wrongly classified image no. %d, original class %d, classified as %d" % (
                 i, pred_label.item(), true_labels.item()))
                 query_all.append(0)
-                not_done_all.append(0)
+                not_done_all.append(1)
                 continue
             img_no += 1
             timestart = time.time()
@@ -131,7 +131,7 @@ def main(args, result_dir_path):
             else:
                 target_labels = None
             target = true_labels if not args.targeted else target_labels
-            adv, const, first_step = attack.run(model, meta_model_copy, img, target)
+            adv, const, first_step, success_queries = attack.run(model, meta_model_copy, img, target)
             timeend = time.time()
             if len(adv.shape) == 3:
                 adv = adv.reshape((1,) + adv.shape)
@@ -148,7 +148,7 @@ def main(args, result_dir_path):
             else:
                 if adv_pred_label[0].item() == target[0].item():
                     success = True
-            if l2_distortion > args.epsilone:
+            if success_queries > args.max_queries:
                 success = False
             if success:
                 # (first_step-1)//args.finetune_intervalargs.update_pixels2+first_step
@@ -158,17 +158,18 @@ def main(args, result_dir_path):
                 # Currently, we find only f(x+h)-f(x) could estimate the gradient well, so args.update_pixels*1 in my updated codes.
                 not_done_all.append(0)
                 # only 1 query for i pixle, because the estimated function is f(x+h)-f(x)/h
-                query_all.append((first_step-1)//args.finetune_interval*args.update_pixels*1+first_step)
+                query_all.append(success_queries)
                 total_success += 1
                 l2_total += l2_distortion
                 avg_step += first_step
                 avg_time += timeend - timestart
-                avg_qry += (first_step-1)//args.finetune_interval*args.update_pixels*1+first_step
-                log.info("Attach {}-th image: {}".format(i, "success"))
+                # avg_qry += (first_step-1)//args.finetune_interval*args.update_pixels*1+first_step
+                avg_qry += success_queries
+                log.info("Attack {}-th image: {}, query:{}".format(i, "success", success_queries))
             else:
                 not_done_all.append(1)
                 query_all.append(args.max_queries)
-                log.info("Attach {}-th image: {}".format(i, "fail"))
+                log.info("Attack {}-th image: {}, query:{}".format(i, "fail", success_queries))
         model.cpu()
         if total_success != 0:
             log.info(
@@ -184,36 +185,36 @@ def main(args, result_dir_path):
                                                                                               not_done_all)
         success_rate_to_avg_query = success_rate_avg_query(query_all, not_done_all)
 
-        query_all_bounded = query_all.copy()
-        not_done_all_bounded = not_done_all.copy()
-        out_of_bound_indexes = np.where(query_all_bounded > args.max_queries)[0]
-        if len(out_of_bound_indexes) > 0:
-            not_done_all_bounded[out_of_bound_indexes] = 1
-        success_bounded = (1-not_done_all_bounded) * correct_all
-        success_query_bounded = success_bounded * query_all_bounded
-
-        query_threshold_success_rate_bounded, query_success_rate_bounded = success_rate_and_query_coorelation(query_all_bounded, not_done_all_bounded)
-        success_rate_to_avg_query_bounded = success_rate_avg_query(query_all_bounded, not_done_all_bounded)
+        # query_all_bounded = query_all.copy()
+        # not_done_all_bounded = not_done_all.copy()
+        # out_of_bound_indexes = np.where(query_all_bounded > args.max_queries)[0]
+        # if len(out_of_bound_indexes) > 0:
+        #     not_done_all_bounded[out_of_bound_indexes] = 1
+        # success_bounded = (1-not_done_all_bounded) * correct_all
+        # success_query_bounded = success_bounded * query_all_bounded
+        #
+        # query_threshold_success_rate_bounded, query_success_rate_bounded = success_rate_and_query_coorelation(query_all_bounded, not_done_all_bounded)
+        # success_rate_to_avg_query_bounded = success_rate_avg_query(query_all_bounded, not_done_all_bounded)
 
         meta_info_dict = {"query_all": query_all.tolist(), "not_done_all": not_done_all.tolist(),
                           "correct_all": correct_all.tolist(),
-                          "mean_query_unbounded_max_queries": np.mean(success_query[np.nonzero(success)[0]]).item(),
-                          "max_query_unbounded_max_queries": np.max(success_query[np.nonzero(success)[0]]).item(),
-                          "median_query_unbounded_max_queries": np.median(success_query[np.nonzero(success)[0]]).item(),
-                          "avg_not_done_unbounded_max_queries": np.mean(not_done_all.astype(np.float32)).item(),
+                          "mean_query": np.mean(success_query[np.nonzero(success)[0]]).item(),
+                          "max_query": np.max(success_query[np.nonzero(success)[0]]).item(),
+                          "median_query": np.median(success_query[np.nonzero(success)[0]]).item(),
+                          "avg_not_done": np.mean(not_done_all.astype(np.float32)).item(),
 
-                          "mean_query_bounded_max_queries": np.mean(success_query_bounded[np.nonzero(success_bounded)[0]]).item(),
-                          "max_query_bounded_max_queries": np.max(success_query_bounded[np.nonzero(success_bounded)[0]]).item(),
-                          "median_query_bounded_max_queries": np.median(success_query_bounded[np.nonzero(success_bounded)[0]]).item(),
-                          "avg_not_done_bounded_max_queries": np.mean(not_done_all_bounded.astype(np.float32)).item(),
+                          # "mean_query_bounded_max_queries": np.mean(success_query_bounded[np.nonzero(success_bounded)[0]]).item(),
+                          # "max_query_bounded_max_queries": np.max(success_query_bounded[np.nonzero(success_bounded)[0]]).item(),
+                          # "median_query_bounded_max_queries": np.median(success_query_bounded[np.nonzero(success_bounded)[0]]).item(),
+                          # "avg_not_done_bounded_max_queries": np.mean(not_done_all_bounded.astype(np.float32)).item(),
 
-                          "query_threshold_success_rate_dict_unbounded": query_threshold_success_rate,
-                          "query_success_rate_dict_unbounded": query_success_rate,
-                          "success_rate_to_avg_query_unbounded": success_rate_to_avg_query,
+                          "query_threshold_success_rate_dict": query_threshold_success_rate,
+                          "query_success_rate_dict": query_success_rate,
+                          "success_rate_to_avg_query": success_rate_to_avg_query,
 
-                          "query_threshold_success_rate_dict_bounded": query_threshold_success_rate_bounded,
-                          "query_success_rate_dict_bounded": query_success_rate_bounded,
-                          "success_rate_to_avg_query_bounded": success_rate_to_avg_query_bounded,
+                          # "query_threshold_success_rate_dict_bounded": query_threshold_success_rate_bounded,
+                          # "query_success_rate_dict_bounded": query_success_rate_bounded,
+                          # "success_rate_to_avg_query_bounded": success_rate_to_avg_query_bounded,
 
                           "args": vars(args)}
         with open(result_dump_path, "w") as result_file_obj:
@@ -231,7 +232,7 @@ if __name__ == "__main__":
     args = get_parse_args()
     os.environ['CUDA_VISIBLE_DEVICES'] = str(args.gpu)
     os.environ["CUDA_DEVICE_ORDER"] = "PCI_BUS_ID"
-    result_dir_path = os.path.join("logs",get_expr_dir_name(args.dataset, args.targeted, args.target_type, args.use_tanh))
+    result_dir_path = os.path.join("logs",get_expr_dir_name(args.dataset,args.norm, args.targeted, args.target_type, args.use_tanh))
     os.makedirs(result_dir_path,exist_ok=True)
     if args.test_archs:
         set_log_file(result_dir_path + "/run.log")

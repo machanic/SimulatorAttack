@@ -125,6 +125,10 @@ def main_train_worker(args):
         elif args.arch == "densenet201":
             network = densenet201(pretrained=True)
     elif args.arch == "resnext32_4":
+        network = resnext101_32x4d(pretrained=None)
+    elif args.arch == "resnext64_4":
+        network = resnext101_64x4d(pretrained=None)
+    elif args.arch == "resnext32_4":
         network = resnext101_32x4d(pretrained="imagenet")
     elif args.arch == "resnext64_4":
         network = resnext101_64x4d(pretrained="imagenet")
@@ -148,8 +152,8 @@ def main_train_worker(args):
     image_classifier_loss = nn.CrossEntropyLoss().cuda()
     optimizer = torch.optim.SGD(network.parameters(), args.lr, momentum=args.momentum, weight_decay=args.weight_decay)
     cudnn.benchmark = True
-    train_dataset = TinyImageNet(IMAGE_DATA_ROOT[args.dataset], preprocessor, is_train=True)
-    test_dataset = TinyImageNet(IMAGE_DATA_ROOT[args.dataset], preprocessor, is_train=False)
+    train_dataset = TinyImageNet(IMAGE_DATA_ROOT[args.dataset], preprocessor, train=True)
+    test_dataset = TinyImageNet(IMAGE_DATA_ROOT[args.dataset], preprocessor, train=False)
 
     train_loader = torch.utils.data.DataLoader(
         train_dataset, batch_size=args.batch_size, shuffle=True,

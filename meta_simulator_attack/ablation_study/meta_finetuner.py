@@ -9,7 +9,7 @@ from torch import nn
 from config import PY_ROOT
 from constant_enum import SPLIT_DATA_PROTOCOL
 from meta_simulator_model.meta_network import MetaNetwork
-from dataset.model_constructor import MetaLearnerModelBuilder
+from dataset.standard_model import MetaLearnerModelBuilder
 from optimizer.radam import RAdam
 
 

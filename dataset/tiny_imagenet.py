@@ -12,18 +12,18 @@ def pil_loader(path):
             return img.convert('RGB')
 
 class TinyImageNet(data.Dataset):
-    def __init__(self, data_root, preprocessor, is_train=True):
-        self.is_train = is_train
-        self.category_names = sorted(os.listdir(data_root + "/train/"))
-        self.transform = preprocessor
-        if is_train:
-            self.dataset = datasets.ImageFolder(data_root + "/train/", transform=preprocessor)
+    def __init__(self, root, transform, train=True, download=None):
+        self.is_train = train
+        self.category_names = sorted(os.listdir(root + "/train/"))
+        self.transform = transform
+        if train:
+            self.dataset = datasets.ImageFolder(root + "/train/", transform=transform)
         else:
             self.file_name_to_category_id = {}
-            with open(data_root + "/val/val_annotations.txt", "r") as file_obj:
+            with open(root + "/val/val_annotations.txt", "r") as file_obj:
                 for line in file_obj:
                     image_file_name, category_name, *_ = line.split()
-                    self.file_name_to_category_id[data_root + "/val/images/{}".format(image_file_name)] \
+                    self.file_name_to_category_id[root + "/val/images/{}".format(image_file_name)] \
                         = self.category_names.index(category_name)
     def __len__(self):
         if self.is_train:

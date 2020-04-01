@@ -14,7 +14,7 @@ from autozoom_attack.autozoom_attack import ZOO, ZOO_AE, AutoZOOM_BiLIN, AutoZOO
 from autozoom_attack.codec import Codec
 from config import IN_CHANNELS, CLASS_NUM, PY_ROOT, MODELS_TEST_STANDARD
 from dataset.dataset_loader_maker import DataLoaderMaker
-from dataset.model_constructor import StandardModel
+from dataset.standard_model import StandardModel
 
 
 class AutoZoomAttackFramework(object):

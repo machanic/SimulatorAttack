@@ -138,7 +138,7 @@ def generate_labeled_data(datasetname):
     elif datasetname == "FashionMNIST":
         train_dataset = FashionMNIST(IMAGE_DATA_ROOT[datasetname], train=True, transform=preprocessor)
     elif datasetname == "TinyImageNet":
-        train_dataset = TinyImageNet(IMAGE_DATA_ROOT[args.dataset], preprocessor, is_train=True)
+        train_dataset = TinyImageNet(IMAGE_DATA_ROOT[args.dataset], preprocessor, train=True)
 
     trn_data_dict = defaultdict(list)
     data_loader = torch.utils.data.DataLoader(train_dataset, batch_size=200, shuffle=False,

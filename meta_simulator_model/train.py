@@ -20,9 +20,9 @@ def parse_args():
     parser.add_argument('--num_updates', type=int, default=12,
                         help='number of inner gradient updates(on support set) during training.')
     parser.add_argument('--tot_num_tasks', type=int, default=30000, help='the maximum number of tasks in total, which is repeatly processed in training.')
-    parser.add_argument('--arch', type=str, default='resnet34',help='network name')  #10 层
+    parser.add_argument('--arch', type=str, required=True,help='network name')  #10 层
     parser.add_argument('--meta_learner', type=str, default="2q_distillation", choices=["2q_distillation",
-                                                                                        "logits_distillation"])
+                                                                                        "1q_distillation"])
     parser.add_argument("--num_support", type=int, default=50)
     parser.add_argument('--test_num_updates', type=int, default=20, help='number of inner gradient updates during testing')
     parser.add_argument("--dataset", type=str, default="CIFAR-10", help="the dataset to train")
@@ -30,10 +30,10 @@ def parse_args():
                         help="split protocol of data")
     parser.add_argument("--load_task_mode", default=LOAD_TASK_MODE.NO_LOAD, type=LOAD_TASK_MODE, choices=list(LOAD_TASK_MODE),
                         help="load task mode")
-    parser.add_argument("--study_subject", type=str, default="meta_simulator")
+    parser.add_argument("--study_subject", type=str, default="meta_simulator_2")
     # the following args are set for choosing which npy data
     parser.add_argument("--data_loss_type", type=str, choices=["xent", "cw"], required=True)
-    parser.add_argument("--loss_type", type=str, default="pair_mse", choices=["pair_mse","mse"])
+    parser.add_argument("--loss_type", type=str, required=True, choices=["pair_mse","mse"])
     parser.add_argument("--adv_norm", type=str, choices=["l2", "linf"], required=True)
     parser.add_argument("--targeted", action="store_true", help="Does it train on the data of targeted attack?")
     parser.add_argument("--target_type", type=str, default="random", choices=["random", "least_likely"])
@@ -60,17 +60,11 @@ def main():
         model_path = '{}/train_pytorch_model/{}/{}@{}.pth.tar'.format(
             PY_ROOT, args.study_subject, args.meta_learner.upper(), param_prefix)
         os.makedirs(os.path.dirname(model_path), exist_ok=True)
-        # if args.meta_learner == "logits_distillation":
-        #     learner = MetaDistillationLearner(args.dataset, args.arch, args.meta_batch_size, args.meta_lr, args.inner_lr,
-        #                                       args.lr_decay_itr, args.epoch, args.num_updates, args.load_task_mode,
-        #                                       args.split_protocol, args.tot_num_tasks, args.num_support, args.distill_loss,
-        #                                       args.data_loss_type, param_prefix)
-        # elif args.meta_learner == "2q_distillation":
         learner = MetaTwoQueriesLearner(args.dataset, args.arch, args.meta_batch_size, args.meta_lr, args.inner_lr,
                                         args.lr_decay_itr, args.epoch, args.num_updates, args.load_task_mode,
                                         args.split_protocol, args.tot_num_tasks, args.num_support, args.data_loss_type,
                                         args.loss_type,
-                                        args.adv_norm, args.targeted, args.target_type, args.data_loss_type=='xent', param_prefix)
+                                        args.adv_norm, args.targeted, args.target_type, args.data_loss_type=='xent')
         resume_epoch = 0
         if os.path.exists(model_path):
             print("=> loading checkpoint '{}'".format(model_path))

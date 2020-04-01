@@ -4,7 +4,7 @@ import os
 import re
 import time
 from dataset.dataset_loader_maker import DataLoaderMaker
-from dataset.model_constructor import MetaLearnerModelBuilder
+from dataset.standard_model import MetaLearnerModelBuilder
 import argparse
 import glob
 from cifar_models_myself import *

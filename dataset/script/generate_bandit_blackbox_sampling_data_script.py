@@ -3,7 +3,6 @@ import random
 import sys
 
 sys.path.append("/home1/machen/meta_perturbations_black_box_attack")
-import glob
 import json
 import os
 from types import SimpleNamespace
@@ -13,8 +12,8 @@ from torch.nn.modules import Upsample
 from cifar_models_myself import *
 from config import IN_CHANNELS, IMAGE_SIZE, CLASS_NUM, PY_ROOT, MODELS_TRAIN_STANDARD
 import glog as log
-from dataset.model_constructor import StandardModel
-from collections import defaultdict, deque
+from dataset.standard_model import StandardModel
+from collections import  deque
 from dataset.dataset_loader_maker import DataLoaderMaker
 
 class BanditAttack(object):
@@ -515,7 +514,7 @@ if __name__ == "__main__":
         attack_conf.update(vars(args))
         params = SimpleNamespace(**attack_conf)
         attack_type_params.append((attack_norm, params))
-    trn_data_loader = DataLoaderMaker.get_img_label_data_loader(args.dataset, args.batch_size, True)  # 生成的是训练集而非测试集
+    trn_data_loader = DataLoaderMaker.get_img_label_data_loader(args.dataset, args.batch_size, is_train=True)  # 生成的是训练集而非测试集
     # if args.dataset == "CIFAR-10" or args.dataset == "CIFAR-100":
     #     for arch in CIFAR_ALL_MODELS:
     #         test_model_path = "{}/train_pytorch_model/real_image_model/{}-pretrained/{}/checkpoint.pth.tar".format(

@@ -15,7 +15,7 @@ from torch.nn import functional as F
 
 from config import IMAGE_SIZE, IN_CHANNELS, PY_ROOT, MODELS_TEST_STANDARD, CLASS_NUM
 from dataset.dataset_loader_maker import DataLoaderMaker
-from dataset.model_constructor import StandardModel
+from dataset.standard_model import StandardModel
 from utils.statistics_toolkit import success_rate_and_query_coorelation, success_rate_avg_query
 
 
@@ -56,6 +56,22 @@ class PriorRGFAttack(object):
             logits = model(x)
         return logits.max(1)[1]
 
+    def norm(self, t, p=2):
+        assert len(t.shape) == 4
+        if p == 2:
+            norm_vec = torch.sqrt(t.pow(2).sum(dim=[1, 2, 3])).view(-1, 1, 1, 1)
+        elif p == 1:
+            norm_vec = t.abs().sum(dim=[1, 2, 3]).view(-1, 1, 1, 1)
+        else:
+            raise NotImplementedError('Unknown norm p={}'.format(p))
+        norm_vec += (norm_vec == 0).float() * 1e-8
+        return norm_vec
+
+    def l2_proj_step(self, image, epsilon, adv_image):
+        delta = adv_image - image
+        out_of_bounds_mask = (self.norm(delta) > epsilon).float()
+        return out_of_bounds_mask * (image + epsilon * delta / self.norm(delta)) + (1 - out_of_bounds_mask) * adv_image
+
     def attack_dataset(self, args, arch, result_dump_path):
 
         success = 0
@@ -95,7 +111,7 @@ class PriorRGFAttack(object):
                 correct_all.append(correct)
                 if correct[0].item() == 0:
                     queries.append(0)
-                    not_done.append(0)  # 原本就分类错了，not_done = 0
+                    not_done.append(1)
                     log.info("The {}-th image is already classified incorrectly.")
                     continue
 
@@ -153,7 +169,8 @@ class PriorRGFAttack(object):
 
                 if args.method != "uniform":
                     prior = torch.squeeze(self.get_grad(self.surrogate_model, adv_images, true_labels, target_labels))  # C,H,W
-                    alpha = torch.sum(true * prior) / torch.clamp(torch.sqrt(torch.sum(true * true) * torch.sum(prior * prior)), min=1e-12)
+                    # 下面求得余弦值
+                    alpha = torch.sum(true * prior) / torch.clamp(torch.sqrt(torch.sum(true * true) * torch.sum(prior * prior)), min=1e-12)  # 这个alpha仅仅用来看看梯度对不对，后续会更新
                     log.info("alpha = {:.3}".format(alpha))
                     prior = prior / torch.clamp(torch.sqrt(torch.mean(torch.mul(prior, prior))),min=1e-12)
                 if args.method == "biased":
@@ -180,7 +197,7 @@ class PriorRGFAttack(object):
                         logits_for_prior_loss = self.model(adv_images + sigma* prior) # prior may be C,H,W
                         prior_loss = self.xent_loss(logits_for_prior_loss, true_labels, target_labels)  # shape = (batch_size,)
                         total_q += 1
-                        diff_prior = (prior_loss - l)[0].item()   # FIXME batch模式下是否[0]?
+                        diff_prior = (prior_loss - l)[0].item()
                         if diff_prior == 0:
                             sigma *= 2
                             log.info("sigma={:.4f}, multiply sigma by 2".format(sigma))
@@ -190,8 +207,8 @@ class PriorRGFAttack(object):
                     est_alpha = est_alpha.item()
                     log.info("Estimated alpha = {:.3f}".format(est_alpha))
                     alpha = est_alpha   # alpha描述了替代模型的梯度是否有用，alpha越大λ也越大，λ=1表示相信这个prior
-                    if alpha < 0:
-                        prior = -prior  # v = -v , negative the transfer gradient
+                    if alpha < 0:  #  夹角大于90度，cos变成负数
+                        prior = -prior  # v = -v , negative the transfer gradient,
                         alpha = -alpha
                 q = args.samples_per_draw
                 n = self.image_height * self.image_width * self.in_channels
@@ -218,7 +235,7 @@ class PriorRGFAttack(object):
                         lmda = 1
                     log.info("lambda = {:.3f}".format(lmda))
                     if lmda == 1:
-                        return_prior = True
+                        return_prior = True   # lmda =1, we trust this prior as true gradient
                 elif args.method == "fixed_biased":
                     lmda = 0.5
                 if not return_prior:
@@ -235,7 +252,8 @@ class PriorRGFAttack(object):
                                           torch.clamp(torch.sqrt(torch.sum(pert[i] * pert[i]) * torch.sum(prior * prior)),min=1e-12)  # C,H,W x B,C,H,W
                             pert[i] = pert[i] - angle_prior * prior  # prior = B,C,H,W so pert[i] = B,C,H,W  # FIXME 这里不支持batch模式
                             pert[i] = pert[i] / torch.clamp(torch.sqrt(torch.mean(torch.mul(pert[i], pert[i]))), min=1e-12)
-                            pert[i] = np.sqrt(1-lmda) * pert[i] + np.sqrt(lmda) * prior
+                            # pert[i]就是论文算法1的第九行第二项的最右边的一串
+                            pert[i] = np.sqrt(1-lmda) * pert[i] + np.sqrt(lmda) * prior  # paper's Algorithm 1: line 9
                         else:
                             pert[i] = pert[i] / torch.clamp(torch.sqrt(torch.mean(torch.mul(pert[i], pert[i]))),min=1e-12)
                     while True:
@@ -281,11 +299,17 @@ class PriorRGFAttack(object):
                 log.info("angle = {:.4f}".format(torch.sum(true*grad) /
                                                  torch.clamp(torch.sqrt(torch.sum(true*true) * torch.sum(grad*grad)),min=1e-12)))
                 if args.norm == "l2":
+                    # Bandits版本
                     adv_images = adv_images + lr * grad / torch.clamp(torch.sqrt(torch.mean(torch.mul(grad,grad))),min=1e-12)
-                    norm = torch.clamp(torch.norm(adv_images - images),min=1e-12).item()
-                    factor = min(1, eps / norm)
-                    adv_images = images + (adv_images - images) * factor
+                    adv_images = self.l2_proj_step(images, eps, adv_images)
+                    # Below is the original author's L2 norm projection-based update
+                    # adv_images = adv_images + lr * grad / torch.clamp(torch.sqrt(torch.mean(torch.mul(grad,grad))),min=1e-12)
+                    # norm = torch.clamp(torch.norm(adv_images - images),min=1e-12).item()
+                    # factor = min(1, eps / norm)
+                    # adv_images = images + (adv_images - images) * factor
                 else:
+                    if grad.dim() == 3:
+                        grad = grad.unsqueeze(0)
                     adv_images = adv_images + lr * torch.sign(grad)
                     adv_images = torch.min(torch.max(adv_images, images - eps), images + eps)
                 adv_images = torch.clamp(adv_images, self.clip_min, self.clip_max)
@@ -293,11 +317,11 @@ class PriorRGFAttack(object):
                 logits_ = self.model(adv_images)
                 l = self.xent_loss(logits_, true_labels, target_labels)
                 log.info('queries:', total_q, 'loss:', l, 'learning rate:', lr, 'sigma:', sigma, 'prediction:', adv_labels,
-                      'distortion:', torch.max(torch.abs(adv_images - images)).item(), torch.norm(adv_images - images).item())
+                      'distortion:', torch.max(torch.abs(adv_images - images)).item(), torch.norm((adv_images - images).view(images.size(0),-1)).item())
                 ite += 1
 
                 if (self.targeted and adv_labels[0].item() == target_labels[0].item()) \
-                        or (not self.targeted and adv_labels[0].item() != true_labels[0].item()):
+                        or ((not self.targeted) and adv_labels[0].item() != true_labels[0].item()):
                     log.info("Stop at queries : {}".format(total_q))
                     success += 1
                     not_done.append(0)

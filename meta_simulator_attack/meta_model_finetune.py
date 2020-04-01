@@ -5,21 +5,22 @@ import re
 import glog as log
 import torch
 from torch import nn
+from torch.optim import Adam
 
 from config import PY_ROOT
 from constant_enum import SPLIT_DATA_PROTOCOL
 from meta_simulator_model.meta_network import MetaNetwork
-from dataset.model_constructor import MetaLearnerModelBuilder
-from optimizer.radam import RAdam
+from dataset.standard_model import MetaLearnerModelBuilder
 
 
 class MetaModelFinetune(object):
     def __init__(self, dataset, batch_size, meta_train_type, distill_loss, data_loss, norm, targeted, use_softmax):
         target_str = "targeted_attack_random" if targeted else "untargeted_attack"
         # 2Q_DISTILLATION@CIFAR-100@TRAIN_I_TEST_II@model_resnet34@loss_pair_mse@dataloss_cw_l2_untargeted_attack@epoch_4@meta_batch_size_30@num_support_50@num_updates_12@lr_0.001@inner_lr_0.01.pth.tar
-        self.meta_model_path = "{root}/train_pytorch_model/meta_simulator/{meta_train_type}@{dataset}@{split}*loss_{loss}@dataloss_{data_loss}_{norm}_{target_str}*".format(
-            root=PY_ROOT, meta_train_type=meta_train_type.upper(), dataset=dataset, split=SPLIT_DATA_PROTOCOL.TRAIN_I_TEST_II,
-            loss=distill_loss, data_loss=data_loss, norm=norm, target_str=target_str)
+        self.meta_model_path = "{root}/train_pytorch_model/meta_simulator/{meta_train_type}@{dataset}@{split}@model_{meta_arch}@loss_{loss}@dataloss_{data_loss}_{norm}_{target_str}*".format(
+            root=PY_ROOT, meta_train_type=meta_train_type.upper(), dataset=dataset,
+            split=SPLIT_DATA_PROTOCOL.TRAIN_I_TEST_II,
+            meta_arch="resnet34", loss=distill_loss, data_loss=data_loss, norm=norm, target_str=target_str)
         self.meta_model_path = glob.glob(self.meta_model_path)
         pattern = re.compile(".*model_(.*?)@.*inner_lr_(.*?)\.pth.*")
         assert len(self.meta_model_path) > 0
@@ -36,19 +37,17 @@ class MetaModelFinetune(object):
         self.mse_loss = nn.MSELoss()
         self.pair_wise_distance = nn.PairwiseDistance(p=2)
         self.use_softmax = use_softmax
-        # self.master_network = MetaNetwork(meta_backbone)
-        # self.master_network.load_state_dict(
-        #     torch.load(self.meta_model_path, map_location=lambda storage, location: storage)["state_dict"])
-        # self.master_network.eval()
-        # self.master_network.cuda()
-        self.meta_model_pool = {}
-        for img_idx in range(batch_size):
-            meta_backbone = self.construct_model(arch, dataset)
-            meta_network = MetaNetwork(meta_backbone)
-            meta_network.load_state_dict(
-                torch.load(self.meta_model_path, map_location=lambda storage, location: storage)["state_dict"])
-            meta_network.eval()
-            self.meta_model_pool[img_idx] = meta_network
+        self.pretrained_weights = torch.load(self.meta_model_path, map_location=lambda storage, location: storage)[
+            "state_dict"]
+        meta_backbone = self.construct_model(arch, dataset)
+        self.meta_network = MetaNetwork(meta_backbone)
+        self.meta_network.load_state_dict(self.pretrained_weights)
+        self.meta_network.eval()
+        self.meta_network.cuda()
+        self.batch_weights = {}
+        self.batch_size = batch_size
+        for i in range(batch_size):
+            self.batch_weights[i] = self.pretrained_weights
 
     def construct_model(self, arch, dataset):
         if dataset in ["CIFAR-10", "CIFAR-100", "MNIST", "FashionMNIST"]:
@@ -69,19 +68,18 @@ class MetaModelFinetune(object):
         '''
         log.info("begin finetune images")
         if is_first_finetune:
-            for meta_network in self.meta_model_pool.values():
-                meta_network.load_state_dict(
-                    torch.load(self.meta_model_path, map_location=lambda storage, location: storage)["state_dict"])
+            for i in range(self.batch_size):
+                self.batch_weights[i] = self.pretrained_weights
+            self.meta_network.load_state_dict(self.pretrained_weights)
         for img_idx, (q1_images_tensor,q2_images_tensor, each_q1_gt_logits,each_q2_gt_logits) in enumerate(zip(q1_images,
                                                                                 q2_images,q1_gt_logits,q2_gt_logits)):
-            meta_network = self.meta_model_pool[img_idx]
-            meta_network.cuda()
+            self.meta_network.load_state_dict(self.batch_weights[img_idx])
             # meta_network.copy_weights(self.master_network) # delete this line, only fine-tune 1 time for later iterations
-            meta_network.train()
-            optimizer = RAdam(meta_network.parameters(), lr=self.inner_lr)
+            # self.meta_network.train()
+            optimizer = Adam(self.meta_network.parameters(), lr=self.inner_lr)
             for _ in range(finetune_times):
-                q1_output = meta_network.forward(q1_images_tensor)
-                q2_output = meta_network.forward(q2_images_tensor)
+                q1_output = self.meta_network.forward(q1_images_tensor)
+                q2_output = self.meta_network.forward(q2_images_tensor)
                 if self.use_softmax:
                     q1_output, q2_output = self.softmax(q1_output), self.softmax(q2_output)
                     each_q1_gt_logits, each_q2_gt_logits = self.softmax(each_q1_gt_logits), self.softmax(each_q2_gt_logits)
@@ -97,8 +95,8 @@ class MetaModelFinetune(object):
                 optimizer.zero_grad()
                 tot_loss.backward()
                 optimizer.step()
-            meta_network.eval()
-            self.meta_model_pool[img_idx] = meta_network
+            self.meta_network.eval()
+            self.batch_weights[img_idx] = self.meta_network.state_dict().copy()
         log.info("finetune images done")
 
     def predict(self, q1_images, q2_images):
@@ -111,13 +109,12 @@ class MetaModelFinetune(object):
         q1_output = []
         q2_output = []
         for img_idx, (q1_img, q2_img) in enumerate(zip(q1_images, q2_images)):
-            meta_network = self.meta_model_pool[img_idx]
-            meta_network.eval()
-            meta_network.cuda()
+            self.meta_network.load_state_dict(self.batch_weights[img_idx])
+            self.meta_network.eval()
             q1_img = torch.unsqueeze(q1_img, 0)
             q2_img=  torch.unsqueeze(q2_img, 0)
-            q1_logits = meta_network.forward(q1_img)
-            q2_logits = meta_network.forward(q2_img)
+            q1_logits = self.meta_network.forward(q1_img)
+            q2_logits = self.meta_network.forward(q2_img)
             q1_output.append(q1_logits)
             q2_output.append(q2_logits)
         q1_output = torch.cat(q1_output, 0)
@@ -138,7 +135,7 @@ class MemoryEfficientMetaModelFinetune(object):
         pattern = re.compile(".*model_(.*?)@.*inner_lr_(.*?)\.pth.*")
         assert len(self.meta_model_path) > 0
         self.meta_model_path = self.meta_model_path[0]
-        log.info("load meta model {}".format(self.meta_model_path))
+
         ma = pattern.match(os.path.basename(self.meta_model_path))
         arch = ma.group(1)
         self.inner_lr = float(ma.group(2))
@@ -152,7 +149,9 @@ class MemoryEfficientMetaModelFinetune(object):
         self.use_softmax = use_softmax
         meta_backbone = self.construct_model(arch, dataset)
         self.meta_network = MetaNetwork(meta_backbone)
-        self.pretrained_weights = torch.load(self.meta_model_path, map_location=lambda storage, location: storage)["state_dict"]
+        loaded = torch.load(self.meta_model_path, map_location=lambda storage, location: storage)
+        self.pretrained_weights = loaded["state_dict"]
+        log.info("load meta model {} epoch({})".format(self.meta_model_path, loaded["epoch"]))
         self.meta_network.load_state_dict(self.pretrained_weights)
         self.meta_network.eval()
         self.meta_network.cuda()
@@ -187,8 +186,8 @@ class MemoryEfficientMetaModelFinetune(object):
                                                                                 q2_images,q1_gt_logits,q2_gt_logits)):
             self.meta_network.load_state_dict(self.batch_weights[img_idx_to_batch_idx[img_idx]])
             # meta_network.copy_weights(self.master_network) # delete this line, only fine-tune 1 time for later iterations
-            self.meta_network.train()
-            optimizer = RAdam(self.meta_network.parameters(), lr=self.inner_lr)
+            # self.meta_network.train()
+            optimizer = Adam(self.meta_network.parameters(), lr=self.inner_lr)
             for _ in range(finetune_times):
                 q1_output = self.meta_network.forward(q1_images_tensor)
                 q2_output = self.meta_network.forward(q2_images_tensor)
@@ -207,6 +206,7 @@ class MemoryEfficientMetaModelFinetune(object):
                 optimizer.zero_grad()
                 tot_loss.backward()
                 optimizer.step()
+            # self.batch_weights[img_idx_to_batch_idx[img_idx]] ={k:v.to('cpu') for k, v in self.meta_network.state_dict().items()}
             self.batch_weights[img_idx_to_batch_idx[img_idx]] = self.meta_network.state_dict().copy()
         log.info("finetune images done")
 

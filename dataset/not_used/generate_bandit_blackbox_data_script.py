@@ -13,7 +13,7 @@ from torch.nn.modules import Upsample
 from cifar_models_myself import *
 from config import IN_CHANNELS, IMAGE_SIZE, PY_ROOT
 from dataset_loader_maker import DataLoaderMaker
-from model_constructor import MetaLearnerModelBuilder
+from standard_model import MetaLearnerModelBuilder
 
 
 class BanditAttack(object):

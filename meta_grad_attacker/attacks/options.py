@@ -5,6 +5,9 @@ import numpy as np
 import torch
 
 #Descrption:
+from config import IMAGE_SIZE
+
+
 def str2bool(s):
     assert s in ['True', 'False']
     if s == 'True':
@@ -17,9 +20,8 @@ def get_parse_args():
     #important parameters
     parser.add_argument("--maxiter", type = int, default=1000, help = "set 0 to use default value")
     parser.add_argument("--gpu",type=int,required=True)
-    parser.add_argument("--max_fintune_iter", type = int, default = 63, help = "maximum finetune iterations")
     parser.add_argument("--max_queries", type=int,default=10000)
-    parser.add_argument("--finetune_interval", type = int, default = 3, help = "iteration interval for finetuneing")
+    parser.add_argument("--finetune_interval", type = int, default = 5, help = "iteration interval for finetuneing")
 
     parser.add_argument('--learning_rate', default = 1e-2, type = float, help = 'learning rate')
     parser.add_argument('--update_pixels', default = 125, type = int, help = 'updated pixels every iteration')
@@ -33,7 +35,7 @@ def get_parse_args():
     parser.add_argument('--batch_size', type = int, default = 64)
     parser.add_argument('--test_batch_size', type = int, default = 1)
     parser.add_argument('--no_cuda', action = 'store_true')
-
+    parser.add_argument("--norm", required=True, type=str, choices=["l2","linf"])
     parser.add_argument("--dataset", choices=["CIFAR-10", "CIFAR-100", "TinyImageNet", "ImageNet"], required=True)
     parser.add_argument("-b", "--binary_steps", type = int, default = 0)
     parser.add_argument("-z", "--use_zvalue", action = 'store_true')
@@ -44,23 +46,30 @@ def get_parse_args():
     parser.add_argument("--save_ckpts", default = "", help = "path to save checkpoint file")
     parser.add_argument("--start_iter", default = 0, type = int, help = "iteration number for start, useful when loading a checkpoint")
     parser.add_argument("--init_size", default = 32, type = int, help = "starting with this size when --use_resize")
-
-    parser.add_argument('--lr', default = 1e-2, type = int, help = 'learning rate')
     parser.add_argument('--inception', action = 'store_true', default = False)
     parser.add_argument('--use_tanh', action = 'store_true', help="must be set")
     parser.add_argument('--arch', default=None, type=str, help='network architecture')
     parser.add_argument('--test_archs', action="store_true")
     parser.add_argument('--debug', action = 'store_true')
-    parser.add_argument("--epsilone",type=float,default=4.6)
+    parser.add_argument("--epsilon",type=float,default=None)
 
     args = parser.parse_args()
-    assert args.use_tanh is True
+    if args.norm == "linf":
+        assert args.use_tanh is False
+    elif args.norm == "l2":
+        assert args.use_tanh is True
     # True False process
     vars(args)['istransfer'] = str2bool(args.istransfer)
     if args.dataset == "ImageNet" and args.targeted:
         args.max_queries = 50000
+    args.init_size = IMAGE_SIZE[args.dataset][0]
     #max iteration process
-
+    if args.targeted:
+        args.finetune_interval = 3
+    if args.norm == "l2":
+        args.epsilon = 4.6
+    elif args.norm == "linf":
+        args.epsilon = 0.031372
     if args.binary_steps != 0:
         args.init_const = 0.01
     else:

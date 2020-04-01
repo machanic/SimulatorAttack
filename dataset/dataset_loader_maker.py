@@ -15,7 +15,7 @@ from torchvision.datasets.utils import download_url, check_integrity
 
 from config import IMAGE_DATA_ROOT, IMAGE_SIZE
 from dataset.tiny_imagenet import TinyImageNet
-from dataset.npz_dataset import NpzDataset, NpzSubDataset
+from dataset.npz_dataset import NpzDataset, NpzSubDataset, NpzAliasDataset
 
 
 def pil_loader(path):
@@ -450,7 +450,7 @@ class DataLoaderMaker(object):
         elif datasetname == "FashionMNIST":
             train_dataset = FashionMNIST(IMAGE_DATA_ROOT[datasetname], train=is_train, transform=preprocessor)
         elif datasetname == "TinyImageNet":
-            train_dataset = TinyImageNet(IMAGE_DATA_ROOT[datasetname], preprocessor, is_train=is_train)
+            train_dataset = TinyImageNet(IMAGE_DATA_ROOT[datasetname], preprocessor, train=is_train)
         elif datasetname == "ImageNet":
             preprocessor = DataLoaderMaker.get_preprocessor(image_size, is_train, center_crop=True)
             sub_folder = "/train" if is_train else "/validation"  # Note that ImageNet uses pretrainedmodels.utils.TransformImage to apply transformation
@@ -518,6 +518,12 @@ class DataLoaderMaker(object):
     @staticmethod
     def get_test_attacked_data(datasetname, batch_size):
         dataset = NpzDataset(datasetname)
+        loader = torch.utils.data.DataLoader(dataset, batch_size=batch_size, num_workers=0, shuffle=False)
+        return loader
+
+    @staticmethod
+    def get_candidate_attacked_data(datasetname, batch_size):
+        dataset = NpzAliasDataset(datasetname)
         loader = torch.utils.data.DataLoader(dataset, batch_size=batch_size, num_workers=0, shuffle=False)
         return loader
 

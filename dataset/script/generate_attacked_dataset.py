@@ -7,7 +7,7 @@ import numpy as np
 import glog as log
 from config import PY_ROOT, MODELS_TRAIN_STANDARD, MODELS_TEST_STANDARD
 from dataset.dataset_loader_maker import DataLoaderMaker
-from dataset.model_constructor import StandardModel, MetaLearnerModelBuilder
+from dataset.standard_model import StandardModel, MetaLearnerModelBuilder
 
 
 def generate_attacked_dataset(dataset, num_sample, models):
@@ -138,7 +138,7 @@ if __name__ == "__main__":
 
     dataset = "TinyImageNet"
     models = load_models(dataset)
-    selected_images, selected_images_big, selected_true_labels, selected_img_id = generate_attacked_dataset(dataset, 1000, models)
-    save_path = "{}/attacked_images/{}/{}_images.npz".format(PY_ROOT, dataset, dataset)
+    selected_images, selected_images_big, selected_true_labels, selected_img_id = generate_attacked_dataset(dataset, 50000, models)
+    save_path = "{}/attacked_images/{}/{}_images_for_candidate.npz".format(PY_ROOT, dataset, dataset)
     os.makedirs(os.path.dirname(save_path), exist_ok=True)
     save_selected_images(dataset, selected_images, selected_images_big, selected_true_labels, selected_img_id, save_path)

@@ -6,7 +6,7 @@ from torchvision.transforms import transforms
 
 from config import pretrained_cifar_model_conf, IMAGE_DATA_ROOT, IMAGE_SIZE
 from dataset.dataset_loader_maker import DataLoaderMaker
-from dataset.model_constructor import StandardModel
+from dataset.standard_model import StandardModel
 
 
 import os

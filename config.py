@@ -37,6 +37,8 @@ pretrained_cifar_model_conf = {"CIFAR-10":{
                                 "WRN-40-10":{"depth":40, "widen_factor":10, "drop":0.0,"epochs":200, "schedule":[60,120,160], "wd":5e-4, "gamma":0.2},
                                 "densenet-bc-100-12":{"depth":100,"growthRate":12,"train_batch":64,"epochs":300, "schedule":[150,225],"wd":1e-4,"gamma":0.1,"compressionRate":2,"drop":0},
                                 "densenet-bc-L190-k40":{"depth":190,"growthRate":40,"train_batch":64,"epochs":300, "schedule":[150,225],"wd":1e-4,"gamma":0.1,"compressionRate":2,"drop":0},
+                                 "defense_resnet-110": {"depth":110},
+                                "defense_resnet-50": {"depth":50}
                             },
                             "CIFAR-100":{
                                 "vgg11_bn":None,
@@ -63,6 +65,12 @@ pretrained_cifar_model_conf = {"CIFAR-10":{
                                 "WRN-40-10":{"depth":40, "widen_factor":10, "drop":0.0,"epochs":200, "schedule":[60,120,160], "wd":5e-4, "gamma":0.2},
                                 "densenet-bc-100-12":{"depth":100,"growthRate":12,"train_batch":64,"epochs":300, "schedule":[150,225],"wd":1e-4,"gamma":0.1,"compressionRate":2, "drop":0},
                                 "densenet-bc-L190-k40":{"depth":190,"growthRate":40,"train_batch":64,"epochs":300, "schedule":[150,225],"wd":1e-4,"gamma":0.1,"compressionRate":2, "drop":0},
+                                "defense_resnet-110": {"depth": 110},
+                                "defense_resnet-50": {"depth": 50}
+                            },
+                            "TinyImageNet":{
+                                "defense_resnet-110": {"depth":110},
+                                "defense_resnet-50": {"depth":50}
                             }
             }
 
