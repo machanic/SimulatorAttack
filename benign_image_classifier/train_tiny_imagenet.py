@@ -187,7 +187,7 @@ def train(train_loader, model, criterion, optimizer, epoch, args):
     # top5 = AverageMeter()
 
     # switch to train_simulate_grad_mode mode
-    model.train_simulate_grad_mode()
+    model.train()
 
     end = time.time()
     for i, (input, target) in enumerate(train_loader):

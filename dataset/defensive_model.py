@@ -9,8 +9,13 @@ from torchvision import models as torch_models
 
 import cifar_models as models
 from adversarial_defense.com_defend.compression_network import ComDefend
-from adversarial_defense.feature_distillation.jpeg import dnn_jpeg
+from adversarial_defense.feature_distillation.jpeg import convert_images
+from adversarial_defense.feature_scatter.attack_methods import Attack_FeaScatter
+from adversarial_defense.model.denoise_resnet import DenoiseResNet50, DenoiseResNet101, DenoiseResNet152, \
+    DenoiseResNet34
 from adversarial_defense.model.feature_defense_model import FeatureDefenseModel
+from adversarial_defense.model.guided_denoiser_network import Net
+from adversarial_defense.model.pcl_resnet import PrototypeConformityLossResNet
 from adversarial_defense.post_averaging.post_averaged_models import PostAveragedNetwork
 from cifar_models_myself.efficient_densenet import EfficientDenseNet
 from cifar_models_myself.ghostnet import ghost_net
@@ -20,7 +25,11 @@ from tiny_imagenet_models.densenet import densenet161, densenet121, densenet169,
 from tiny_imagenet_models.inception import inception_v3
 from tiny_imagenet_models.resnext import resnext101_32x4d, resnext101_64x4d
 from tiny_imagenet_models.wrn import tiny_imagenet_wrn
+from adversarial_defense.model.resnet_return_feature import ResNet
+from adversarial_defense.model.wrn_return_feature import WideResNet
+from adversarial_defense.model.tinyimagenet_resnet_return_feature import resnet101, resnet152, resnet34, resnet50
 
+import glog as log
 
 class DefensiveModel(nn.Module):
     """
@@ -30,14 +39,14 @@ class DefensiveModel(nn.Module):
     1. com_defend, feature_distillation,post_averaging (based on preprocessing denoise)
     2. feature_scatter, pcl_loss, feature_denoise  (based on adversarial training)
     """
-    def __init__(self, dataset, arch, no_grad, defense_type):
+    def __init__(self, dataset, arch, no_grad, defense_model):
         super(DefensiveModel, self).__init__()
         # init cnn model
         self.in_channels = IN_CHANNELS[dataset]
         self.dataset = dataset
         self.arch = arch
-
-        if defense_type != "feature_denoise" and defense_type != "pcl_loss":
+        self.defense_model = defense_model
+        if defense_model != "feature_denoise" and defense_model != "pcl_loss" and defense_model!="pcl_loss_adv_train" and defense_model != "guided_denoiser":
             if dataset.startswith("CIFAR"):
                 trained_model_path = "{root}/train_pytorch_model/real_image_model/{dataset}-pretrained/{arch}/checkpoint.pth.tar".format(root=PY_ROOT, dataset=dataset, arch=arch)
                 assert os.path.exists(trained_model_path), "{} does not exist!".format(trained_model_path)
@@ -58,45 +67,287 @@ class DefensiveModel(nn.Module):
             self.mean.requires_grad =True
             self.std = torch.FloatTensor(self.model.std).view(1, self.in_channels, 1, 1).cuda()
             self.std.requires_grad = True
+            self.input_space = self.model.input_space  # 'RGB' or 'GBR'
+            self.input_range = self.model.input_range  # [0, 1] or [0, 255]
+            self.input_size = self.model.input_size
 
-        if defense_type == "com_defend":
-            self.preprocessor = ComDefend(self.in_channels, 20)
-        elif defense_type == "feature_distillation":
-            self.preprocessor = dnn_jpeg
-        elif defense_type == "post_averaging":
-            R = 30 if arch in ["resnet-101", "resnet-110", "resnet-152"] else 6
-            self.model = PostAveragedNetwork(self.cnn, K=15, R=R)
-        elif defense_type == "feature_denoise" or defense_type == "pcl_loss":
-            self.model = FeatureDefenseModel(self.dataset, self.arch, no_grad).cnn
-            self.mean = self.model.mean
-            self.std = self.model.std
+        if defense_model == "com_defend":
+            self.preprocessor = ComDefend(self.in_channels, 1.0)
+            com_defend_model_path = "{}/train_pytorch_model/adversarial_train/com_defend/{}@*.pth.tar".format(PY_ROOT, dataset)
+            com_defend_model_path = list(glob.glob(com_defend_model_path))[0]
+            assert os.path.exists(com_defend_model_path), "{} does not exist!".format(com_defend_model_path)
+            self.preprocessor.load_state_dict(torch.load(com_defend_model_path, map_location=lambda storage, location: storage)["state_dict"])
+            self.preprocessor.eval()
+        elif defense_model == "feature_scatter":
+            model_path = "{}/train_pytorch_model/adversarial_train/feature_scatter/{}@{}@*.pth.tar".format(PY_ROOT, dataset, arch)
+            model_path = list(glob.glob(model_path))[0]
+            config_feature_scatter = {
+                'train': True,
+                'epsilon': 8.0 / 255 * 2,
+                'num_steps': 1,
+                'step_size': 8.0 / 255 * 2,
+                'random_start': True,
+                'ls_factor': 0.5,
+            }
+            self.feature_scatter = Attack_FeaScatter(self.model, config_feature_scatter)
+            state_dict = torch.load(model_path, map_location=lambda storage, location: storage)["net"]
+            filtered_state_dict = {}
+            for module, params in state_dict.items():
+                filtered_state_dict[module.replace("module.","").replace("cnn.","")] = params
+            self.feature_scatter.load_state_dict(filtered_state_dict)
+            self.model = self.feature_scatter.basic_net
+        elif defense_model == "LGD":
+            model_path = "{}/train_pytorch_model/adversarial_train/guided_denoiser/guided_denoiser_{}_{}_LGD.pth.tar".format(PY_ROOT, dataset, arch)
+            assert os.path.exists(model_path), "Model file {} does not exist!".format(model_path)
+            checkpoint = torch.load(model_path, map_location=lambda storage, location: storage)
+            if dataset.startswith("CIFAR"):
+                if arch == "resnet-50":
+                    classifier = ResNet(50, CLASS_NUM[dataset], block_name='BasicBlock')
+                elif arch == "resnet-110":
+                    classifier = ResNet(110, CLASS_NUM[dataset], block_name='BasicBlock')
+                elif arch == "resnet101":
+                    classifier = ResNet(56, CLASS_NUM[dataset], block_name='BasicBlock')
+                elif arch == "WRN-28-10-drop":
+                    classifier = WideResNet(28, CLASS_NUM[dataset], widen_factor=10, dropRate=0.3)
+                elif arch == "WRN-40-10-drop":
+                    classifier = WideResNet(40, CLASS_NUM[dataset], widen_factor=10, dropRate=0.3)
+            elif dataset == "TinyImageNet":
+                if arch == "resnet50":
+                    classifier = resnet50(num_classes=CLASS_NUM[dataset],pretrained=False)
+                elif arch == "resnet152":
+                    classifier = resnet152(num_classes=CLASS_NUM[dataset],pretrained=False)
+                elif arch == "resnet101":
+                    classifier = resnet101(num_classes=CLASS_NUM[dataset],pretrained=False)
+                elif arch == "WRN-28-10-drop":
+                    classifier = WideResNet(28, CLASS_NUM[dataset], widen_factor=10, dropRate=0.3)
+                elif arch == "WRN-40-10-drop":
+                    classifier = WideResNet(40, CLASS_NUM[dataset], widen_factor=10, dropRate=0.3)
+            net = Net(classifier, dataset, IMAGE_SIZE[dataset][0], IN_CHANNELS[dataset], 1, 0, False)
+            net.load_state_dict(checkpoint['state_dict'])
+            net.cuda()
+            self.model = net
+            self.mean = torch.FloatTensor([0, 0, 0]).view(1, self.in_channels, 1, 1).cuda()
+            self.mean.requires_grad = True
+            self.std = torch.FloatTensor([1, 1, 1]).view(1, self.in_channels, 1, 1).cuda()
+            self.std.requires_grad = True
+            self.input_space = 'RGB'
+            self.input_range = [0, 1]
+            self.input_size = [IN_CHANNELS[dataset], IMAGE_SIZE[dataset][0], IMAGE_SIZE[dataset][1]]
+        elif defense_model == "FGD":
+            model_path = "{}/train_pytorch_model/adversarial_train/guided_denoiser/guided_denoiser_{}_{}_FGD.pth.tar".format(PY_ROOT, dataset, arch)
+            assert os.path.exists(model_path), "Model file {} does not exist!".format(model_path)
+            checkpoint = torch.load(model_path, map_location=lambda storage, location: storage)
+            if dataset.startswith("CIFAR"):
+                if arch == "resnet-50":
+                    classifier = ResNet(50, CLASS_NUM[dataset], block_name='BasicBlock')
+                elif arch == "resnet-110":
+                    classifier = ResNet(110, CLASS_NUM[dataset], block_name='BasicBlock')
+                elif arch == "resnet101":
+                    classifier = ResNet(56, CLASS_NUM[dataset], block_name='BasicBlock')
+                elif arch == "WRN-28-10-drop":
+                    classifier = WideResNet(28, CLASS_NUM[dataset], widen_factor=10, dropRate=0.3)
+                elif arch == "WRN-40-10-drop":
+                    classifier = WideResNet(40, CLASS_NUM[dataset], widen_factor=10, dropRate=0.3)
+            elif dataset == "TinyImageNet":
+                if arch == "resnet50":
+                    classifier = resnet50(num_classes=CLASS_NUM[dataset],pretrained=False)
+                elif arch == "resnet152":
+                    classifier = resnet152(num_classes=CLASS_NUM[dataset],pretrained=False)
+                elif arch == "resnet101":
+                    classifier = resnet101(num_classes=CLASS_NUM[dataset],pretrained=False)
+                elif arch == "WRN-28-10-drop":
+                    classifier = WideResNet(28, CLASS_NUM[dataset], widen_factor=10, dropRate=0.3)
+                elif arch == "WRN-40-10-drop":
+                    classifier = WideResNet(40, CLASS_NUM[dataset], widen_factor=10, dropRate=0.3)
+            net = Net(classifier, dataset, IMAGE_SIZE[dataset][0], IN_CHANNELS[dataset], 1, 0, False)
+            net.load_state_dict(checkpoint['state_dict'])
+            net.cuda()
+            self.model = net
+            self.mean = torch.FloatTensor([0, 0, 0]).view(1, self.in_channels, 1, 1).cuda()
+            self.mean.requires_grad = True
+            self.std = torch.FloatTensor([1, 1, 1]).view(1, self.in_channels, 1, 1).cuda()
+            self.std.requires_grad = True
+            self.input_space = 'RGB'
+            self.input_range = [0, 1]
+            self.input_size = [IN_CHANNELS[dataset], IMAGE_SIZE[dataset][0], IMAGE_SIZE[dataset][1]]
+        elif defense_model == "guided_denoiser":
+            model_path = "{}/train_pytorch_model/adversarial_train/guided_denoiser/guided_denoiser_{}_{}.pth.tar".format(PY_ROOT, dataset, arch)
+            assert os.path.exists(model_path), "Model file {} does not exist!".format(model_path)
+            checkpoint = torch.load(model_path, map_location=lambda storage, location: storage)
+            if dataset.startswith("CIFAR"):
+                if arch == "resnet-50":
+                    classifier = ResNet(50, CLASS_NUM[dataset], block_name='BasicBlock')
+                elif arch == "resnet-110":
+                    classifier = ResNet(110, CLASS_NUM[dataset], block_name='BasicBlock')
+                elif arch == "resnet101":
+                    classifier = ResNet(56, CLASS_NUM[dataset], block_name='BasicBlock')
+                elif arch == "WRN-28-10-drop":
+                    classifier = WideResNet(28, CLASS_NUM[dataset], widen_factor=10, dropRate=0.3)
+                elif arch == "WRN-40-10-drop":
+                    classifier = WideResNet(40, CLASS_NUM[dataset], widen_factor=10, dropRate=0.3)
+            elif dataset == "TinyImageNet":
+                if arch == "resnet50":
+                    classifier = resnet50(num_classes=CLASS_NUM[dataset],pretrained=False)
+                elif arch == "resnet152":
+                    classifier = resnet152(num_classes=CLASS_NUM[dataset],pretrained=False)
+                elif arch == "resnet101":
+                    classifier = resnet101(num_classes=CLASS_NUM[dataset],pretrained=False)
+                elif arch == "WRN-28-10-drop":
+                    classifier = WideResNet(28, CLASS_NUM[dataset], widen_factor=10, dropRate=0.3)
+                elif arch == "WRN-40-10-drop":
+                    classifier = WideResNet(40, CLASS_NUM[dataset], widen_factor=10, dropRate=0.3)
+            net = Net(classifier, dataset, IMAGE_SIZE[dataset][0], IN_CHANNELS[dataset], 1, 0, False)
+            net.load_state_dict(checkpoint['state_dict'])
+            net.cuda()
+            self.model = net
+            self.mean = torch.FloatTensor([0, 0, 0]).view(1, self.in_channels, 1, 1).cuda()
+            self.mean.requires_grad = True
+            self.std = torch.FloatTensor([1, 1, 1]).view(1, self.in_channels, 1, 1).cuda()
+            self.std.requires_grad = True
+            self.input_space = 'RGB'
+            self.input_range = [0, 1]
+            self.input_size = [IN_CHANNELS[dataset], IMAGE_SIZE[dataset][0], IMAGE_SIZE[dataset][1]]
 
+        elif defense_model == "feature_distillation":
+            self.preprocessor = convert_images
+        elif defense_model == "post_averaging":
+            R = 30 if arch in ["resnet-152", "ResNet152","DenoiseResNet152"] else 6
+            self.input_space = self.model.input_space  # 'RGB' or 'GBR'
+            self.input_range = self.model.input_range  # [0, 1] or [0, 255]
+            self.input_size = self.model.input_size
+            self.model = PostAveragedNetwork(self.model, K=15, R=R, num_classes=CLASS_NUM[dataset]).cuda()
+        elif defense_model == "pcl_loss":
+            self.model = PrototypeConformityLossResNet(in_channels=IN_CHANNELS[dataset], depth=pretrained_cifar_model_conf[dataset][arch]["depth"], num_classes=CLASS_NUM[dataset])
+            self.mean = torch.FloatTensor([0.4914, 0.4822, 0.4465]).view(1, self.in_channels, 1, 1).cuda()
+            self.std = torch.FloatTensor([0.2023, 0.1994, 0.2010]).view(1, self.in_channels, 1, 1).cuda()
+            self.mean.requires_grad = True
+            self.std.requires_grad = True
+            self.input_space = 'RGB'
+            self.input_range = [0, 1]
+            self.input_size = [IN_CHANNELS[dataset], IMAGE_SIZE[dataset][0], IMAGE_SIZE[dataset][1]]
+            pretrained_model_path = "{root}/train_pytorch_model/adversarial_train/pl_loss/pcl_train_{dataset}@{arch}.pth.tar".format(root=PY_ROOT, dataset=dataset, arch=arch)
+            assert os.path.exists(pretrained_model_path), "{} does not exist!".format(pretrained_model_path)
+            state_dict = torch.load(pretrained_model_path, map_location=lambda storage, location: storage)["state_dict"]
+            filtered_dict = {}
+            for key, value in state_dict.items():
+                filtered_dict[key.replace("cnn.","")] = value
+            self.model.load_state_dict(filtered_dict)
+            log.info("Load pcl model from {} done".format(pretrained_model_path))
+        elif defense_model == "pcl_loss_adv_train":
+            self.model = PrototypeConformityLossResNet(in_channels=IN_CHANNELS[dataset], depth=pretrained_cifar_model_conf[dataset][arch]["depth"], num_classes=CLASS_NUM[dataset])
+            self.mean = torch.FloatTensor([0.4914, 0.4822, 0.4465]).view(1, self.in_channels, 1, 1).cuda()
+            self.std = torch.FloatTensor([0.2023, 0.1994, 0.2010]).view(1, self.in_channels, 1, 1).cuda()
+            self.mean.requires_grad = True
+            self.std.requires_grad = True
+            self.input_space = 'RGB'
+            self.input_range = [0, 1]
+            self.input_size = [IN_CHANNELS[dataset], IMAGE_SIZE[dataset][0], IMAGE_SIZE[dataset][1]]
+            pretrained_model_path = "{root}/train_pytorch_model/adversarial_train/pl_loss/pcl_pgd_adv_train_{dataset}@{arch}.pth.tar".format(root=PY_ROOT, dataset=dataset, arch=arch)
+            assert os.path.exists(pretrained_model_path), "{} does not exist!".format(pretrained_model_path)
+            state_dict = torch.load(pretrained_model_path, map_location=lambda storage, location: storage)["state_dict"]
+            filtered_dict = {}
+            for key, value in state_dict.items():
+                filtered_dict[key.replace("cnn.","")] = value
+            self.model.load_state_dict(filtered_dict)
+            log.info("Load pcl model from {} done".format(pretrained_model_path))
+        elif defense_model == "feature_denoise":
+            filter_type = "NonLocal_Filter"
+            ksize = 3
+            if arch == "DenoiseResNet34":
+                self.model = DenoiseResNet34(in_channels=IN_CHANNELS[dataset], num_classes=CLASS_NUM[dataset],
+                                          whether_denoising=True, filter_type=filter_type, ksize=ksize)
+            elif arch == "DenoiseResNet50":
+                self.model = DenoiseResNet50(in_channels=IN_CHANNELS[dataset], num_classes=CLASS_NUM[dataset],
+                                          whether_denoising=True, filter_type=filter_type, ksize=ksize)
+            elif arch == "DenoiseResNet101":
+                self.model = DenoiseResNet101(in_channels=IN_CHANNELS[dataset], num_classes=CLASS_NUM[dataset],
+                                       whether_denoising=True, filter_type=filter_type, ksize=ksize)
+            elif arch == "DenoiseResNet152":
+                self.model = DenoiseResNet152(in_channels=IN_CHANNELS[dataset], num_classes=CLASS_NUM[dataset],
+                                       whether_denoising=True, filter_type=filter_type, ksize=ksize)
 
-        self.input_space = self.cnn.input_space  # 'RGB' or 'GBR'
-        self.input_range = self.cnn.input_range  # [0, 1] or [0, 255]
-        self.input_size = self.cnn.input_size
+            self.mean = torch.FloatTensor([0.4914, 0.4822, 0.4465]).view(1, self.in_channels, 1, 1).cuda()
+            self.std = torch.FloatTensor([0.2023, 0.1994, 0.2010]).view(1, self.in_channels, 1, 1).cuda()
+            self.mean.requires_grad = True
+            self.std.requires_grad = True
+            self.input_space = 'RGB'
+            self.input_range = [0, 1]
+            self.input_size = [IN_CHANNELS[dataset], IMAGE_SIZE[dataset][0], IMAGE_SIZE[dataset][1]]
+            pretrained_model_path = "{root}/train_pytorch_model/adversarial_train/feature_denoise/{dataset}@{arch}_{filter_type}_{ksize}.pth.tar".format(
+                root=PY_ROOT, dataset=dataset, arch=arch, filter_type=filter_type, ksize=ksize)
+            assert os.path.exists(pretrained_model_path), "{} does not exist!".format(pretrained_model_path)
+            state_dict = torch.load(pretrained_model_path, map_location=lambda storage, location: storage)["state_dict"]
+            log.info("Load feature denoise model from {} done".format(pretrained_model_path))
+            filtered_dict = {}
+            for key, value in state_dict.items():
+                filtered_dict[key.replace("cnn.", "")] = value
+            self.model.load_state_dict(filtered_dict)
+        elif defense_model == "feature_denoise_adv_train":
+            filter_type = "NonLocal_Filter"
+            ksize = 3
+            if arch == "DenoiseResNet34":
+                self.model = DenoiseResNet34(in_channels=IN_CHANNELS[dataset], num_classes=CLASS_NUM[dataset],
+                                             whether_denoising=True, filter_type=filter_type, ksize=ksize)
+            elif arch == "DenoiseResNet50":
+                self.model = DenoiseResNet50(in_channels=IN_CHANNELS[dataset], num_classes=CLASS_NUM[dataset],
+                                             whether_denoising=True, filter_type=filter_type, ksize=ksize)
+            elif arch == "DenoiseResNet101":
+                self.model = DenoiseResNet101(in_channels=IN_CHANNELS[dataset], num_classes=CLASS_NUM[dataset],
+                                              whether_denoising=True, filter_type=filter_type, ksize=ksize)
+            elif arch == "DenoiseResNet152":
+                self.model = DenoiseResNet152(in_channels=IN_CHANNELS[dataset], num_classes=CLASS_NUM[dataset],
+                                              whether_denoising=True, filter_type=filter_type, ksize=ksize)
+
+            self.mean = torch.FloatTensor([0.4914, 0.4822, 0.4465]).view(1, self.in_channels, 1, 1).cuda()
+            self.std = torch.FloatTensor([0.2023, 0.1994, 0.2010]).view(1, self.in_channels, 1, 1).cuda()
+            self.mean.requires_grad = True
+            self.std.requires_grad = True
+            self.input_space = 'RGB'
+            self.input_range = [0, 1]
+            self.input_size = [IN_CHANNELS[dataset], IMAGE_SIZE[dataset][0], IMAGE_SIZE[dataset][1]]
+            pretrained_model_path = "{root}/train_pytorch_model/adversarial_train/feature_denoise/pgd_adv_train_{dataset}@{arch}_NonLocal_Filter_3.pth.tar".format(
+                root=PY_ROOT, dataset=dataset, arch=arch)
+            assert os.path.exists(pretrained_model_path), "{} does not exist!".format(pretrained_model_path)
+            state_dict = torch.load(pretrained_model_path, map_location=lambda storage, location: storage)["state_dict"]
+            filtered_dict = {}
+            for key, value in state_dict.items():
+                filtered_dict[key.replace("cnn.", "")] = value
+            self.model.load_state_dict(filtered_dict)
+            log.info("Load feature denoise model from {} done".format(pretrained_model_path))
+
         self.no_grad = no_grad
-
 
     def forward(self, x):
         # assign dropout probability
-        # if hasattr(self, 'drop'):
-        #     self.cnn.drop = self.drop
         # channel order
         if self.input_space == 'BGR':
             x = x[:, [2, 1, 0], :, :]  # pytorch does not support negative stride index (::-1) yet
         # input range
         if max(self.input_range) == 255:
             x = x * 255
-        if hasattr(self, "preprocessor"):
-            x = self.preprocessor(x) # feature distillation
-        # normalization
-        x = (x - self.mean.type(x.dtype).to(x.device)) / self.std.type(x.dtype).to(x.device)
         if self.no_grad:
             with torch.no_grad():
-                x = self.model(x)
+                if hasattr(self, "preprocessor"):
+                    x = self.preprocessor(x) # feature distillation
+                # normalization
+                x = (x - self.mean.type(x.dtype).to(x.device)) / self.std.type(x.dtype).to(x.device)
+                if self.defense_model == "guided_denoiser" or self.defense_model == "LGD" or self.defense_model == "FGD":
+                    x = self.model(None, x, requires_control=False, train=False)
+                elif self.defense_model == "pcl_loss" or self.defense_model == "pcl_loss_adv_train":
+                    x = self.model(x)[-1]
+                else:
+                    x = self.model(x)
         else:
-            x = self.model(x)
+            if hasattr(self, "preprocessor"):
+                x = self.preprocessor(x)  # feature distillation
+            # normalization
+            x = (x - self.mean.type(x.dtype).to(x.device)) / self.std.type(x.dtype).to(x.device)
+            if self.defense_model == "guided_denoiser" or self.defense_model == "LGD" or self.defense_model == "FGD":
+                x = self.model(None, x, requires_control=False, train=False)
+            elif self.defense_model == "pcl_loss" or self.defense_model == "pcl_loss_adv_train":
+                x = self.model(x)[-1]
+            else:
+                x = self.model(x)
         x = x.view(x.size(0), -1)
         return x
 

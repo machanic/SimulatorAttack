@@ -149,8 +149,6 @@ def main():
     if torch.cuda.is_available():
         model.cuda(gpus[0])
 
-    if torch.cuda.device_count() > 1:
-        model = nn.DataParallel(model, device_ids=gpus)
 
     log.info("After trained over, model will be saved to {}".format(model_path))
     train_loader = get_img_label_data_loader(args.dataset, args.batch_size, True)
@@ -213,6 +211,7 @@ def main():
             train_total += images.shape[0]
             with torch.no_grad():
                 train_correct += model(images).max(1)[1].eq(labels).float().sum().item()
+            model.eval()
             adv_images = attack.perturb(images, labels)
             model.train()
             adv_outputs = model(adv_images)

@@ -1,10 +1,12 @@
 import sys
+
+
 sys.path.append("/home1/machen/meta_perturbations_black_box_attack")
 import argparse
 import glob
 import json
 import os
-
+from dataset.defensive_model import DefensiveModel
 from types import SimpleNamespace
 
 import glog as log
@@ -148,8 +150,8 @@ class PriorRGFAttack(object):
             ite = 0
             while total_q <= args.max_queries:
                 total_q += 1
-                true = torch.squeeze(self.get_grad(self.model, adv_images, true_labels, target_labels))  # C,H,W, # 其实没啥用，只是为了看看估计的准不准
-                log.info("Grad norm : {:.3f}".format(torch.sqrt(torch.sum(true * true)).item()))
+                # true = torch.squeeze(self.get_grad(self.model, adv_images, true_labels, target_labels))  # C,H,W, # 其实没啥用，只是为了看看估计的准不准
+                # log.info("Grad norm : {:.3f}".format(torch.sqrt(torch.sum(true * true)).item()))
 
                 if ite % 2 == 0 and sigma != args.sigma:
                     log.info("checking if sigma could be set to be 1e-4")
@@ -170,8 +172,8 @@ class PriorRGFAttack(object):
                 if args.method != "uniform":
                     prior = torch.squeeze(self.get_grad(self.surrogate_model, adv_images, true_labels, target_labels))  # C,H,W
                     # 下面求得余弦值
-                    alpha = torch.sum(true * prior) / torch.clamp(torch.sqrt(torch.sum(true * true) * torch.sum(prior * prior)), min=1e-12)  # 这个alpha仅仅用来看看梯度对不对，后续会更新
-                    log.info("alpha = {:.3}".format(alpha))
+                    # alpha = torch.sum(true * prior) / torch.clamp(torch.sqrt(torch.sum(true * true) * torch.sum(prior * prior)), min=1e-12)  # 这个alpha仅仅用来看看梯度对不对，后续会更新
+                    # log.info("alpha = {:.3}".format(alpha))
                     prior = prior / torch.clamp(torch.sqrt(torch.mean(torch.mul(prior, prior))),min=1e-12)
                 if args.method == "biased":
                     start_iter = 3  # 是只有start_iter=3的时候算一下gradient norm
@@ -296,8 +298,8 @@ class PriorRGFAttack(object):
                             log.info(lprior, lgrad)
                 else:
                     grad = prior
-                log.info("angle = {:.4f}".format(torch.sum(true*grad) /
-                                                 torch.clamp(torch.sqrt(torch.sum(true*true) * torch.sum(grad*grad)),min=1e-12)))
+                # log.info("angle = {:.4f}".format(torch.sum(true*grad) /
+                #                                  torch.clamp(torch.sqrt(torch.sum(true*true) * torch.sum(grad*grad)),min=1e-12)))
                 if args.norm == "l2":
                     # Bandits版本
                     adv_images = adv_images + lr * grad / torch.clamp(torch.sqrt(torch.mean(torch.mul(grad,grad))),min=1e-12)
@@ -331,8 +333,6 @@ class PriorRGFAttack(object):
                 not_done.append(1)
                 queries.append(args.max_queries) # 因此不能用np.mean(queries)来计算，平均query次数
 
-
-
         log.info('Attack {} success rate: {:.3f} Queries_mean: {:.3f} Queries_median: {:.3f}'.format(arch, success/total,
                                                                                            np.mean(queries), np.median(queries)))
         correct_all = np.concatenate(correct_all, axis=0).astype(np.int32)
@@ -340,28 +340,26 @@ class PriorRGFAttack(object):
         not_done_all = np.array(not_done).astype(np.int32)
         success = (1 - not_done_all) * correct_all
         success_query = success * query_all
-        query_threshold_success_rate, query_success_rate = success_rate_and_query_coorelation(query_all, not_done_all)
-        success_rate_to_avg_query = success_rate_avg_query(query_all, not_done_all)
         meta_info_dict = {"query_all":query_all.tolist(),"not_done_all":not_done_all.tolist(),
                           "correct_all":correct_all.tolist(),
                           "mean_query": np.mean(success_query[np.nonzero(success)[0]]).item(),
                           "max_query":np.max(success_query[np.nonzero(success)[0]]).item(),
                           "median_query": np.median(success_query[np.nonzero(success)[0]]).item(),
-                          "avg_not_done": np.mean(not_done_all.astype(np.float32)).item(),
-                          "query_threshold_success_rate_dict": query_threshold_success_rate,
-                          "query_success_rate_dict": query_success_rate,
-                          "success_rate_to_avg_query": success_rate_to_avg_query,
+                          "avg_not_done": np.mean(not_done_all[np.nonzero(correct_all)[0]].astype(np.float32)).item(),
                           "args": vars(args)}
         with open(result_dump_path, "w") as result_file_obj:
             json.dump(meta_info_dict, result_file_obj, sort_keys=True)
         log.info("done, write stats info to {}".format(result_dump_path))
 
 
-def get_expr_dir_name(dataset, method, surrogate_arch, norm, targeted, target_type):
+def get_expr_dir_name(dataset, method, surrogate_arch, norm, targeted, target_type, args):
     from datetime import datetime
     # dirname = datetime.now().strftime('%Y-%m-%d_%H-%M-%S')
     target_str = "untargeted" if not targeted else "targeted_{}".format(target_type)
-    dirname = 'P-RGF_{}_attack_{}_surrogate_arch_{}_{}_{}'.format(method, dataset,surrogate_arch,norm,target_str)
+    if args.attack_defense:
+        dirname = 'P-RGF_{}_attack_on_defensive_model_{}_surrogate_arch_{}_{}_{}'.format(method, dataset, surrogate_arch, norm, target_str)
+    else:
+        dirname = 'P-RGF_{}_attack_{}_surrogate_arch_{}_{}_{}'.format(method, dataset,surrogate_arch,norm,target_str)
     return dirname
 
 def set_log_file(fname):
@@ -415,18 +413,28 @@ if __name__ == "__main__":
     parser.add_argument("--sigma", type=float,default=1e-4, help="Sampling variance.")
     # parser.add_argument("--number_images", type=int, default=100000,  help='Number of images for evaluation.')
     parser.add_argument("--max_queries", type=int, default=10000, help="Maximum number of queries.")
+    parser.add_argument('--attack_defense', action="store_true")
+    parser.add_argument('--defense_model', type=str, default=None)
+
     args = parser.parse_args()
     os.environ["CUDA_DEVICE_ORDER"] = "PCI_BUS_ID"
     os.environ['CUDA_VISIBLE_DEVICES'] = str(args.gpu)
     os.environ['CUDA_VISIBLE_DEVICE'] = str(args.gpu)
     assert args.batch_size == 1, 'The code does not support batch_size > 1 yet.'
     args.exp_dir = os.path.join(args.exp_dir, get_expr_dir_name(args.dataset, args.method, args.surrogate_arch, args.norm,
-                                                                args.targeted, args.target_type))
+                                                                args.targeted, args.target_type, args))
     os.makedirs(args.exp_dir, exist_ok=True)
     if args.test_archs:
-        set_log_file(os.path.join(args.exp_dir, 'run.log'))
-    else:
-        set_log_file(os.path.join(args.exp_dir, 'run_{}.log'.format(args.arch)))
+        if args.attack_defense:
+            log_file_path = os.path.join(args.exp_dir, 'run_defense_{}.log'.format(args.defense_model))
+        else:
+            log_file_path = os.path.join(args.exp_dir, 'run.log')
+    elif args.arch is not None:
+        if args.attack_defense:
+            log_file_path = os.path.join(args.exp_dir, 'run_defense_{}_{}.log'.format(args.arch, args.defense_model))
+        else:
+            log_file_path = os.path.join(args.exp_dir, 'run_{}.log'.format(args.arch))
+    set_log_file(log_file_path)
     defaults = json.load(open(args.json_config))[args.dataset]
     arg_vars = vars(args)
     arg_vars = {k: arg_vars[k] for k in arg_vars if arg_vars[k] is not None}
@@ -471,10 +479,16 @@ if __name__ == "__main__":
     log.info('Called with args:')
     print_args(args)
     for arch in archs:
-        save_result_path = args.exp_dir + "/{}_result.json".format(arch)
+        if args.attack_defense:
+            save_result_path = args.exp_dir + "/{}_{}_result.json".format(arch, args.defense_model)
+        else:
+            save_result_path = args.exp_dir + "/{}_result.json".format(arch)
         if os.path.exists(save_result_path):
             continue
-        model = StandardModel(args.dataset, arch, no_grad=False)
+        if args.attack_defense:
+            model = DefensiveModel(args.dataset, arch, no_grad=True, defense_model=args.defense_model)
+        else:
+            model = StandardModel(args.dataset, arch, no_grad=True)
         model.cuda()
         model.eval()
         log.info("Begin attack {} on {}, result will be saved to {}".format(arch, args.dataset, save_result_path))

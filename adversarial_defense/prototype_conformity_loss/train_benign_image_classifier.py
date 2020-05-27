@@ -7,7 +7,6 @@ import sys
 sys.path.append("/home1/machen/meta_perturbations_black_box_attack")
 import argparse
 import os
-import shutil
 import time
 import random
 
@@ -21,7 +20,7 @@ import torchvision.transforms as transforms
 import torchvision.datasets as datasets
 import numpy as np
 
-from adversarial_defense.prototype_conformity_loss.resnet import ResNet
+from adversarial_defense.model.pcl_resnet import PrototypeConformityLossResNet
 from config import IMAGE_SIZE, IN_CHANNELS, CLASS_NUM, PY_ROOT
 from dataset.tiny_imagenet import TinyImageNet
 from adversarial_defense.prototype_conformity_loss.utils import AverageMeter
@@ -61,7 +60,7 @@ parser.add_argument('--resume', default='', type=str, metavar='PATH',
 # Architecture
 parser.add_argument('--arch', '-a', metavar='ARCH', default='resnet20',
                     help='model architecture')
-parser.add_argument('--depth', type=int, default=29, help='Model depth.')
+parser.add_argument('--depth', type=int, default=50, help='Model depth.')
 parser.add_argument('--block-name', type=str, default='BasicBlock',
                     help='the building block for Resnet and Preresnet: BasicBlock, Bottleneck (default: Basicblock for cifar10/cifar100)')
 parser.add_argument('--cardinality', type=int, default=8, help='Model cardinality (group).')
@@ -168,8 +167,8 @@ def accuracy(output, target, topk=(1,)):
 def main():
     global best_acc
     start_epoch = args.start_epoch  # start from epoch 0 or last checkpoint epoch
-    args.checkpoint = '{}/train_pytorch_model/adversarial_train/pl_loss/benign_image_{}@{}-{}.pth.tar'.format(
-        PY_ROOT, args.dataset, args.arch, args.depth)
+    args.checkpoint = '{}/train_pytorch_model/adversarial_train/pl_loss/benign_image_{}@{}.pth.tar'.format(
+        PY_ROOT, args.dataset, args.arch)
     os.makedirs(os.path.dirname(args.checkpoint),exist_ok=True)
     in_channels = IN_CHANNELS[args.dataset]
     image_size = IMAGE_SIZE[args.dataset][0]
@@ -233,7 +232,7 @@ def main():
     # Model
     log.info("==> creating model '{}'".format(args.arch))
     if 'resnet' in args.arch:
-        model = ResNet(
+        model = PrototypeConformityLossResNet(
                     in_channels=in_channels,
                     num_classes=num_classes,
                     depth=args.depth

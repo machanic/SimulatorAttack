@@ -16,12 +16,18 @@ from dataset.standard_model import StandardModel
 from meta_grad_attacker.attacks.black_box_attack import MetaGradAttack
 from meta_grad_attacker.attacks.options import get_parse_args
 from meta_grad_attacker.meta_training.load_attacked_and_meta_model import load_meta_model
+from dataset.defensive_model import DefensiveModel
 
-def get_expr_dir_name(dataset, norm, targeted, target_type, use_tanh):
+
+def get_expr_dir_name(dataset, norm, targeted, target_type, use_tanh, args):
     target_str = "untargeted" if not targeted else "targeted_{}".format(target_type)
     use_tanh_str = "tanh" if use_tanh else "no_tanh"
-    dirname = 'MetaGradAttack_{}_{}_{}_{}'.format(dataset, norm, target_str, use_tanh_str)
+    if args.attack_defense:
+        dirname = 'MetaGradAttack_on_defensive_model_{}_{}_{}_{}'.format(dataset, norm, target_str, use_tanh_str)
+    else:
+        dirname = 'MetaGradAttack_{}_{}_{}_{}'.format(dataset, norm, target_str, use_tanh_str)
     return dirname
+
 def set_log_file(fname):
     import subprocess
     tee = subprocess.Popen(['tee', fname], stdin=subprocess.PIPE)
@@ -61,16 +67,24 @@ def main(args, result_dir_path):
     else:
         assert args.arch is not None
         archs = [args.arch]
-    meta_model_path =  '{}/train_pytorch_model/meta_grad_regression/{}.pth.tar'.format(PY_ROOT, args.dataset)
+    if args.attack_defense:
+        meta_model_path = '{}/train_pytorch_model/meta_grad_regression/{}_without_resnet.pth.tar'.format(PY_ROOT, args.dataset)
+    else:
+        meta_model_path =  '{}/train_pytorch_model/meta_grad_regression/{}.pth.tar'.format(PY_ROOT, args.dataset)
     assert os.path.exists(meta_model_path), "{} does not exist!".format(meta_model_path)
     meta_model = load_meta_model(meta_model_path)
+
     log.info("Load meta model from {}".format(meta_model_path))
     attack = MetaGradAttack(args, norm=args.norm, epsilon=args.epsilon,
                             targeted=args.targeted, search_steps=args.binary_steps,
                             max_steps=args.maxiter, use_log=not args.use_zvalue, cuda=not args.no_cuda)
 
     for arch in archs:
-        model = StandardModel(args.dataset, arch, no_grad=True)
+        if args.attack_defense:
+            model = DefensiveModel(args.dataset, arch, no_grad=True, defense_model=args.defense_model)
+        else:
+            model = StandardModel(args.dataset, arch, no_grad=True)
+
         model.cuda().eval()
         query_all = []
         not_done_all = []
@@ -81,7 +95,11 @@ def main(args, result_dir_path):
         avg_step = 0
         avg_time = 0
         avg_qry = 0
-        result_dump_path = result_dir_path + "/{}_result.json".format(arch)
+        if args.attack_defense:
+            result_dump_path = result_dir_path + "/{}_{}_result.json".format(arch, args.defense_model)
+        else:
+            result_dump_path = result_dir_path + "/{}_result.json".format(arch)
+
         # if os.path.exists(result_dump_path):
         #     continue
         log.info("Begin attack {} on {}".format(arch, args.dataset))
@@ -107,7 +125,7 @@ def main(args, result_dir_path):
                 log.info("Skip wrongly classified image no. %d, original class %d, classified as %d" % (
                 i, pred_label.item(), true_labels.item()))
                 query_all.append(0)
-                not_done_all.append(1)
+                not_done_all.append(1)  # 原本就分类错误，not_done给1，假如99%都原本分类错误的话, avg_not_done = 99%
                 continue
             img_no += 1
             timestart = time.time()
@@ -181,9 +199,6 @@ def main(args, result_dir_path):
         not_done_all = np.array(not_done_all).astype(np.int32)
         success = (1 - not_done_all) * correct_all
         success_query = success * query_all
-        query_threshold_success_rate, query_success_rate = success_rate_and_query_coorelation(query_all,
-                                                                                              not_done_all)
-        success_rate_to_avg_query = success_rate_avg_query(query_all, not_done_all)
 
         # query_all_bounded = query_all.copy()
         # not_done_all_bounded = not_done_all.copy()
@@ -201,16 +216,12 @@ def main(args, result_dir_path):
                           "mean_query": np.mean(success_query[np.nonzero(success)[0]]).item(),
                           "max_query": np.max(success_query[np.nonzero(success)[0]]).item(),
                           "median_query": np.median(success_query[np.nonzero(success)[0]]).item(),
-                          "avg_not_done": np.mean(not_done_all.astype(np.float32)).item(),
+                          "avg_not_done": np.mean(not_done_all.astype(np.float32)[np.nonzero(correct_all)[0]]).item(),
 
                           # "mean_query_bounded_max_queries": np.mean(success_query_bounded[np.nonzero(success_bounded)[0]]).item(),
                           # "max_query_bounded_max_queries": np.max(success_query_bounded[np.nonzero(success_bounded)[0]]).item(),
                           # "median_query_bounded_max_queries": np.median(success_query_bounded[np.nonzero(success_bounded)[0]]).item(),
                           # "avg_not_done_bounded_max_queries": np.mean(not_done_all_bounded.astype(np.float32)).item(),
-
-                          "query_threshold_success_rate_dict": query_threshold_success_rate,
-                          "query_success_rate_dict": query_success_rate,
-                          "success_rate_to_avg_query": success_rate_to_avg_query,
 
                           # "query_threshold_success_rate_dict_bounded": query_threshold_success_rate_bounded,
                           # "query_success_rate_dict_bounded": query_success_rate_bounded,
@@ -232,12 +243,19 @@ if __name__ == "__main__":
     args = get_parse_args()
     os.environ['CUDA_VISIBLE_DEVICES'] = str(args.gpu)
     os.environ["CUDA_DEVICE_ORDER"] = "PCI_BUS_ID"
-    result_dir_path = os.path.join("logs",get_expr_dir_name(args.dataset,args.norm, args.targeted, args.target_type, args.use_tanh))
+    result_dir_path = os.path.join("logs",get_expr_dir_name(args.dataset,args.norm, args.targeted, args.target_type, args.use_tanh, args))
     os.makedirs(result_dir_path,exist_ok=True)
     if args.test_archs:
-        set_log_file(result_dir_path + "/run.log")
+        if args.attack_defense:
+            log_file_path = os.path.join(result_dir_path, 'run_defense_{}.log'.format(args.defense_model))
+        else:
+            log_file_path = os.path.join(result_dir_path, 'run.log')
     elif args.arch is not None:
-        set_log_file(result_dir_path + "/run_{}.log".format(args.arch))
+        if args.attack_defense:
+            log_file_path = os.path.join(result_dir_path, 'run_defense_{}_{}.log'.format(args.arch, args.defense_model))
+        else:
+            log_file_path = os.path.join(result_dir_path, 'run_{}.log'.format(args.arch))
+    set_log_file(log_file_path)
     log.info("using GPU :{}".format(args.gpu))
     log.info('Command line is: {}'.format(' '.join(sys.argv)))
     log.info("Log file is written in {}".format(result_dir_path))

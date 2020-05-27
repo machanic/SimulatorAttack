@@ -37,8 +37,8 @@ pretrained_cifar_model_conf = {"CIFAR-10":{
                                 "WRN-40-10":{"depth":40, "widen_factor":10, "drop":0.0,"epochs":200, "schedule":[60,120,160], "wd":5e-4, "gamma":0.2},
                                 "densenet-bc-100-12":{"depth":100,"growthRate":12,"train_batch":64,"epochs":300, "schedule":[150,225],"wd":1e-4,"gamma":0.1,"compressionRate":2,"drop":0},
                                 "densenet-bc-L190-k40":{"depth":190,"growthRate":40,"train_batch":64,"epochs":300, "schedule":[150,225],"wd":1e-4,"gamma":0.1,"compressionRate":2,"drop":0},
-                                 "defense_resnet-110": {"depth":110},
-                                "defense_resnet-50": {"depth":50}
+                                 "pcl_resnet-110": {"depth":110},
+                                "pcl_resnet-50": {"depth":50}
                             },
                             "CIFAR-100":{
                                 "vgg11_bn":None,
@@ -65,12 +65,12 @@ pretrained_cifar_model_conf = {"CIFAR-10":{
                                 "WRN-40-10":{"depth":40, "widen_factor":10, "drop":0.0,"epochs":200, "schedule":[60,120,160], "wd":5e-4, "gamma":0.2},
                                 "densenet-bc-100-12":{"depth":100,"growthRate":12,"train_batch":64,"epochs":300, "schedule":[150,225],"wd":1e-4,"gamma":0.1,"compressionRate":2, "drop":0},
                                 "densenet-bc-L190-k40":{"depth":190,"growthRate":40,"train_batch":64,"epochs":300, "schedule":[150,225],"wd":1e-4,"gamma":0.1,"compressionRate":2, "drop":0},
-                                "defense_resnet-110": {"depth": 110},
-                                "defense_resnet-50": {"depth": 50}
+                                "pcl_resnet-110": {"depth": 110},
+                                "pcl_resnet-50": {"depth": 50}
                             },
                             "TinyImageNet":{
-                                "defense_resnet-110": {"depth":110},
-                                "defense_resnet-50": {"depth":50}
+                                "pcl_resnet110": {"depth":110},
+                                "pcl_resnet50": {"depth":50}
                             }
             }
 
@@ -100,6 +100,19 @@ MODELS_TEST_STANDARD = {"CIFAR-10": ["pyramidnet272", "gdas","WRN-28-10-drop","W
                         "CIFAR-100":["pyramidnet272", "gdas","WRN-28-10-drop","WRN-40-10-drop"],
                         "ImageNet": ["inceptionv3","inceptionv4","senet154","pnasnet5large","resnet101"],
                         "TinyImageNet":["resnext64_4","densenet121","resnext32_4"]}
+
+
+
+MODELS_TRAIN_WITHOUT_RESNET = {"CIFAR-10": ["alexnet", "densenet-bc-100-12", "densenet-bc-L190-k40",  "preresnet-110",
+                                      "resnext-16x64d","resnext-8x64d","vgg19_bn"],
+                         "CIFAR-100": ["alexnet", "densenet-bc-100-12", "densenet-bc-L190-k40",  "preresnet-110",
+                                      "resnext-16x64d","resnext-8x64d","vgg19_bn"],
+                         "ImageNet": ["alexnet", "bninception","densenet121", "densenet161","densenet169", "densenet201","dpn68",
+                                     "resnext101_32x4d","resnext101_64x4d","se_resnext101_32x4d",
+                                      "se_resnext50_32x4d","squeezenet1_0","squeezenet1_1","vgg11","vgg11_bn","vgg13_bn","vgg13",
+                                      "vgg16","vgg16_bn","vgg19_bn","vgg19"],
+                         "TinyImageNet": ["vgg13","densenet169","vgg11_bn","vgg19","vgg13_bn","vgg11","vgg16",
+                                          "vgg19_bn","densenet201","densenet161","vgg16_bn"]}
 
 
 

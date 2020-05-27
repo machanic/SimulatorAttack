@@ -52,6 +52,8 @@ def get_parse_args():
     parser.add_argument('--test_archs', action="store_true")
     parser.add_argument('--debug', action = 'store_true')
     parser.add_argument("--epsilon",type=float,default=None)
+    parser.add_argument('--attack_defense', action="store_true")
+    parser.add_argument('--defense_model', type=str, default=None)
 
     args = parser.parse_args()
     if args.norm == "linf":

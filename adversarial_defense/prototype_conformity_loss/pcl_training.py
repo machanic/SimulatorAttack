@@ -70,7 +70,7 @@ parser.add_argument('--use-cpu', action='store_true')
 parser.add_argument('--save-dir', type=str, default='log')
 parser.add_argument('--gpu', required=True, type=str,
                         help='id(s) for CUDA_VISIBLE_DEVICES')
-parser.add_argument('--arch', type=str, default="defense_resnet-50")
+parser.add_argument('--arch', type=str, default="pcl_resnet-50")
 parser.add_argument("--dataset",type=str, required=True)
 args = parser.parse_args()
 state = {k: v for k, v in args._get_kwargs()}
@@ -117,15 +117,25 @@ def main():
 
     start_time = time.time()
     resume_epoch = 0
-    if os.path.exists(model_path):
-        state_dict = torch.load(model_path, map_location=lambda storage, location: storage)
-        resume_epoch = state_dict["epoch"]
-        model.load_state_dict(state_dict["state_dict"])
-        optimizer_model.load_state_dict(state_dict["optimizer_model"])
-        optimizer_prox_1024.load_state_dict(state_dict["optimizer_prox_1024"])
-        optimizer_prox_256.load_state_dict(state_dict["optimizer_prox_256"])
-        optimizer_conprox_1024.load_state_dict(state_dict["optimizer_conprox_1024"])
-        optimizer_conprox_256.load_state_dict(state_dict["optimizer_conprox_256"])
+
+    softmax_model_path = '{}/train_pytorch_model/adversarial_train/pl_loss/benign_image_{}@{}.pth.tar'.format(
+        PY_ROOT, args.dataset, args.arch)
+    assert os.path.exists(softmax_model_path), "{} does not exist!".format(softmax_model_path)
+    state_dict = torch.load(softmax_model_path, map_location=lambda storage, location: storage)
+    model.cnn.load_state_dict(state_dict["state_dict"])
+    log.info("Load softmax pretrained model from {} done".format(softmax_model_path))
+    optimizer_model.load_state_dict(state_dict["optimizer"])
+
+
+    # if os.path.exists(model_path):
+    #     state_dict = torch.load(model_path, map_location=lambda storage, location: storage)
+    #     resume_epoch = state_dict["epoch"]
+    #     model.load_state_dict(state_dict["state_dict"])
+    #     optimizer_model.load_state_dict(state_dict["optimizer_model"])
+    #     optimizer_prox_1024.load_state_dict(state_dict["optimizer_prox_1024"])
+    #     optimizer_prox_256.load_state_dict(state_dict["optimizer_prox_256"])
+    #     optimizer_conprox_1024.load_state_dict(state_dict["optimizer_conprox_1024"])
+    #     optimizer_conprox_256.load_state_dict(state_dict["optimizer_conprox_256"])
 
     for epoch in range(resume_epoch, args.max_epoch):
 

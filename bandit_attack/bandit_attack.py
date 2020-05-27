@@ -8,6 +8,7 @@ import os.path as osp
 import random
 from types import SimpleNamespace
 from dataset.standard_model import StandardModel
+from dataset.defensive_model import DefensiveModel
 import glog as log
 import numpy as np
 import torch
@@ -42,12 +43,15 @@ class BanditsAttack(object):
     # l2/linf: projected gradient descent
     ###
 
-    def eg_step(self, x, g, lr):
+    def eg_prior_step(self, x, g, lr):
         real_x = (x + 1) / 2  # from [-1, 1] to [0, 1]
         pos = real_x * torch.exp(lr * g)
         neg = (1 - real_x) * torch.exp(-lr * g)
         new_x = pos / (pos + neg)
         return new_x * 2 - 1
+
+    def gd_prior_step(self, x, g, lr):
+        return x + lr * g
 
     def linf_step(self, x, g, lr):
         return x + lr * torch.sign(g)
@@ -57,9 +61,6 @@ class BanditsAttack(object):
         norm_new_x = self.norm(new_x)
         norm_mask = (norm_new_x < 1.0).float()
         return new_x * norm_mask + (1 - norm_mask) * new_x / norm_new_x
-
-    def gd_prior_step(self, x, g, lr):
-        return x + lr * g
 
     def l2_image_step(self, x, g, lr):
         return x + lr * g / self.norm(g)
@@ -144,7 +145,7 @@ class BanditsAttack(object):
             target_labels = None
         prior = torch.zeros(args.batch_size, IN_CHANNELS[args.dataset], prior_size, prior_size).cuda()
         dim = prior.nelement() / args.batch_size               # nelement() --> total number of elements
-        prior_step = self.gd_prior_step if args.norm == 'l2' else self.eg_step
+        prior_step = self.gd_prior_step if args.norm == 'l2' else self.eg_prior_step
         image_step = self.l2_image_step if args.norm == 'l2' else self.linf_step
         proj_maker = self.l2_proj if args.norm == 'l2' else self.linf_proj  # 调用proj_maker返回的是一个函数
         proj_step = proj_maker(images, args.epsilon)
@@ -199,7 +200,7 @@ class BanditsAttack(object):
                 self.total_images, step_index + 1, int(query.max().item())
             ))
             log.info('        correct: {:.4f}'.format(correct.mean().item()))
-            log.info('       not_done: {:.4f}'.format(not_done.mean().item()))
+            log.info('       not_done: {:.4f}'.format(not_done[correct.byte()].mean().item()))
             log.info('      fd_scalar: {:.9f}'.format((l1 - l2).mean().item()))
             if success.sum().item() > 0:
                 log.info('     mean_query: {:.4f}'.format(success_query[success.byte()].mean().item()))
@@ -234,10 +235,7 @@ class BanditsAttack(object):
 
             self.make_adversarial_examples(batch_idx, images.cuda(), true_labels.cuda(), args, target_model)
 
-        query_all_ = self.query_all.detach().cpu().numpy().astype(np.int32)
-        not_done_all_ = self.not_done_all.detach().cpu().numpy().astype(np.int32)
-        query_threshold_success_rate, query_success_rate = success_rate_and_query_coorelation(query_all_, not_done_all_)
-        success_rate_to_avg_query = success_rate_avg_query(query_all_, not_done_all_)
+
         log.info('{} is attacked finished ({} images)'.format(arch_name, self.total_images))
         log.info('        avg correct: {:.4f}'.format(self.correct_all.mean().item()))
         log.info('       avg not_done: {:.4f}'.format(self.not_done_all.mean().item()))  # 有多少图没做完
@@ -250,16 +248,13 @@ class BanditsAttack(object):
             log.info('  avg not_done_prob: {:.4f}'.format(self.not_done_prob_all[self.not_done_all.byte()].mean().item()))
         log.info('Saving results to {}'.format(result_dump_path))
         meta_info_dict = {"avg_correct": self.correct_all.mean().item(),
-                          "avg_not_done": self.not_done_all.mean().item(),
+                          "avg_not_done": self.not_done_all[self.correct_all.byte()].mean().item(),
                           "mean_query": self.success_query_all[self.success_all.byte()].mean().item(),
                           "median_query": self.success_query_all[self.success_all.byte()].median().item(),
                           "max_query": self.success_query_all[self.success_all.byte()].max().item(),
                           "correct_all": self.correct_all.detach().cpu().numpy().astype(np.int32).tolist(),
                           "not_done_all": self.not_done_all.detach().cpu().numpy().astype(np.int32).tolist(),
                           "query_all": self.query_all.detach().cpu().numpy().astype(np.int32).tolist(),
-                          "query_threshold_success_rate_dict": query_threshold_success_rate,
-                          "success_rate_to_avg_query": success_rate_to_avg_query,
-                          "query_success_rate_dict": query_success_rate,
                           "not_done_loss": self.not_done_loss_all[self.not_done_all.byte()].mean().item(),
                           "not_done_prob": self.not_done_prob_all[self.not_done_all.byte()].mean().item(),
                           "args":vars(args)}
@@ -269,11 +264,12 @@ class BanditsAttack(object):
 
 
 
-def get_exp_dir_name(dataset, loss, norm, targeted, target_type):
-    from datetime import datetime
-    # dirname = datetime.now().strftime('%Y_%m_%d_%H_%M_%S')
+def get_exp_dir_name(dataset, loss, norm, targeted, target_type, args):
     target_str = "untargeted" if not targeted else "targeted_{}".format(target_type)
-    dirname = 'bandits_attack-{}-{}_loss-{}-{}'.format(dataset, loss, norm, target_str)
+    if args.attack_defense:
+        dirname = 'bandits_attack_on_defensive_model-{}-{}_loss-{}-{}'.format(dataset, loss, norm, target_str)
+    else:
+        dirname = 'bandits_attack-{}-{}_loss-{}-{}'.format(dataset, loss, norm, target_str)
     return dirname
 
 def print_args(args):
@@ -323,11 +319,12 @@ if __name__ == "__main__":
     parser.add_argument('--exp-dir', default='logs', type=str,
                         help='directory to save results and logs')
     parser.add_argument('--seed', default=0, type=int, help='random seed')
+    parser.add_argument('--attack_defense',action="store_true")
+    parser.add_argument('--defense_model',type=str, default=None)
 
     args = parser.parse_args()
     os.environ["CUDA_DEVICE_ORDER"] = "PCI_BUS_ID"
     os.environ['CUDA_VISIBLE_DEVICES'] = str(args.gpu)
-    os.environ['CUDA_VISIBLE_DEVICE'] = str(args.gpu)
     os.environ["TORCH_HOME"] = "/home1/machen/.cache/torch/pretrainedmodels"
     print("using GPU {}".format(args.gpu))
 
@@ -346,12 +343,23 @@ if __name__ == "__main__":
     if args.targeted:
         if args.dataset == "ImageNet":
             args.max_queries = 50000
-    args.exp_dir = osp.join(args.exp_dir, get_exp_dir_name(args.dataset, args.loss, args.norm, args.targeted, args.target_type))  # 随机产生一个目录用于实验
+    args.exp_dir = osp.join(args.exp_dir, get_exp_dir_name(args.dataset, args.loss, args.norm, args.targeted, args.target_type, args))  # 随机产生一个目录用于实验
     os.makedirs(args.exp_dir, exist_ok=True)
+
     if args.test_archs:
-        set_log_file(os.path.join(args.exp_dir, 'run.log'))
-    else:
-        set_log_file(os.path.join(args.exp_dir, 'run_{}.log'.format(args.arch)))
+        if args.attack_defense:
+            log_file_path = osp.join(args.exp_dir, 'run_defense_{}.log'.format(args.defense_model))
+        else:
+            log_file_path = osp.join(args.exp_dir, 'run.log')
+    elif args.arch is not None:
+        if args.attack_defense:
+            log_file_path = osp.join(args.exp_dir, 'run_defense_{}_{}.log'.format(args.arch, args.defense_model))
+        else:
+            log_file_path = osp.join(args.exp_dir, 'run_{}.log'.format(args.arch))
+    set_log_file(log_file_path)
+    if args.attack_defense:
+        assert args.defense_model is not None
+
 
     torch.backends.cudnn.deterministic = True
     random.seed(args.seed)
@@ -388,16 +396,22 @@ if __name__ == "__main__":
         archs = [args.arch]
     args.arch = ", ".join(archs)
     log.info('Command line is: {}'.format(' '.join(sys.argv)))
-    log.info("Log file is written in {}".format(osp.join(args.exp_dir, 'run.log')))
+    log.info("Log file is written in {}".format(log_file_path))
     log.info('Called with args:')
     print_args(args)
     attacker = BanditsAttack(args)
     for arch in archs:
-        save_result_path = args.exp_dir + "/{}_result.json".format(arch)
+        if args.attack_defense:
+            save_result_path = args.exp_dir + "/{}_{}_result.json".format(arch, args.defense_model)
+        else:
+            save_result_path = args.exp_dir + "/{}_result.json".format(arch)
         if os.path.exists(save_result_path):
             continue
         log.info("Begin attack {} on {}, result will be saved to {}".format(arch, args.dataset, save_result_path))
-        model = StandardModel(args.dataset, arch, no_grad=True)
+        if args.attack_defense:
+            model = DefensiveModel(args.dataset, arch, no_grad=True, defense_model=args.defense_model)
+        else:
+            model = StandardModel(args.dataset, arch, no_grad=True)
         model.cuda()
         model.eval()
         attacker.attack_all_images(args, arch, model, save_result_path)

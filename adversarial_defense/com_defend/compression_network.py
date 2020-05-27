@@ -79,9 +79,11 @@ class ComDefend(nn.Module):
         linear_code =self.com_cnn(x)
         noisy_code =linear_code -torch.randn_like(linear_code).cuda()  * self.noise_dev
         binary_code =self.sigmoid(noisy_code)
-        binary_code_test = (binary_code >0.5).float()
+        # y = self.rec_cnn(binary_code)
+        binary_code_test = (binary_code > 0.5).float()
         y_test =self.rec_cnn(binary_code_test)
         return y_test  # 训练的时候用倒数第二个
+
     def __call__(self, x):
         return self.forward(x)
 

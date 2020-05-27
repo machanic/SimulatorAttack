@@ -6,9 +6,11 @@ from collections import defaultdict
 import matplotlib.pyplot as plt
 import numpy as np
 import json
-
+import seaborn as sns
 import re
-
+from matplotlib import rcParams
+rcParams['xtick.direction'] = 'out'
+rcParams['ytick.direction'] = 'out'
 
 
 def get_all_json_data(file_dir_path, ablation_key):
@@ -27,7 +29,6 @@ def get_all_json_data(file_dir_path, ablation_key):
 
 
 def draw_meta_predict_interval_curve_figure(ablation_key, json_key, dump_file_path, xlabel, ylabel):
-
     targeted_data = {}
     for targeted in ["untargeted", "targeted"]:
         if targeted == "targeted":
@@ -45,28 +46,29 @@ def draw_meta_predict_interval_curve_figure(ablation_key, json_key, dump_file_pa
         x = np.array(x)
         y = np.array(y)
         targeted_data[targeted] = (x,y)
-    plt.style.use('seaborn-whitegrid')
-    plt.figure(figsize=(10, 8))
+    # plt.style.use('seaborn-whitegrid')
+    with sns.axes_style("whitegrid", rc={"legend.framealpha":0.5}):
+        plt.figure(figsize=(10, 8))
 
-    colors = ['b', 'r',  'c', 'm', 'y', 'k', 'w']
-    markers = [".",",","o","^","s","p","x"]
-    max_x = 0
-    min_x = 0
-    for idx,targeted in enumerate(["untargeted", "targeted"]):
-        x,y = targeted_data[targeted]
-        line, = plt.plot(x, y, marker="o",
-                         label=r"$\ell_2$ norm {} attack on WRN-28 model".format(targeted), color=colors[idx], linestyle="-")
-    plt.xlim(0, 90)
-    plt.ylim(0, 101)
-    plt.gcf().subplots_adjust(bottom=0.15)
-    xtick = [0,3,5,7,10,20, 30, 40, 50, 60, 70, 80, 90]
-    # xtick = [0, 5000, 10000]
-    plt.xticks(xtick, fontsize=15)
-    plt.yticks([0, 5, 10, 15, 20, 25, 30, 35, 40, 45, 50, 55, 60, 65, 70, 75, 80, 85, 90, 95, 100], fontsize=15)
-    plt.xlabel(xlabel, fontsize=18)
-    plt.ylabel(ylabel, fontsize=18)
-    plt.legend(loc='lower right', prop={'size': 13})
-    plt.savefig(dump_file_path, dpi=200)
+        colors = ['b', 'r',  'c', 'm', 'y', 'k', 'w']
+        markers = [".",",","o","^","s","p","x"]
+        max_x = 0
+        min_x = 0
+        for idx,targeted in enumerate(["untargeted", "targeted"]):
+            x,y = targeted_data[targeted]
+            line, = plt.plot(x, y, marker="o",
+                             label=r"$\ell_2$ norm {} attack".format(targeted), color=colors[idx], linestyle="-")
+        plt.xlim(0, 90)
+        plt.ylim(0, 101)
+        plt.gcf().subplots_adjust(bottom=0.15)
+        xtick = [0,3,5,7,10,20, 30, 40, 50, 60, 70, 80, 90]
+        # xtick = [0, 5000, 10000]
+        plt.xticks(xtick, fontsize=15)
+        plt.yticks([0, 5, 10, 15, 20, 25, 30, 35, 40, 45, 50, 55, 60, 65, 70, 75, 80, 85, 90, 95, 100], fontsize=15)
+        plt.xlabel(xlabel, fontsize=18)
+        plt.ylabel(ylabel, fontsize=18)
+        plt.legend(loc='lower right', prop={'size': 18}, fancybox=True, framealpha=0.5)
+        plt.savefig(dump_file_path, dpi=200)
 
 
 def draw_other_curve_figure(ablation_key, json_key, dump_file_path):
@@ -83,29 +85,32 @@ def draw_other_curve_figure(ablation_key, json_key, dump_file_path):
         x = np.array(x)
         y = np.array(y)
         targeted_data[targeted] = (x,y)
-    plt.style.use('seaborn-whitegrid')
-    plt.figure(figsize=(10, 8))
-    if ablation_key == "meta_seq_len":
-        label = r"deque $\mathbb{D}$'s maximum capacity"
-    elif ablation_key == "warm_up":
-        label = "warm-up iterations"
-    color = {"untargeted": "b", "targeted":"r"}
-    for idx,targeted in enumerate(["untargeted", "targeted"]):
-        x,y = targeted_data[targeted]
-        line, = plt.plot(x, y, marker="o", label=r"$\ell_2$ norm {} attack on WRN-28 model".format(targeted), color=color[targeted], linestyle="-")
-    plt.xlim(0, max(x.tolist()))
-    plt.ylim(0, 660)
-    plt.gcf().subplots_adjust(bottom=0.15)
-    # xtick = [0, 5000, 10000]
-    plt.xticks([0] + x.tolist(), fontsize=15)
-    plt.yticks(np.arange(0,661,20).tolist(), fontsize=15)
-    plt.xlabel(label, fontsize=18)
-    plt.ylabel("Avg. Query", fontsize=18)
-    if ablation_key == "meta_seq_len":
-        plt.legend(prop={'size': 13},loc='upper right')
-    else:
-        plt.legend(prop={'size': 13})
-    plt.savefig(dump_file_path, dpi=200)
+    with sns.axes_style("whitegrid", rc={"legend.framealpha":0.5}):
+        plt.figure(figsize=(10, 8))
+        if ablation_key == "meta_seq_len":
+            label = r"deque $\mathbb{D}$'s maximum length"
+        elif ablation_key == "warm_up":
+            label = "warm-up iterations"
+        color = {"untargeted": "b", "targeted":"r"}
+        for idx,targeted in enumerate(["untargeted", "targeted"]):
+            x,y = targeted_data[targeted]
+            line, = plt.plot(x, y, marker="o", label=r"$\ell_2$ norm {} attack".format(targeted), color=color[targeted], linestyle="-")
+        plt.xlim(0, max(x.tolist()))
+        plt.ylim(0, 660)
+        plt.gcf().subplots_adjust(bottom=0.15)
+        # xtick = [0, 5000, 10000]
+        plt.xticks([0] + x.tolist(), fontsize=15)
+        plt.yticks(np.arange(0,661,20).tolist(), fontsize=15)
+        plt.xlabel(label, fontsize=18)
+        plt.ylabel("Avg. Query", fontsize=18)
+        plt.legend(loc='lower right', prop={'size': 18}, fancybox=True, framealpha=0.5)
+        # if ablation_key == "meta_seq_len":
+        #     plt.legend(prop={'size': 15},loc='upper right')
+        # elif ablation_key == "warm_up":
+        #     plt.legend(prop={'size': 15}, loc='lower right')
+        # else:
+        #     plt.legend(prop={'size': 15})
+        plt.savefig(dump_file_path, dpi=200)
 
 
 def draw_meta_or_not_curve_figure(dump_file_path):
@@ -121,40 +126,42 @@ def draw_meta_or_not_curve_figure(dump_file_path):
             data_dict[mode]["MSE_error"] =  [MSE_error for iter, MSE_error in sorted(json_data["logits_error_iteration"].items(),
                                                                key=lambda e:int(e[0]))]
     # plt.style.use('seaborn-whitegrid')
-    plt.figure(figsize=(10, 8))
-    colors = {"deep":'m', "meta":'r', "uninitial": 'y'}
-    for mode,  data_info in data_dict.items():
-        x  = np.arange(125) + 1
-        y  = np.array(data_info["MSE_error"][:125])
-        is_finetune_list = data_info["is_finetune"][:125]
-        if mode == "meta":
-            simulator_name = "MetaSimulator"
-        elif mode == "deep":
-            simulator_name = "Simulator$_{vanilla}$"
-        else:
-            simulator_name = "Simulator$_{rnd}$"
-        line, = plt.plot(x, y, label=r"$\ell_2$ norm untargeted attack result of {}".format(simulator_name),
-                         color=colors[mode], linestyle="-")
-    first_finetune = True
-    for x_, is_finetune in enumerate(is_finetune_list):
-        if is_finetune == 1:
-            if first_finetune:
-                plt.axvline(x=x_+1, color='#778899', linestyle='--', linewidth=1, label="fine-tune iterations")
-                first_finetune = False
+    with sns.axes_style("whitegrid", rc={"legend.framealpha": 0.5}):
+        plt.figure(figsize=(10, 8))
+        colors = {"deep":'m', "meta":'r', "uninitial": 'y'}
+        for mode,  data_info in data_dict.items():
+            x  = np.arange(125) + 1
+            y  = np.array(data_info["MSE_error"][:125])
+            is_finetune_list = data_info["is_finetune"][:125]
+            if mode == "meta":
+                simulator_name = "MetaSimulator"
+            elif mode == "deep":
+                simulator_name = "Simulator$_{vanilla}$"
             else:
-                plt.axvline(x=x_ + 1, color='#778899', linestyle='--', linewidth=1)
+                simulator_name = "Simulator$_{rnd}$"
+            line, = plt.plot(x, y, label=r"$\ell_2$ norm untargeted attack result of {}".format(simulator_name),
+                             color=colors[mode], linestyle="-")
+        first_finetune = True
+        for x_, is_finetune in enumerate(is_finetune_list):
+            if is_finetune == 1:
+                if first_finetune:
+                    plt.axvline(x=x_+1, color='#778899', linestyle='--', linewidth=1, label="fine-tune iterations")
+                    first_finetune = False
+                else:
+                    plt.axvline(x=x_ + 1, color='#778899', linestyle='--', linewidth=1)
 
-    plt.xlim(min(x.tolist()), max(x.tolist()))
-    plt.ylim(0, 30)
-    plt.gcf().subplots_adjust(bottom=0.15)
-    # xtick = [0, 5000, 10000]
-    plt.xticks([1,10, 25,50,75,100,125], fontsize=15)
-    plt.yticks([0, 5, 10,15, 20,25,30], fontsize=15)
-    plt.xlabel("attack iterations", fontsize=18)
-    plt.ylabel("MSE between outputs of simulator and target model", fontsize=18)
-    legend = plt.legend(loc='upper right', prop={'size': 15}, shadow=True, facecolor="white")
-    # legend.get_frame().set_facecolor('#E6E6FA')
-    plt.savefig(dump_file_path, dpi=200)
+        plt.xlim(min(x.tolist()), max(x.tolist()))
+        plt.ylim(0, 30)
+        plt.gcf().subplots_adjust(bottom=0.15)
+        # xtick = [0, 5000, 10000]
+        plt.xticks([1,10, 25,50,75,100,125], fontsize=15)
+        plt.yticks([0, 5, 10,15, 20,25,30], fontsize=15)
+        plt.xlabel("attack iterations", fontsize=18)
+        plt.ylabel("MSE between outputs of simulator and target model", fontsize=18)
+        plt.legend(loc='upper right', prop={'size': 18}, fancybox=True, framealpha=0.5)
+        # legend = plt.legend(loc='upper right', prop={'size': 15}, shadow=True, facecolor="white")
+        # legend.get_frame().set_facecolor('#E6E6FA')
+        plt.savefig(dump_file_path, dpi=200)
 
 def parse_args():
     parser = argparse.ArgumentParser(description='PyTorch Meta Model Training')
@@ -167,30 +174,29 @@ def parse_args():
 
 if __name__ == "__main__":
     args = parse_args()
+    x_label = "meta-predict interval"
+    y_label = "Attack Success Rate (%)"
+    dump_folder = "/home1/machen/meta_perturbations_black_box_attack/figures/ablation_study/"
+    os.makedirs(dump_folder, exist_ok=True)
+    file_path = dump_folder + "meta_predict_interval.pdf"
+    draw_meta_predict_interval_curve_figure("meta_predict_steps", "success_rate", file_path, x_label, y_label)
+    print("written to {}".format(file_path))
 
-    # x_label = "meta-predict interval"
-    # y_label = "Attack Success Rate (%)"
-    # dump_folder = "/home1/machen/meta_perturbations_black_box_attack/figures/ablation_study_meta_predict_steps/"
-    # os.makedirs(dump_folder, exist_ok=True)
-    # file_path = dump_folder + "meta_predict_steps.png"
-    # draw_meta_predict_interval_curve_figure("meta_predict_steps", "success_rate", file_path, x_label, y_label)
-    # print("written to {}".format(file_path))
-
-
-    # dump_folder = "/home1/machen/meta_perturbations_black_box_attack/figures/ablation_study/"
-    # os.makedirs(dump_folder, exist_ok=True)
-    # file_path = dump_folder + "warm_up.png"
-    # draw_other_curve_figure("warm_up", "mean_query", file_path)
-    # print("written to {}".format(file_path))
-    #
-    # dump_folder = "/home1/machen/meta_perturbations_black_box_attack/figures/ablation_study/"
-    # os.makedirs(dump_folder, exist_ok=True)
-    # file_path = dump_folder + "deque_length.png"
-    # draw_other_curve_figure("meta_seq_len", "mean_query", file_path)
-    # print("written to {}".format(file_path))
 
     dump_folder = "/home1/machen/meta_perturbations_black_box_attack/figures/ablation_study/"
     os.makedirs(dump_folder, exist_ok=True)
-    file_path = dump_folder + "meta_or_not.png"
+    file_path = dump_folder + "warm_up.pdf"
+    draw_other_curve_figure("warm_up", "mean_query", file_path)
+    print("written to {}".format(file_path))
+    #
+    dump_folder = "/home1/machen/meta_perturbations_black_box_attack/figures/ablation_study/"
+    os.makedirs(dump_folder, exist_ok=True)
+    file_path = dump_folder + "deque_length.pdf"
+    draw_other_curve_figure("meta_seq_len", "mean_query", file_path)
+    print("written to {}".format(file_path))
+
+    dump_folder = "/home1/machen/meta_perturbations_black_box_attack/figures/ablation_study/"
+    os.makedirs(dump_folder, exist_ok=True)
+    file_path = dump_folder + "meta_or_not.pdf"
     draw_meta_or_not_curve_figure(file_path)
-    # print("written to {}".format(file_path))
+    print("written to {}".format(file_path))

@@ -8,7 +8,7 @@ import numpy as np
 import torch
 from torch.utils.data import DataLoader
 
-from config import MODELS_TRAIN_STANDARD, PY_ROOT
+from config import MODELS_TRAIN_STANDARD, PY_ROOT, MODELS_TRAIN_WITHOUT_RESNET
 from dataset.standard_model import StandardModel
 from meta_grad_attacker.dataset.image_gradient_dataset import ImageGradientDataset
 from meta_grad_attacker.meta_training.meta import Meta
@@ -34,6 +34,7 @@ def get_parse_args():
     argparser.add_argument('--update_step', type=int, help='task-level inner update steps', default=5)
     argparser.add_argument('--update_step_test', type=int, help='update steps for finetunning', default=20)
     argparser.add_argument("--gpu", type=int, required=True)
+    argparser.add_argument('--without_resnet',action='store_true')
 
     args = argparser.parse_args()
     os.environ['CUDA_VISIBLE_DEVICES'] = str(args.gpu)
@@ -68,7 +69,11 @@ def main(args):
     maml = Meta(args, config).cuda()
     # initiate different datasets
     minis = []
-    archs = MODELS_TRAIN_STANDARD[args.dataset]
+    if args.without_resnet:
+        archs = MODELS_TRAIN_WITHOUT_RESNET[args.dataset]
+    else:
+        archs = MODELS_TRAIN_STANDARD[args.dataset]
+
     for arch in archs:
         root_path = "{}/data_grad_regression/{}/".format(PY_ROOT, args.dataset)
         mini = ImageGradientDataset(root_path, arch, args.dataset, k_shot=args.k_spt, k_query=args.k_qry)
@@ -93,13 +98,14 @@ def main(args):
     log_file_path = '{}/train_pytorch_model/meta_grad_regression/train_{}.log'.format(PY_ROOT, args.dataset)
     set_log_file(log_file_path)
 
-    meta_model_path = '{}/train_pytorch_model/meta_grad_regression/{}.pth.tar'.format(PY_ROOT,args.dataset)
-    def save_model(model, dataset, epoch, acc):
-        model_folder_path = '{}/train_pytorch_model/meta_grad_regression'.format(PY_ROOT)
+    model_folder_path = '{}/train_pytorch_model/meta_grad_regression'.format(PY_ROOT)
+    if args.without_resnet:
+        meta_model_path = '{}/{}_without_resnet.pth.tar'.format(model_folder_path, args.dataset)
+    else:
+        meta_model_path = '{}/{}.pth.tar'.format(model_folder_path, args.dataset)
+    def save_model(model, epoch, acc):
         os.makedirs(model_folder_path, exist_ok=True)
-        file_name =  dataset  + '.pth.tar'
-        save_model_path = os.path.join(model_folder_path, file_name)
-        torch.save({"state_dict": model.state_dict(), "accuracy": acc, "epoch":epoch}, save_model_path)
+        torch.save({"state_dict": model.state_dict(), "accuracy": acc, "epoch":epoch}, meta_model_path)
 
     resume_epoch = 0
     if os.path.exists(meta_model_path):
@@ -121,7 +127,7 @@ def main(args):
                 log.info('step: {}  training acc: {:.6f}'.format(step, accs[0].item()))
                 if accs[0].item() < BEST_ACC:
                     BEST_ACC = accs[0].item()
-                    save_model(maml, args.dataset, epoch, BEST_ACC)
+                    save_model(maml,  epoch, BEST_ACC)
             if (epoch + 1) % (15) == 0 and step == 0:  # evaluation
                 accs_all_test = []
                 for i in range(3):

@@ -3,7 +3,7 @@ import numpy as np
 from collections import OrderedDict
 
 
-def success_rate_and_query_coorelation(query_all, not_done_indexes):
+def success_rate_and_query_coorelation(query_all, not_done_indexes, correct_indexes):
     # query为0的是还没攻击就分类错的（当然最好没有这种情况), not_done_indexes是未攻击成功的，还有很多事没有攻击成功的，query很大达到100000
     query_threshold_success_rate = OrderedDict()  # accumulative query->success rate
     query_success_rate = OrderedDict()
@@ -11,6 +11,8 @@ def success_rate_and_query_coorelation(query_all, not_done_indexes):
         query_all = query_all.detach().cpu().numpy().astype(np.int32)
     if isinstance(not_done_indexes, torch.Tensor):
         not_done_indexes = not_done_indexes.detach().cpu().numpy().astype(np.int32)
+    query_all = query_all[np.nonzero(correct_indexes)[0]]
+    not_done_indexes = not_done_indexes[np.nonzero(correct_indexes)[0]]
     assert len(query_all) == len(not_done_indexes)
     query_all = query_all[np.nonzero(query_all)[0]]  # 选择出非0的, 排除原本模型就能分类错位的图片index
     not_done_indexes = not_done_indexes[np.nonzero(query_all)[0]]
@@ -28,15 +30,17 @@ def success_rate_and_query_coorelation(query_all, not_done_indexes):
         query_success_rate[query.item()] = float(count) / total_samples
     return query_threshold_success_rate, query_success_rate
 
-def success_rate_avg_query(query_all, not_done_indexes):
+def success_rate_avg_query(query_all, not_done_indexes, correct_indexes):
     # query为0的是还没攻击就分类错的（当然最好没有这种情况), not_done_indexes是未攻击成功的，还有很多事没有攻击成功的，query很大达到100000
     if isinstance(query_all, torch.Tensor):
         query_all = query_all.detach().cpu().numpy().astype(np.int32)
     if isinstance(not_done_indexes, torch.Tensor):
         not_done_indexes = not_done_indexes.detach().cpu().numpy().astype(np.int32)
     assert len(query_all) == len(not_done_indexes)
-    query_all = query_all[np.nonzero(query_all)[0]]  # 选择出非0的, 排除原本模型就能分类错位的图片index
-    not_done_indexes = not_done_indexes[np.nonzero(query_all)[0]]
+    query_all = query_all[np.nonzero(correct_indexes)[0]]
+    not_done_indexes = not_done_indexes[np.nonzero(correct_indexes)[0]]
+    query_all = query_all[np.where(query_all < 10000)[0]]  # 选择出非0的, 排除原本模型就能分类错位的图片index
+    not_done_indexes = not_done_indexes[np.where(query_all < 10000)[0]]
     query_all = query_all.astype(np.float32)
     success_indexes = np.nonzero(not_done_indexes==0)[0]
     query_all = query_all[success_indexes]
@@ -44,6 +48,6 @@ def success_rate_avg_query(query_all, not_done_indexes):
     sucess_rate_avg_query_dict = OrderedDict()
     for success_rate in success_rate_list:
         threshold = np.percentile(query_all, float(success_rate))
-        avg_query = np.mean(query_all[np.where(query_all < threshold)[0]])
+        avg_query = np.mean(query_all[np.where(query_all <= threshold)[0]])
         sucess_rate_avg_query_dict[success_rate] = avg_query.item()
     return sucess_rate_avg_query_dict

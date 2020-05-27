@@ -4,8 +4,7 @@ from PIL import Image
 import math
 import numpy as np
 import argparse
-
-
+from numba import jit
 def load_quantization_table(component, qs=40):
     # Quantization Table for JPEG Standard: https://tools.ietf.org/html/rfc2435
     if component == 'lum':
@@ -71,7 +70,7 @@ def idct2d(dct_coeff):
                          axis=1, norm='ortho')
     return block
 
-
+@jit
 def encode(npmat, component, factor):
     rows, cols = npmat.shape[0], npmat.shape[1]
     blocks_count = rows // 8 * cols // 8
@@ -88,7 +87,7 @@ def encode(npmat, component, factor):
                 quant_matrix_list.append(quant_matrix)
     return blocks_count, quant_matrix_list
 
-
+@jit
 def decode(blocks_count, quant_matrix_list, component, factor):
     block_side = 8
     image_side = int(math.sqrt(blocks_count)) * block_side
@@ -111,13 +110,13 @@ def decode(blocks_count, quant_matrix_list, component, factor):
     return npmat
 
 
-def dnn_jpeg(image, component='jpeg', factor=50):
+def dnn_jpeg(image, component='dnn', factor=50):
     return_torch_tensor = False
     if isinstance(image, torch.Tensor):
         image = image.detach().cpu().numpy()
         return_torch_tensor = True
     image = image * 255  # 0-1 --> 0-255
-    image_uint8 = (image).astype('uint8')
+    image_uint8 = image.astype('uint8')
     ycbcr = Image.fromarray(image_uint8, 'RGB').convert('YCbCr')
     npmat = np.array(ycbcr)
     cnt, coeff = encode(npmat, component, factor)
@@ -128,10 +127,22 @@ def dnn_jpeg(image, component='jpeg', factor=50):
         image_array = torch.from_numpy(image_array).cuda()
     return image_array
 
+
+def convert_images(images, component='dnn', factor=50):
+    images = images.permute(0, 2, 3, 1)  # NCHW -> NHWC
+    converted_images = []
+    for image in images:
+        converted_image = dnn_jpeg(image, component, factor)
+        converted_images.append(converted_image)
+    converted_images = torch.stack(converted_images)
+    converted_images = converted_images.permute(0, 3,1,2).float()  # NHWC -> NCHW
+    return converted_images
+
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('--image', type=str, default='fig/lena.png', help='image name')
-    parser.add_argument('--component', type=str, default='dnn-oriented',
+    parser.add_argument('--component', type=str, default='dnn',
                         help='dnn-oriented or jpeg standard')
     parser.add_argument('--factor', type=int, default=50, help='compression factor')
     args = parser.parse_args()

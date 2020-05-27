@@ -14,7 +14,7 @@ import torch.optim as optim
 from torch.optim.lr_scheduler import MultiStepLR
 from dataset.tiny_imagenet import TinyImageNet
 
-from adversarial_defense.feature_denoise.denoise_resnet import DenoiseResNet18, DenoiseResNet34, DenoiseResNet50, DenoiseResNet101, DenoiseResNet152
+from adversarial_defense.model.denoise_resnet import DenoiseResNet18, DenoiseResNet34, DenoiseResNet50, DenoiseResNet101, DenoiseResNet152
 from config import PY_ROOT, IN_CHANNELS, CLASS_NUM, IMAGE_SIZE, IMAGE_DATA_ROOT
 
 

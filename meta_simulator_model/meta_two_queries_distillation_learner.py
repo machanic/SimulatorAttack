@@ -17,7 +17,8 @@ from dataset.standard_model import MetaLearnerModelBuilder
 class MetaTwoQueriesLearner(object):
     def __init__(self, dataset, arch, meta_batch_size, meta_step_size,
                  inner_step_size, lr_decay_itr, epoch, num_inner_updates, load_task_mode, protocol,
-                 tot_num_tasks, num_support, data_loss_type, loss_type, adv_norm, targeted, target_type, use_softmax):
+                 tot_num_tasks, num_support, data_loss_type, loss_type, adv_norm, targeted, target_type, without_resnet,
+                 use_softmax):
         super(self.__class__, self).__init__()
         self.dataset = dataset
         self.meta_batch_size = meta_batch_size
@@ -36,7 +37,7 @@ class MetaTwoQueriesLearner(object):
         self.network = MetaNetwork(backbone)
         self.network.cuda()
         self.num_support = num_support
-        trn_dataset = TwoQueriesMetaTaskDataset(dataset, adv_norm, data_loss_type, tot_num_tasks, load_task_mode, protocol, targeted, target_type)
+        trn_dataset = TwoQueriesMetaTaskDataset(dataset, adv_norm, data_loss_type, tot_num_tasks, load_task_mode, protocol, targeted, target_type, without_resnet)
         # workers = 6 if dataset == "ImageNet" else 0
         self.train_loader = DataLoader(trn_dataset, batch_size=meta_batch_size, shuffle=True, num_workers=0, pin_memory=True)
         # self.tensorboard = TensorBoardWriter("{0}/tensorboard/2q_distillation".format(PY_ROOT),

@@ -86,6 +86,9 @@ def parse_args():
                         help='id(s) for CUDA_VISIBLE_DEVICES')
     args = parser.parse_args()
     return args
+args = parse_args()
+state = {k: v for k, v in args._get_kwargs()}
+
 
 def set_log_file(fname):
     import subprocess
@@ -122,8 +125,10 @@ def adjust_learning_rate_conprox(args, optimizer, epoch):
         state['lr_conprox'] *= args.gamma
         for param_group in optimizer.param_groups:
             param_group['lr_conprox'] = state['lr_conprox']
+
 def main():
-    args = parse_args()
+    global args
+    global state
     os.environ['CUDA_VISIBLE_DEVICES'] = args.gpu
     model = FeatureDefenseModel(args.dataset, args.arch, no_grad=False)
     model = model.cuda()
@@ -153,6 +158,16 @@ def main():
 
     optimizer_conprox_1024 = torch.optim.SGD(criterion_conprox_1024.parameters(), lr=args.lr_conprox)
     optimizer_conprox_256 = torch.optim.SGD(criterion_conprox_256.parameters(), lr=args.lr_conprox)
+
+    softmax_model_path = '{}/train_pytorch_model/adversarial_train/pl_loss/benign_image_{}@{}.pth.tar'.format(
+        PY_ROOT, args.dataset, args.arch)
+    assert os.path.exists(softmax_model_path), "{} does not exist!".format(softmax_model_path)
+    state_dict = torch.load(softmax_model_path, map_location=lambda storage, location: storage)
+    model.cnn.load_state_dict(state_dict["state_dict"])
+    optimizer_model.load_state_dict(state_dict["optimizer"])
+    log.info("Load softmax pretrained model from {} done".format(softmax_model_path))
+
+
     start_time = time.time()
     resume_epoch = 0
     if os.path.exists(model_path):
@@ -164,6 +179,7 @@ def main():
         optimizer_prox_256.load_state_dict(state_dict["optimizer_prox_256"])
         optimizer_conprox_1024.load_state_dict(state_dict["optimizer_conprox_1024"])
         optimizer_conprox_256.load_state_dict(state_dict["optimizer_conprox_256"])
+        log.info("Load model from {} (epoch:{})".format(model_path, resume_epoch))
 
     for epoch in range(resume_epoch, args.max_epoch):
         adjust_learning_rate(args, optimizer_model, epoch)

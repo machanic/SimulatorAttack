@@ -25,12 +25,12 @@ def parse_args():
                                                                                         "1q_distillation"])
     parser.add_argument("--num_support", type=int, default=50)
     parser.add_argument('--test_num_updates', type=int, default=20, help='number of inner gradient updates during testing')
-    parser.add_argument("--dataset", type=str, default="CIFAR-10", help="the dataset to train")
+    parser.add_argument("--dataset", type=str, required=True, help="the dataset to train")
     parser.add_argument("--split_protocol", required=True, type=SPLIT_DATA_PROTOCOL, choices=list(SPLIT_DATA_PROTOCOL),
                         help="split protocol of data")
     parser.add_argument("--load_task_mode", default=LOAD_TASK_MODE.NO_LOAD, type=LOAD_TASK_MODE, choices=list(LOAD_TASK_MODE),
                         help="load task mode")
-    parser.add_argument("--study_subject", type=str, default="meta_simulator_2")
+    parser.add_argument("--study_subject", type=str, default="meta_simulator")
     # the following args are set for choosing which npy data
     parser.add_argument("--data_loss_type", type=str, choices=["xent", "cw"], required=True)
     parser.add_argument("--loss_type", type=str, required=True, choices=["pair_mse","mse"])
@@ -38,6 +38,7 @@ def parse_args():
     parser.add_argument("--targeted", action="store_true", help="Does it train on the data of targeted attack?")
     parser.add_argument("--target_type", type=str, default="random", choices=["random", "least_likely"])
     parser.add_argument("--evaluate", action="store_true")
+    parser.add_argument("--without_resnet",action="store_true")
     ## Logging, saving, and testing options
     args = parser.parse_args()
     os.environ["CUDA_DEVICE_ORDER"] = "PCI_BUS_ID"
@@ -59,12 +60,15 @@ def main():
             args.num_support, args.num_updates, args.meta_lr, args.inner_lr)
         model_path = '{}/train_pytorch_model/{}/{}@{}.pth.tar'.format(
             PY_ROOT, args.study_subject, args.meta_learner.upper(), param_prefix)
+        if args.without_resnet:
+            model_path = '{}/train_pytorch_model/{}/{}@{}@without_resnet.pth.tar'.format(
+                PY_ROOT, args.study_subject, args.meta_learner.upper(), param_prefix)
         os.makedirs(os.path.dirname(model_path), exist_ok=True)
         learner = MetaTwoQueriesLearner(args.dataset, args.arch, args.meta_batch_size, args.meta_lr, args.inner_lr,
                                         args.lr_decay_itr, args.epoch, args.num_updates, args.load_task_mode,
                                         args.split_protocol, args.tot_num_tasks, args.num_support, args.data_loss_type,
                                         args.loss_type,
-                                        args.adv_norm, args.targeted, args.target_type, args.data_loss_type=='xent')
+                                        args.adv_norm, args.targeted, args.target_type, args.without_resnet, args.data_loss_type=='xent')
         resume_epoch = 0
         if os.path.exists(model_path):
             print("=> loading checkpoint '{}'".format(model_path))

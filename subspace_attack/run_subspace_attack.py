@@ -462,21 +462,15 @@ def main(target_model,  result_dump_path, args):
         log.info('  avg not_done_loss: {:.4f}'.format(not_done_loss_all[not_done_all.byte()].mean().item()))
         log.info('  avg not_done_prob: {:.4f}'.format(not_done_prob_all[not_done_all.byte()].mean().item()))
     log.info('Saving results to {}'.format(result_dump_path))
-    query_all_ = query_all.detach().cpu().numpy().astype(np.int32)
-    not_done_all_ = not_done_all.detach().cpu().numpy().astype(np.int32)
-    query_threshold_success_rate, query_success_rate = success_rate_and_query_coorelation(query_all_, not_done_all_)
-    success_rate_to_avg_query = success_rate_avg_query(query_all_, not_done_all_)
+
     meta_info_dict = {"avg_correct": correct_all.mean().item(),
-                      "avg_not_done": not_done_all.mean().item(),
+                      "avg_not_done": not_done_all[correct_all.byte()].mean().item(),
                       "mean_query": success_query_all[success_all.byte()].mean().item(),
                       "median_query": success_query_all[success_all.byte()].median().item(),
                       "max_query": success_query_all[success_all.byte()].max().item(),
                       "correct_all": correct_all.detach().cpu().numpy().astype(np.int32).tolist(),
                       "not_done_all": not_done_all.detach().cpu().numpy().astype(np.int32).tolist(),
                       "query_all": query_all.detach().cpu().numpy().astype(np.int32).tolist(),
-                      "query_threshold_success_rate_dict": query_threshold_success_rate,
-                      "success_rate_to_avg_query": success_rate_to_avg_query,
-                      "query_success_rate_dict": query_success_rate,
                       "not_done_loss": not_done_loss_all[not_done_all.byte()].mean().item(),
                       "not_done_prob": not_done_prob_all[not_done_all.byte()].mean().item(),
                       "args":vars(args)}

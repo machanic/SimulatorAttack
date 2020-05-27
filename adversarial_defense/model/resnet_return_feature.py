@@ -1,13 +1,14 @@
-"""
-Created on Tue Apr  2 14:21:30 2019
+from __future__ import absolute_import
 
-@author: aamir-mustafa
-"""
-import torch
+'''Resnet for cifar dataset.
+Ported form
+https://github.com/facebook/fb.resnet.torch
+and
+https://github.com/pytorch/vision/blob/master/torchvision/models/resnet.py
+(c) YANG, Wei
+'''
 import torch.nn as nn
 import math
-
-__all__ = ['resnet']
 
 def conv3x3(in_planes, out_planes, stride=1):
     "3x3 convolution with padding"
@@ -34,6 +35,7 @@ class BasicBlock(nn.Module):
         out = self.conv1(x)
         out = self.bn1(out)
         out = self.relu(out)
+
         out = self.conv2(out)
         out = self.bn2(out)
 
@@ -62,22 +64,24 @@ class Bottleneck(nn.Module):
         self.downsample = downsample
         self.stride = stride
 
-    def forward(self, x):  # (conv-bn-relu) x 3 times
+    def forward(self, x):
         residual = x
 
         out = self.conv1(x)
         out = self.bn1(out)
         out = self.relu(out)
+
         out = self.conv2(out)
         out = self.bn2(out)
         out = self.relu(out)
+
         out = self.conv3(out)
         out = self.bn3(out)
 
         if self.downsample is not None:
             residual = self.downsample(x)
 
-        out += residual  # in our case is none
+        out += residual
         out = self.relu(out)
 
         return out
@@ -85,25 +89,31 @@ class Bottleneck(nn.Module):
 
 class ResNet(nn.Module):
 
-    def __init__(self, in_channels, depth, num_classes):
+    def __init__(self, depth, num_classes, block_name='BasicBlock'):
         super(ResNet, self).__init__()
         # Model type specifies number of layers for CIFAR-10 model
-        assert (depth - 2) % 6 == 0, 'depth should be 6n+2'
-        n = (depth - 2) // 6
-        block = Bottleneck if depth >= 44 else BasicBlock
+        if block_name.lower() == 'basicblock':
+            assert (depth - 2) % 6 == 0, 'When use basicblock, depth should be 6n+2, e.g. 20, 32, 44, 56, 110, 1202'
+            n = (depth - 2) // 6
+            block = BasicBlock
+        elif block_name.lower() == 'bottleneck':
+            assert (depth - 2) % 9 == 0, 'When use bottleneck, depth should be 9n+2, e.g. 20, 29, 47, 56, 110, 1199'
+            n = (depth - 2) // 9
+            block = Bottleneck
+        else:
+            raise ValueError('block_name shoule be Basicblock or Bottleneck')
+
+
         self.inplanes = 16
-        self.conv1 = nn.Conv2d(in_channels, 16, kernel_size=3, padding=1,
+        self.conv1 = nn.Conv2d(3, 16, kernel_size=3, padding=1,
                                bias=False)
         self.bn1 = nn.BatchNorm2d(16)
         self.relu = nn.ReLU(inplace=True)
         self.layer1 = self._make_layer(block, 16, n)
         self.layer2 = self._make_layer(block, 32, n, stride=2)
         self.layer3 = self._make_layer(block, 64, n, stride=2)
-        self.avgpool = nn.AdaptiveAvgPool2d(output_size=1)
-        self.maxpool2 = nn.AdaptiveMaxPool2d(output_size=1)
-        self.fc = nn.Linear(64 * block.expansion, 1024)
-        self.fcf = nn.Linear(1024, num_classes)
-
+        self.avgpool = nn.AvgPool2d(8)
+        self.fc = nn.Linear(64 * block.expansion, num_classes)
 
         for m in self.modules():
             if isinstance(m, nn.Conv2d):
@@ -131,28 +141,20 @@ class ResNet(nn.Module):
         return nn.Sequential(*layers)
 
     def forward(self, x):
+        outputs = []
         x = self.conv1(x)
         x = self.bn1(x)
-        x = self.relu(x)
+        x = self.relu(x)    # 32x32
 
-        x = self.layer1(x)
-        x = self.layer2(x)
-
-        m = self.maxpool2(x)
-        m = m.view(m.size(0), -1)  # 128 dimensional
-
-        x = self.layer3(x)
-
+        x = self.layer1(x)  # 32x32
+        x = self.layer2(x)  # 16x16
+        x = self.layer3(x)  # 8x8
+        outputs.append(x)
         x = self.avgpool(x)
-        z = x.view(x.size(0), -1)  # 256 dimensional
-        x = self.fc(z)  # 1024 dimensional
-        y = self.fcf(x)  # num_classes dimensional
+        x = x.view(x.size(0), -1)
+        x = self.fc(x)
+        outputs.append(x)
+        return outputs
 
-        return m, z, x, y
 
 
-def resnet(**kwargs):
-    """
-    Constructs a ResNet model.
-    """
-    return ResNet(**kwargs)

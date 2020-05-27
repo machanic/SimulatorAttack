@@ -4,10 +4,9 @@ import pretrainedmodels
 import torch
 from torch import nn
 from torchvision import models as torch_models
-import os.path as osp
 import cifar_models as models
-from adversarial_defense.feature_denoise.denoise_resnet import DenoiseResNet50, DenoiseResNet101, DenoiseResNet152
-from adversarial_defense.prototype_conformity_loss.resnet import ResNet
+from adversarial_defense.model.denoise_resnet import DenoiseResNet50, DenoiseResNet101, DenoiseResNet152
+from adversarial_defense.model.pcl_resnet import PrototypeConformityLossResNet
 from cifar_models_myself import Conv3, DenseNet121, DenseNet169, DenseNet201, GoogLeNet, MobileNet, MobileNetV2, \
     ResNet18, \
     ResNet34, ResNet50, ResNet101, ResNet152, PNASNetA, PNASNetB, EfficientNetB0, DPN26, DPN92, ResNeXt29_2x64d, \
@@ -43,6 +42,7 @@ class FeatureDefenseModel(nn.Module):
             trained_model_path = "{root}/train_pytorch_model/real_image_model/{dataset}-pretrained/{arch}/checkpoint.pth.tar".format(root=PY_ROOT, dataset=dataset, arch=arch)
             assert os.path.exists(trained_model_path), "{} does not exist!".format(trained_model_path)
         elif dataset == "TinyImageNet":
+            arch = arch.replace("resnet-", "resnet")
             trained_model_path = "{root}/train_pytorch_model/real_image_model/{dataset}@{arch}@*.pth.tar".format(root=PY_ROOT, dataset=dataset, arch=arch)
             trained_model_path_list = list(glob.glob(trained_model_path))
             assert len(trained_model_path_list)>0, "{} does not exist!".format(trained_model_path)
@@ -101,18 +101,18 @@ class FeatureDefenseModel(nn.Module):
         x = (x - self.mean.type(x.dtype).to(x.device)) / self.std.type(x.dtype).to(x.device)
         if self.no_grad:
             with torch.no_grad():
-                if "defense" in self.arch:
+                if "pcl" in self.arch:
                     feats128, feats256, feats1024, x = self.cnn(x)
                 else:
                     x = self.cnn(x)
         else:
-            if "defense" in self.arch:
+            if "pcl" in self.arch:
                 feats128, feats256, feats1024, x = self.cnn(x)
             else:
                 x = self.cnn(x)
 
         x = x.view(x.size(0), -1)
-        if "defense" in self.arch:
+        if "pcl" in self.arch:
             return feats128, feats256, feats1024, x
         return x
 
@@ -155,14 +155,14 @@ class FeatureDefenseModel(nn.Module):
                 widen_factor=conf["widen_factor"],
                 dropRate=conf["drop"],
             )
-        elif arch.endswith('resnet') and "defense" not in arch and "denoise" not in arch:
+        elif arch.endswith('resnet') and "pcl_" not in arch and "denoise" not in arch:
             model = models.__dict__[arch](
                 num_classes=num_classes,
                 depth=conf["depth"],
                 block_name=conf["block_name"],
             )
-        elif "defense_resnet" in arch:
-            model = ResNet(in_channels=IN_CHANNELS[dataset], depth=conf["depth"], num_classes=CLASS_NUM[dataset])
+        elif "pcl_resnet" in arch:
+            model = PrototypeConformityLossResNet(in_channels=IN_CHANNELS[dataset], depth=conf["depth"], num_classes=CLASS_NUM[dataset])
         elif arch == "DenoiseResNet50":
             model = DenoiseResNet50(in_channels=IN_CHANNELS[dataset], num_classes=CLASS_NUM[dataset], whether_denoising=True)
         elif arch == "DenoiseResNet101":
@@ -197,25 +197,21 @@ class FeatureDefenseModel(nn.Module):
                 model.input_range = [0, 1]
                 model.input_size = [in_channel, IMAGE_SIZE[dataset][0], IMAGE_SIZE[dataset][1]]
             else:
-                model = self.construct_cifar_model(arch, dataset, num_classes)
+                model = self.construct_cifar_model(arch, dataset, num_classes)  #
                 model.mean = [0.4914, 0.4822, 0.4465]
                 model.std = [0.2023, 0.1994, 0.2010]
                 model.input_space = 'RGB'
                 model.input_range = [0, 1]
                 model.input_size = [in_channel, IMAGE_SIZE[dataset][0], IMAGE_SIZE[dataset][1]]
-            self.load_weight_from_pth_checkpoint(model, trained_model_path)
+            # self.load_weight_from_pth_checkpoint(model, trained_model_path)
         elif dataset == "TinyImageNet":
             model = MetaLearnerModelBuilder.construct_tiny_imagenet_model(arch, dataset)
             model.input_space = 'RGB'
             model.input_range = [0, 1]
-            if "defense_resnet" not in arch and "denoise" not in arch:
-                model.mean = [0,0,0]
-                model.std = [1,1,1]
-            else:
-                model.mean = [0.4914, 0.4822, 0.4465]
-                model.std = [0.2023, 0.1994, 0.2010]
+            model.mean = [0.4914, 0.4822, 0.4465] # if "defense_resnet" not in arch and "denoise" not in arch: [0,0,0] . [1,1,1]
+            model.std = [0.2023, 0.1994, 0.2010]
             model.input_size = [in_channel,IMAGE_SIZE[dataset][0], IMAGE_SIZE[dataset][1]]
-            model.load_state_dict(torch.load(trained_model_path, map_location=lambda storage, location: storage)["state_dict"])
+            # model.load_state_dict(torch.load(trained_model_path, map_location=lambda storage, location: storage)["state_dict"])
         elif dataset == 'ImageNet':
             os.environ["TORCH_HOME"] = "{}/train_pytorch_model/real_image_model/ImageNet-pretrained".format(PY_ROOT)
             model = pretrainedmodels.__dict__[arch](num_classes=1000, pretrained="imagenet")
@@ -361,8 +357,8 @@ class MetaLearnerModelBuilder(object):
             network.avgpool = Identity()
             network.classifier[0] = nn.Linear(512 * 2 * 2, 4096)  # 64 /2**5 = 2
             network.classifier[-1] = nn.Linear(4096, num_classes)
-        elif "defense_resnet" in arch:
-            network = ResNet(in_channels=IN_CHANNELS[dataset], depth=pretrained_cifar_model_conf[dataset][arch]["depth"], num_classes=CLASS_NUM[dataset])
+        elif "pcl_resnet" in arch:
+            network = PrototypeConformityLossResNet(in_channels=IN_CHANNELS[dataset], depth=pretrained_cifar_model_conf[dataset][arch]["depth"], num_classes=CLASS_NUM[dataset])
         elif arch == "DenoiseResNet50":
             network = DenoiseResNet50(in_channels=IN_CHANNELS[dataset], num_classes=CLASS_NUM[dataset], whether_denoising=True)
         elif arch == "DenoiseResNet101":

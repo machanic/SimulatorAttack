@@ -263,10 +263,6 @@ class SimulateBanditsAttack(object):
 
             self.make_adversarial_examples(batch_idx, images.cuda(), true_labels.cuda(), args, target_model)
 
-        query_all_ = self.query_all.detach().cpu().numpy().astype(np.int32)
-        not_done_all_ = self.not_done_all.detach().cpu().numpy().astype(np.int32)
-        query_threshold_success_rate, query_success_rate = success_rate_and_query_coorelation(query_all_, not_done_all_)
-        success_rate_to_avg_query = success_rate_avg_query(query_all_, not_done_all_)
         log.info('{} is attacked finished ({} images)'.format(arch_name, self.total_images))
         log.info('        avg correct: {:.4f}'.format(self.correct_all.mean().item()))
         log.info('       avg not_done: {:.4f}'.format(self.not_done_all.mean().item()))  # 有多少图没做完
@@ -279,16 +275,13 @@ class SimulateBanditsAttack(object):
             log.info('  avg not_done_prob: {:.4f}'.format(self.not_done_prob_all[self.not_done_all.byte()].mean().item()))
         log.info('Saving results to {}'.format(result_dump_path))
         meta_info_dict = {"avg_correct": self.correct_all.mean().item(),
-                          "avg_not_done": self.not_done_all.mean().item(),
+                          "avg_not_done": self.not_done_all[self.correct_all.byte()].mean().item(),
                           "mean_query": self.success_query_all[self.success_all.byte()].mean().item(),
                           "median_query": self.success_query_all[self.success_all.byte()].median().item(),
                           "max_query": self.success_query_all[self.success_all.byte()].max().item(),
                           "correct_all": self.correct_all.detach().cpu().numpy().astype(np.int32).tolist(),
                           "not_done_all": self.not_done_all.detach().cpu().numpy().astype(np.int32).tolist(),
                           "query_all": self.query_all.detach().cpu().numpy().astype(np.int32).tolist(),
-                          "query_threshold_success_rate_dict": query_threshold_success_rate,
-                          "success_rate_to_avg_query": success_rate_to_avg_query,
-                          "query_success_rate_dict": query_success_rate,
                           "not_done_loss": self.not_done_loss_all[self.not_done_all.byte()].mean().item(),
                           "not_done_prob": self.not_done_prob_all[self.not_done_all.byte()].mean().item(),
                           "args":vars(args)}

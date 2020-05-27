@@ -153,7 +153,6 @@ else:
     raise NotImplementedError("Please implement this algorithm first!")
 
 if device == 'cuda':
-    net = torch.nn.DataParallel(net)
     cudnn.benchmark = True
 
 optimizer = optim.SGD(net.parameters(),

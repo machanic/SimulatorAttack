@@ -16,6 +16,7 @@ from torch.nn.modules import Upsample
 from config import IN_CHANNELS, CLASS_NUM, PY_ROOT, MODELS_TEST_STANDARD
 from dataset.dataset_loader_maker import DataLoaderMaker
 from dataset.standard_model import StandardModel
+from dataset.defensive_model import DefensiveModel
 from utils.statistics_toolkit import success_rate_and_query_coorelation, success_rate_avg_query
 from meta_simulator_attack.meta_model_finetune import MemoryEfficientMetaModelFinetune
 from collections import deque, OrderedDict
@@ -106,12 +107,15 @@ class SimulateBanditsAttackShrink(object):
         norm_vec += (norm_vec == 0).float() * 1e-8
         return norm_vec
 
-    def eg_step(self, x, g, lr):
+    def eg_prior_step(self, x, g, lr):
         real_x = (x + 1) / 2  # from [-1, 1] to [0, 1]
         pos = real_x * torch.exp(lr * g)
         neg = (1 - real_x) * torch.exp(-lr * g)
         new_x = pos / (pos + neg)
         return new_x * 2 - 1
+
+    def gd_prior_step(self, x, g, lr):
+        return x + lr * g
 
     def linf_step(self, x, g, lr):
         return x + lr * torch.sign(g)
@@ -123,9 +127,6 @@ class SimulateBanditsAttackShrink(object):
         delta = adv_image - image
         out_of_bounds_mask = (self.norm(delta) > epsilon).float()
         return out_of_bounds_mask * (image + epsilon * delta / self.norm(delta)) + (1 - out_of_bounds_mask) * adv_image
-
-    def gd_prior_step(self, x, g, lr):
-        return x + lr * g
 
     def l2_image_step(self, x, g, lr):
         return x + lr * g / self.norm(g)
@@ -175,7 +176,10 @@ class SimulateBanditsAttackShrink(object):
 
     def attack_all_images(self, args, arch, tmp_dump_path, result_dump_path):
         # subset_pos用于回调函数汇报汇总统计结果
-        model = StandardModel(args.dataset, arch, no_grad=True)
+        if args.attack_defense:
+            model = DefensiveModel(args.dataset, arch, no_grad=True, defense_model=args.defense_model)
+        else:
+            model = StandardModel(args.dataset, arch, no_grad=True)
         model.cuda()
         model.eval()
         # 带有缩减功能的，攻击成功的图片自动删除掉
@@ -197,7 +201,7 @@ class SimulateBanditsAttackShrink(object):
                 else:
                     images, true_labels = data_tuple[0], data_tuple[2]
             else:
-                images, true_labels = data_tuple[0], data_tuple[1]  # TODO 缩减
+                images, true_labels = data_tuple[0], data_tuple[1]
             if images.size(-1) != model.input_size[-1]:
                 images = F.interpolate(images, size=model.input_size[-1], mode='bilinear',align_corners=True)
             # skip_batch_index_list = np.nonzero(np.asarray(chunk_skip_indexes[data_idx]))[0].tolist()
@@ -229,9 +233,9 @@ class SimulateBanditsAttackShrink(object):
             with torch.no_grad():
                 logit = model(images)
             pred = logit.argmax(dim=1)
-            query = torch.zeros(images.size(0)).cuda()  # TODO 缩减
-            correct = pred.eq(true_labels).float()  # shape = (batch_size,)  # TODO 缩减
-            not_done = correct.clone()  # shape = (batch_size,)  # TODO 缩减
+            query = torch.zeros(images.size(0)).cuda()
+            correct = pred.eq(true_labels).float()  # shape = (batch_size,)
+            not_done = correct.clone()  # shape = (batch_size,)
 
             if args.targeted:
                 if args.target_type == 'random':
@@ -246,18 +250,18 @@ class SimulateBanditsAttackShrink(object):
                 elif args.target_type == 'least_likely':
                     target_labels = logit.argmin(dim=1)
                 elif args.target_type == "increment":
-                    target_labels = torch.fmod(true_labels + 1, CLASS_NUM[args.dataset])  # TODO 缩减
+                    target_labels = torch.fmod(true_labels + 1, CLASS_NUM[args.dataset])
                 else:
                     raise NotImplementedError('Unknown target_type: {}'.format(args.target_type))
             else:
                 target_labels = None
-            prior = torch.zeros(images.size(0), IN_CHANNELS[args.dataset], prior_size, prior_size).cuda()  # TODO 缩减
-            prior_step = self.gd_prior_step if args.norm == 'l2' else self.eg_step
+            prior = torch.zeros(images.size(0), IN_CHANNELS[args.dataset], prior_size, prior_size).cuda()
+            prior_step = self.gd_prior_step if args.norm == 'l2' else self.eg_prior_step
             image_step = self.l2_image_step if args.norm == 'l2' else self.linf_step
             proj_step = self.l2_proj_step if args.norm == 'l2' else self.linf_proj_step  # 调用proj_maker返回的是一个函数
             criterion = self.cw_loss if args.data_loss == "cw" else self.xent_loss
             adv_images = images.clone()
-            for step_index in range(1, args.max_queries + 1):  # FIXME 可以改为设置50000次
+            for step_index in range(1, args.max_queries + 1):
                 # Create noise for exporation, estimate the gradient, and take a PGD step
                 dim = prior.nelement() / images.size(0)  # nelement() --> total number of elements
                 exp_noise = args.exploration * torch.randn_like(prior) / (dim ** 0.5)  # parameterizes the exploration to be done around the prior
@@ -292,7 +296,7 @@ class SimulateBanditsAttackShrink(object):
                     with torch.no_grad():
                         q1_logits, q2_logits = self.meta_finetuner.predict(q1_images, q2_images, img_idx_to_batch_idx)
 
-                        q1_logits = q1_logits / torch.norm(q1_logits, p=2, dim=-1, keepdim=True)  # FIXME 到底加不加
+                        q1_logits = q1_logits / torch.norm(q1_logits, p=2, dim=-1, keepdim=True)
                         q2_logits = q2_logits / torch.norm(q2_logits, p=2, dim=-1, keepdim=True)
 
                 l1 = criterion(q1_logits, true_labels, target_labels)
@@ -317,7 +321,7 @@ class SimulateBanditsAttackShrink(object):
                 adv_loss = criterion(adv_logit, true_labels, target_labels)
                 ## Continue query count
                 if predict_by_target_model:
-                    query = query + 2 * not_done # TODO 注意query和not_done,这几个变量都是缩减过的
+                    query = query + 2 * not_done
                 if args.targeted:
                     not_done = not_done * (1 - adv_pred.eq(target_labels).float()).float()  # not_done初始化为 correct, shape = (batch_size,)
                 else:
@@ -325,7 +329,7 @@ class SimulateBanditsAttackShrink(object):
                 success = (1 - not_done) * correct
                 success_query = success * query
                 not_done_loss = adv_loss * not_done
-                not_done_prob = adv_prob[torch.arange(adv_images.size(0)), true_labels] * not_done  # TODO 每次缩减都要填写到all_的全局变量里汇报出去
+                not_done_prob = adv_prob[torch.arange(adv_images.size(0)), true_labels] * not_done
 
                 log.info('Attacking image {} - {} / {}, step {}'.format(
                     data_idx * args.batch_size, (data_idx + 1) * args.batch_size, self.total_images, step_index
@@ -333,7 +337,7 @@ class SimulateBanditsAttackShrink(object):
                 log.info('       not_done: {:.4f}'.format(len(np.where(not_done.detach().cpu().numpy().astype(np.int32) == 1)[0]) / float(args.batch_size)))
                 log.info('      fd_scalar: {:.9f}'.format((l1 - l2).mean().item()))
                 if success.sum().item() > 0:
-                    log.info('     mean_query: {:.4f}'.format(success_query[success.byte()].mean().item()))  # TODO 注意缩减过
+                    log.info('     mean_query: {:.4f}'.format(success_query[success.byte()].mean().item()))
                     log.info('   median_query: {:.4f}'.format(success_query[success.byte()].median().item()))
                 if not_done.sum().item() > 0:
                     log.info('  not_done_loss: {:.4f}'.format(not_done_loss[not_done.byte()].mean().item()))
@@ -381,8 +385,6 @@ class SimulateBanditsAttackShrink(object):
 
         query_all_ = self.query_all.detach().cpu().numpy().astype(np.int32)
         not_done_all_ = self.not_done_all.detach().cpu().numpy().astype(np.int32)
-        query_threshold_success_rate, query_success_rate = success_rate_and_query_coorelation(query_all_, not_done_all_)
-        success_rate_to_avg_query = success_rate_avg_query(query_all_, not_done_all_)
         # log.info('{} is attacked finished ({} images)'.format(arch, self.total_images))
         # log.info('        avg correct: {:.4f}'.format(self.correct_all.mean().item()))
         # log.info('       avg not_done: {:.4f}'.format(self.not_done_all.mean().item()))  # 有多少图没做完
@@ -399,16 +401,13 @@ class SimulateBanditsAttackShrink(object):
         #         '  avg not_done_prob: {:.4f}'.format(self.not_done_prob_all[self.not_done_all.byte()].mean().item()))
         log.info('Saving results to {}'.format(result_dump_path))
         meta_info_dict = {"avg_correct": self.correct_all.mean().item(),
-                          "avg_not_done": self.not_done_all.mean().item(),
+                          "avg_not_done": self.not_done_all[self.correct_all.byte()].mean().item(),
                           "mean_query": self.success_query_all[self.success_all.byte()].mean().item(),
                           "median_query": self.success_query_all[self.success_all.byte()].median().item(),
                           "max_query": self.success_query_all[self.success_all.byte()].max().item(),
                           "correct_all": self.correct_all.detach().cpu().numpy().astype(np.int32).tolist(),
                           "not_done_all": self.not_done_all.detach().cpu().numpy().astype(np.int32).tolist(),
                           "query_all": self.query_all.detach().cpu().numpy().astype(np.int32).tolist(),
-                          "query_threshold_success_rate_dict": query_threshold_success_rate,
-                          "success_rate_to_avg_query": success_rate_to_avg_query,
-                          "query_success_rate_dict": query_success_rate,
                           "not_done_loss": self.not_done_loss_all[self.not_done_all.byte()].mean().item(),
                           "not_done_prob": self.not_done_prob_all[self.not_done_all.byte()].mean().item(),
                           "args": vars(args)}
@@ -424,13 +423,17 @@ class SimulateBanditsAttackShrink(object):
         self.not_done_prob_all.fill_(0)
         model.cpu()
 
-def get_exp_dir_name(dataset, loss, norm, targeted, target_type, distillation_loss, meta_interval):
+def get_exp_dir_name(dataset, loss, norm, targeted, target_type, distillation_loss, args):
     target_str = "untargeted" if not targeted else "targeted_{}".format(target_type)
     # if targeted:
     #     dirname = 'simulate_bandits_shrink_attack-{}-{}_loss-{}-{}-{}-meta_interval-{}'.format(dataset, loss, norm, target_str,
     #                                                                           distillation_loss, meta_interval)
     # else:
-    dirname = 'simulate_bandits_shrink_attack-{}-{}_loss-{}-{}-{}'.format(dataset, loss, norm, target_str, distillation_loss)
+    if args.attack_defense:
+        dirname = 'simulate_bandits_shrink_attack_on_defensive_model-{}-{}_loss-{}-{}-{}'.format(dataset,
+                                                                                              loss, norm, target_str, distillation_loss)
+    else:
+        dirname = 'simulate_bandits_shrink_attack-{}-{}_loss-{}-{}-{}'.format(dataset, loss, norm, target_str, distillation_loss)
     return dirname
 
 def get_bandits_exp_dir_name(dataset, loss, norm, targeted, target_type):
@@ -492,6 +495,8 @@ if __name__ == "__main__":
     parser.add_argument("--warm_up_steps", type=int, default=None)
     parser.add_argument("--meta_seq_len", type=int, default=10)
     parser.add_argument("--meta_arch",type=str, required=True)
+    parser.add_argument('--attack_defense', action="store_true")
+    parser.add_argument('--defense_model', type=str, default=None)
 
     args = parser.parse_args()
     os.environ["CUDA_DEVICE_ORDER"] = "PCI_BUS_ID"
@@ -520,7 +525,7 @@ if __name__ == "__main__":
 
     args.exp_dir = osp.join(args.exp_dir, get_exp_dir_name(args.dataset, args.data_loss,
                                                            args.norm, args.targeted, args.target_type,
-                                                           args.distillation_loss, args.meta_predict_steps))
+                                                           args.distillation_loss, args))
 
 
     os.makedirs(args.exp_dir, exist_ok=True)
@@ -562,11 +567,16 @@ if __name__ == "__main__":
     args.arch = ", ".join(archs)
 
     if args.test_archs:
-        log_file_path = osp.join(args.exp_dir, 'run.log')
-        set_log_file(log_file_path)
+        if args.attack_defense:
+            log_file_path = osp.join(args.exp_dir, 'run_defense_{}.log'.format(args.defense_model))
+        else:
+            log_file_path = osp.join(args.exp_dir, 'run.log')
     elif args.arch is not None:
-        log_file_path = osp.join(args.exp_dir, 'run_{}.log'.format(args.arch))
-        set_log_file(log_file_path)
+        if args.attack_defense:
+            log_file_path = osp.join(args.exp_dir, 'run_defense_{}_{}.log'.format(args.arch, args.defense_model))
+        else:
+            log_file_path = osp.join(args.exp_dir, 'run_{}.log'.format(args.arch))
+    set_log_file(log_file_path)
     log.info('Command line is: {}'.format(' '.join(sys.argv)))
     log.info("Log file is written in {}".format(log_file_path))
     log.info('Called with args:')
@@ -575,7 +585,7 @@ if __name__ == "__main__":
                                                       args.meta_train_type,
                                                       args.distillation_loss,
                                                       args.data_loss, args.norm, args.targeted,
-                                                      args.data_loss == "xent")
+                                                      args.data_loss == "xent", without_resnet=args.attack_defense)
     attacker = SimulateBanditsAttackShrink(args, meta_finetuner)
     for arch in archs:
         # bandit_result_path = bandit_expr_dir_path + "/{}_result.json".format(arch)
@@ -583,10 +593,14 @@ if __name__ == "__main__":
         #     with open(bandit_result_path, "r") as file_obj:
         #         json_data = json.load(file_obj)
         #         tot_skip_indexes = np.array(json_data["not_done_all"]).astype(np.int32)  # 出现1了表示以前就fail，跳过去
-        save_result_path = args.exp_dir + "/{}_result.json".format(arch)
-        tmp_result_path = args.exp_dir + "/tmp_{}_result.json".format(arch)
+        if args.attack_defense:
+            save_result_path = args.exp_dir + "/{}_{}_result.json".format(arch, args.defense_model)
+            tmp_result_path = args.exp_dir + "/tmp_{}_{}_result.json".format(arch, args.defense_model)
+        else:
+            save_result_path = args.exp_dir + "/{}_result.json".format(arch)
+            tmp_result_path = args.exp_dir + "/tmp_{}_result.json".format(arch)
         # if os.path.exists(save_result_path):
         #     continue
         log.info("Begin attack {} on {}, result will be saved to {}".format(arch, args.dataset, save_result_path))
-
         attacker.attack_all_images(args, arch,tmp_result_path, save_result_path)
+        os.remove(tmp_result_path)

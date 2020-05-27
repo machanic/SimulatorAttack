@@ -182,7 +182,7 @@
   },
     "ImageNet": {
         "l2":{
-              "fd_eta": 0.1,
+              "fd_eta": 0.01,
               "max_queries": 10000,
               "image_lr": 0.5,
               "norm": "l2",
@@ -196,7 +196,7 @@
               "target_type":"random",
               "nes": false,
               "notdone_threshold": 0.0,
-                "warm_up_steps": 20
+                "warm_up_steps": 10
         },
         "linf": {
             "fd_eta": 0.1,
@@ -213,7 +213,7 @@
             "target_type": "random",
             "nes": false,
             "notdone_threshold": 0.0,
-            "warm_up_steps": 20
+            "warm_up_steps": 10
         }
     }
 }

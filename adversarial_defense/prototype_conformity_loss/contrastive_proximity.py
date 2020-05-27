@@ -33,7 +33,7 @@ class Con_Proximity(nn.Module):
 
             k= -1* k +1
 
-            kk= k.clone().to(dtype=torch.uint8)
+            kk= k.clone().bool()
 
             value = distmat[i][kk]
 
