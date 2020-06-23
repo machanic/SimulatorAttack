@@ -114,7 +114,7 @@ class PriorRGFAttack(object):
                 if correct[0].item() == 0:
                     queries.append(0)
                     not_done.append(1)
-                    log.info("The {}-th image is already classified incorrectly.")
+                    log.info("The {}-th image is already classified incorrectly.".format(batch_idx))
                     continue
 
             if self.targeted:

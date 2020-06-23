@@ -3,17 +3,17 @@ import sys
 sys.path.append("/home1/machen/meta_perturbations_black_box_attack")
 
 from meta_grad_regression_auto_encoder.network.autoencoder import AutoEncoder
-from meta_simulator_model.network.fcn_8s import FCN8s
-from meta_simulator_model.network.unet import ResNetUNet
+from meta_simulator_learning.network.fcn_8s import FCN8s
+from meta_simulator_learning.network.unet import ResNetUNet
 import os
 from config import PY_ROOT, IN_CHANNELS, CLASS_NUM
 from torch.optim import Adam
 from torch.utils.data import DataLoader
 from dataset.meta_img_grad_dataset import MetaImgOnlineGradTaskDataset
 from cifar_models_myself import *
-from meta_simulator_model.inner_loop import InnerLoop
-from meta_simulator_model.tensorboard_helper import TensorBoardWriter
-from meta_simulator_model.meta_network import MetaNetwork
+from meta_simulator_learning.inner_loop import InnerLoop
+from meta_simulator_learning.tensorboard_helper import TensorBoardWriter
+from meta_simulator_learning.meta_network import MetaNetwork
 import numpy as np
 
 class MetaGradRegressionLearner(object):

@@ -9,7 +9,7 @@ from torch.optim import Adam
 
 from config import PY_ROOT
 from constant_enum import SPLIT_DATA_PROTOCOL
-from meta_simulator_model.meta_network import MetaNetwork
+from meta_simulator_learning.meta_network import MetaNetwork
 from dataset.standard_model import MetaLearnerModelBuilder
 
 

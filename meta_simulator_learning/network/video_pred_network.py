@@ -1,7 +1,7 @@
 from torch import nn
 import torch
 from config import IMAGE_SIZE, IN_CHANNELS
-from meta_simulator_model.network.conv_lstm import ConvLSTM
+from meta_simulator_learning.network.conv_lstm import ConvLSTM
 
 class VideoPredNetwork(nn.Module):
     def __init__(self, dataset):

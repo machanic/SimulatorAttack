@@ -1,0 +1,26 @@
+{
+  "CIFAR-10": {
+    "freq_dims": 11,
+    "stride": 7,
+    "linf_bound": 0.031372,
+    "l2_bound": 4.6
+  },
+  "CIFAR-100": {
+    "freq_dims": 11,
+      "stride": 7,
+      "linf_bound": 0.031372,
+      "l2_bound": 4.6
+  },
+  "TinyImageNet": {
+    "freq_dims": 15,
+    "stride": 7,
+    "linf_bound": 0.031372,
+    "l2_bound": 4.6
+  },
+  "ImageNet": {
+    "freq_dims": 28,
+    "stride": 7,
+    "linf_bound": 0.05,
+    "l2_bound": 4.6
+  }
+}

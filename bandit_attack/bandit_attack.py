@@ -301,8 +301,7 @@ if __name__ == "__main__":
     parser.add_argument('--online-lr', type=float, help='Learning rate for the prior')
     parser.add_argument('--norm', type=str, required=True, help='Which lp constraint to run bandits [linf|l2]')
     parser.add_argument("--loss", type=str, required=True, choices=["xent", "cw"])
-    parser.add_argument('--exploration', type=float,
-                        help='\delta, parameterizes the exploration to be done around the prior')
+    parser.add_argument('--exploration', type=float, help='\delta, parameterizes the exploration to be done around the prior')
     parser.add_argument('--tile-size', type=int, help='the side length of each tile (for the tiling prior)')
     parser.add_argument('--tiling', action='store_true')
     parser.add_argument('--json-config', type=str, default='/home1/machen/meta_perturbations_black_box_attack/configures/bandits_attack_conf.json',

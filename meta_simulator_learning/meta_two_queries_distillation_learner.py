@@ -9,7 +9,7 @@ import os
 from config import PY_ROOT
 from torch.utils.data import DataLoader
 from cifar_models_myself import *
-from meta_simulator_model.meta_network import MetaNetwork
+from meta_simulator_learning.meta_network import MetaNetwork
 import numpy as np
 from inner_loop_pair_loss import InnerLoopPairLoss
 from dataset.standard_model import MetaLearnerModelBuilder

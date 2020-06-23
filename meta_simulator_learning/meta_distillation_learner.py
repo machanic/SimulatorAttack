@@ -9,9 +9,9 @@ from torch.optim import Adam
 from torch.utils.data import DataLoader
 from dataset.meta_img_grad_dataset import MetaImgOnlineGradTaskDataset
 from cifar_models_myself import *
-from meta_simulator_model.inner_loop import InnerLoop
-from meta_simulator_model.tensorboard_helper import TensorBoardWriter
-from meta_simulator_model.meta_network import MetaNetwork
+from meta_simulator_learning.inner_loop import InnerLoop
+from meta_simulator_learning.tensorboard_helper import TensorBoardWriter
+from meta_simulator_learning.meta_network import MetaNetwork
 import numpy as np
 from torch.nn import functional as F
 

@@ -510,7 +510,7 @@ if __name__ == "__main__":
                         help='\delta, parameterizes the exploration to be done around the prior')
     parser.add_argument('--tile-size', type=int, help='the side length of each tile (for the tiling prior)')
     parser.add_argument('--tiling', action='store_true')
-    parser.add_argument('--json-config', type=str, default='/home1/machen/meta_perturbations_black_box_attack/configures/simulate_bandits_attack_conf.json',
+    parser.add_argument('--json-config', type=str, default='/home1/machen/meta_perturbations_black_box_attack/configures/meta_simulator_attack_conf.json',
                         help='a configures file to be passed in instead of arguments')
     parser.add_argument("--notdone_threshold", type=float, default=None)
     parser.add_argument('--epsilon', type=float, help='the lp perturbation bound')
@@ -573,7 +573,7 @@ if __name__ == "__main__":
             save_result_path = args.exp_dir + "/warmup_{}_{}_result.json".format(args.warm_up_steps, args.arch)
             log_file_path = osp.join(args.exp_dir, 'run_{}_warmup@{}.log'.format(args.arch, args.warm_up_steps))
             attack_dataset(copy.deepcopy(args), gpu, save_result_path, log_file_path)
-            # pool.apply_async(attack_dataset, args=(copy.deepcopy(args), gpu, save_result_path, log_file_path))
+            # pool.apply_async(attack_all_images, args=(copy.deepcopy(args), gpu, save_result_path, log_file_path))
         # pool.close()
         # pool.join()
     elif args.study_subject == "meta_predict_steps":
@@ -585,7 +585,7 @@ if __name__ == "__main__":
             save_result_path = args.exp_dir + "/meta_predict_steps_{}_{}_result.json".format(meta_step, args.arch)
             log_file_path = osp.join(args.exp_dir, 'run_{}_meta_predict_steps@{}.log'.format(args.arch, meta_step))
             attack_dataset(copy.deepcopy(args), gpu, save_result_path, log_file_path)
-            # pool.apply_async(attack_dataset, args=(copy.deepcopy(args), gpu, save_result_path, log_file_path))
+            # pool.apply_async(attack_all_images, args=(copy.deepcopy(args), gpu, save_result_path, log_file_path))
         # pool.close()
         # pool.join()
     elif args.study_subject == "meta_seq_len":
@@ -598,7 +598,7 @@ if __name__ == "__main__":
             save_result_path = args.exp_dir + "/meta_seq_len_{}_{}_result.json".format(meta_seq_len, args.arch)
             log_file_path = osp.join(args.exp_dir, 'run_{}_meta_seq_len@{}.log'.format(args.arch, meta_seq_len))
             attack_dataset(copy.deepcopy(args), gpu, save_result_path, log_file_path)
-            # pool.apply_async(attack_dataset, args=(copy.deepcopy(args), gpu, save_result_path, log_file_path))
+            # pool.apply_async(attack_all_images, args=(copy.deepcopy(args), gpu, save_result_path, log_file_path))
         # pool.close()
         # pool.join()
     elif args.study_subject == "meta_or_not":
@@ -611,7 +611,7 @@ if __name__ == "__main__":
             save_result_path = args.exp_dir + "/meta_mode_{}_{}_result.json".format(meta_mode, args.arch)
             log_file_path = osp.join(args.exp_dir, 'run_{}_meta_mode@{}.log'.format(args.arch, meta_mode))
             attack_dataset(copy.deepcopy(args), gpu, save_result_path, log_file_path)
-        #     pool.apply_async(attack_dataset, args=(copy.deepcopy(args), gpu, save_result_path, log_file_path))
+        #     pool.apply_async(attack_all_images, args=(copy.deepcopy(args), gpu, save_result_path, log_file_path))
         # pool.close()
         # pool.join()
     elif args.study_subject == "loss_type":
@@ -623,7 +623,7 @@ if __name__ == "__main__":
             save_result_path = args.exp_dir + "/loss_{}_{}_result.json".format(loss_type, args.arch)
             log_file_path = osp.join(args.exp_dir, 'run_{}_loss@{}.log'.format(args.arch, loss_type))
             attack_dataset(copy.deepcopy(args), gpu, save_result_path, log_file_path)
-        #     pool.apply_async(attack_dataset, args=(copy.deepcopy(args), gpu, save_result_path, log_file_path))
+        #     pool.apply_async(attack_all_images, args=(copy.deepcopy(args), gpu, save_result_path, log_file_path))
         # pool.close()
         # pool.join()
     elif args.study_subject =="backbone":

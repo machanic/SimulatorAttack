@@ -23,7 +23,7 @@ from dataset.dataset_loader_maker import DataLoaderMaker
 from utils.statistics_toolkit import success_rate_and_query_coorelation, success_rate_avg_query
 
 
-class NesAttacker(object):
+class NES(object):
     def __init__(self, dataset_name, targeted):
         self.dataset_name = dataset_name
         self.num_classes = CLASS_NUM[self.dataset_name]
@@ -558,7 +558,7 @@ if __name__ == "__main__":
     log.info("Log file is written in {}".format(os.path.join(args.exp_dir, 'run.log')))
     log.info('Called with args:')
     print_args(args)
-    attacker = NesAttacker(args.dataset,  args.targeted)
+    attacker = NES(args.dataset, args.targeted)
     for arch in archs:
         if args.attack_defense:
             save_result_path = args.exp_dir + "/{}_{}_result.json".format(arch, args.defense_model)

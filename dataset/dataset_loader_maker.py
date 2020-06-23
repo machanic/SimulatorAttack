@@ -451,7 +451,7 @@ class DataLoaderMaker(object):
             train_dataset = FashionMNIST(IMAGE_DATA_ROOT[datasetname], train=is_train, transform=preprocessor)
         elif datasetname == "TinyImageNet":
             train_dataset = TinyImageNet(IMAGE_DATA_ROOT[datasetname], preprocessor, train=is_train)
-            workers = 7
+            workers = 3
         elif datasetname == "ImageNet":
             preprocessor = DataLoaderMaker.get_preprocessor(image_size, is_train, center_crop=True)
             sub_folder = "/train" if is_train else "/validation"  # Note that ImageNet uses pretrainedmodels.utils.TransformImage to apply transformation

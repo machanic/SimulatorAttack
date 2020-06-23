@@ -5,7 +5,7 @@ import torch
 from torch import nn
 from torch.nn import functional as F
 
-from config import IMAGE_SIZE, IN_CHANNELS
+from config import IN_CHANNELS
 
 
 def gather_nd(params, indices):
@@ -52,7 +52,6 @@ class LocalSearchHelper(object):
         # Network Setting
         self.model = model
         self.softmax = nn.Softmax(dim=1)
-        self.img_size = IMAGE_SIZE[args.dataset][0]
         self.in_channels= IN_CHANNELS[args.dataset]
 
     def get_logits(self, image):
@@ -116,7 +115,7 @@ class LocalSearchHelper(object):
         # Local variables
         priority_queue = []
         num_queries = 0
-
+        img_size = image.size(2)
         # Check if a block is in the working set or not
         A = torch.zeros((len(blocks)), dtype=torch.int32)
         for i, block in enumerate(blocks):
@@ -151,8 +150,8 @@ class LocalSearchHelper(object):
             for ibatch in range(num_batches):
                 bstart = ibatch * batch_size
                 bend = min(bstart + batch_size, indices.size(0))
-                image_batch = torch.zeros([bend - bstart,self.in_channels,self.img_size,self.img_size]).float().cuda()
-                noise_batch = torch.zeros([bend - bstart,self.in_channels,self.img_size,self.img_size]).float().cuda()
+                image_batch = torch.zeros([bend - bstart,self.in_channels,img_size,img_size]).float().cuda()
+                noise_batch = torch.zeros([bend - bstart,self.in_channels,img_size,img_size]).float().cuda()
                 label_batch = label.repeat(bend - bstart)
                 for i, idx in enumerate(indices[bstart:bend]):
                     idx = idx.item()
@@ -222,8 +221,8 @@ class LocalSearchHelper(object):
                 bstart = ibatch * batch_size
                 bend = min(bstart + batch_size, indices.size(0))
 
-                image_batch = torch.zeros([bend - bstart,self.in_channels, self.img_size, self.img_size]).float().cuda()
-                noise_batch = torch.zeros([bend - bstart,self.in_channels, self.img_size, self.img_size]).float().cuda()
+                image_batch = torch.zeros([bend - bstart,self.in_channels, img_size, img_size]).float().cuda()
+                noise_batch = torch.zeros([bend - bstart,self.in_channels, img_size, img_size]).float().cuda()
                 label_batch = label.repeat(bend - bstart)
                 for i, idx in enumerate(indices[bstart:bend]):
                     noise_batch[i:i + 1, ...] = self._flip_noise(noise, blocks[idx])

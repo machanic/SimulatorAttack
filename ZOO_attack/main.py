@@ -34,7 +34,7 @@ class ZooAttackFramework(object):
 
 
     def make_adversarial_examples(self, batch_index, images, true_labels, args,  attacker):
-        target_model = attacker.model
+        target_model = attacker.target_model
         batch_size = images.size(0)
         selected = torch.arange(batch_index * batch_size, min((batch_index + 1) * batch_size, self.total_images))  # 选择这个batch的所有图片的index
         if args.targeted:

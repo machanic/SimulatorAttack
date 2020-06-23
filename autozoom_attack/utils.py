@@ -139,7 +139,7 @@ def generate_attack_data_set(data, num_sample, img_offset, model, attack_type="t
     target_labels = []
     orig_img_id = []
 
-    pred_labels = np.argmax(model.model.predict(data.test_data), axis=1)
+    pred_labels = np.argmax(model.target_model.predict(data.test_data), axis=1)
     true_labels = np.argmax(data.test_labels, axis=1)
     correct_data_indices = np.where([1 if x == y else 0 for (x, y) in zip(pred_labels, true_labels)])
 
@@ -189,7 +189,7 @@ def generate_attack_data_set(data, num_sample, img_offset, model, attack_type="t
 
 
 def model_prediction(model, inputs):
-    prob = model.model.predict(inputs)
+    prob = model.target_model.predict(inputs)
     predicted_class = np.argmax(prob)
     prob_str = np.array2string(prob).replace('\n', '')
     return prob, predicted_class, prob_str

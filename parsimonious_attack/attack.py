@@ -4,7 +4,6 @@ import math
 import glog as log
 import torch
 
-from config import IMAGE_SIZE
 from parsimonious_attack.local_search_helper import LocalSearchHelper
 
 
@@ -21,7 +20,6 @@ class ParsimoniousAttack(object):
         # Hyperparameter setting
         self.loss_func = args.loss_func
         self.max_queries = args.max_queries
-        self.image_size = IMAGE_SIZE[args.dataset][0]
         self.epsilon = args.epsilon
         self.batch_size = args.batch_size
         self.block_size = args.block_size
@@ -81,7 +79,7 @@ class ParsimoniousAttack(object):
         num_queries = 0
         block_size = self.block_size
         upper_left = [0, 0]
-        lower_right = [self.image_size, self.image_size]
+        lower_right = [image.size(2), image.size(2)]
         # Split an image into a set of blocks
         blocks = self._split_block(upper_left, lower_right, block_size)
         # Initialize a noise to -epsilon
