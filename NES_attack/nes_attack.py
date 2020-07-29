@@ -30,11 +30,11 @@ class NES(object):
         self.dataset_loader = DataLoaderMaker.get_test_attacked_data(dataset_name, 1)
 
         log.info("label index dict data build begin")
-        # if self.dataset_name == "TinyImageNet":
-        #     self.candidate_loader = DataLoaderMaker.get_candidate_attacked_data(dataset_name, 1)
-        #     self.dataset = self.candidate_loader.dataset
-        # else:
-        self.dataset = self.dataset_loader.dataset
+        if self.dataset_name == "TinyImageNet":
+            self.candidate_loader = DataLoaderMaker.get_candidate_attacked_data(dataset_name, 1)
+            self.dataset = self.candidate_loader.dataset
+        else:
+            self.dataset = self.dataset_loader.dataset
         self.label_data_index_dict = self.get_label_dataset(self.dataset)
         log.info("label index dict data build over!")
         self.total_images = len(self.dataset_loader.dataset)

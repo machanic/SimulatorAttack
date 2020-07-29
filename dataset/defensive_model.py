@@ -217,7 +217,9 @@ class DefensiveModel(nn.Module):
             self.input_size = self.model.input_size
             self.model = PostAveragedNetwork(self.model, K=15, R=R, num_classes=CLASS_NUM[dataset]).cuda()
         elif defense_model == "pcl_loss":
-            self.model = PrototypeConformityLossResNet(in_channels=IN_CHANNELS[dataset], depth=pretrained_cifar_model_conf[dataset][arch]["depth"], num_classes=CLASS_NUM[dataset])
+            self.model = PrototypeConformityLossResNet(in_channels=IN_CHANNELS[dataset],
+                                                       depth=pretrained_cifar_model_conf[dataset][arch]["depth"],
+                                                       num_classes=CLASS_NUM[dataset])
             self.mean = torch.FloatTensor([0.4914, 0.4822, 0.4465]).view(1, self.in_channels, 1, 1).cuda()
             self.std = torch.FloatTensor([0.2023, 0.1994, 0.2010]).view(1, self.in_channels, 1, 1).cuda()
             self.mean.requires_grad = True

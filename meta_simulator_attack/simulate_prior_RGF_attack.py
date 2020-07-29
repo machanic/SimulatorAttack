@@ -20,7 +20,6 @@ from torch.nn import functional as F
 from config import IMAGE_SIZE, IN_CHANNELS, PY_ROOT, MODELS_TEST_STANDARD, CLASS_NUM
 from dataset.dataset_loader_maker import DataLoaderMaker
 from dataset.standard_model import StandardModel, MetaLearnerModelBuilder
-from utils.statistics_toolkit import success_rate_and_query_coorelation, success_rate_avg_query
 
 
 class SimulatePriorRGFAttack(object):
@@ -380,17 +379,12 @@ class SimulatePriorRGFAttack(object):
         not_done_all = np.array(not_done).astype(np.int32)
         success = (1 - not_done_all) * correct_all
         success_query = success * query_all
-        query_threshold_success_rate, query_success_rate = success_rate_and_query_coorelation(query_all, not_done_all)
-        success_rate_to_avg_query = success_rate_avg_query(query_all, not_done_all)
         meta_info_dict = {"query_all":query_all.tolist(),"not_done_all":not_done_all.tolist(),
                           "correct_all":correct_all.tolist(),
                           "mean_query": np.mean(success_query[np.nonzero(success)[0]]).item(),
                           "max_query":np.max(success_query[np.nonzero(success)[0]]).item(),
                           "median_query": np.median(success_query[np.nonzero(success)[0]]).item(),
                           "avg_not_done": np.mean(not_done_all.astype(np.float32)).item(),
-                          "query_threshold_success_rate_dict": query_threshold_success_rate,
-                          "query_success_rate_dict": query_success_rate,
-                          "success_rate_to_avg_query": success_rate_to_avg_query,
                           "args": vars(args)}
         with open(result_dump_path, "w") as result_file_obj:
             json.dump(meta_info_dict, result_file_obj, sort_keys=True)

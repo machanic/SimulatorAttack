@@ -335,6 +335,7 @@ class SignHunterAttack(object):
             self.best_est_deriv = est_deriv
             #add_queries = 3  # because of bxs_t and the 2 evaluations in the i=0, h=0, case.
             query_count += 2
+
         chunk_len = np.ceil(dim / (2 ** self.h)).astype(int)
         istart = self.i * chunk_len
         iend = min(dim, (self.i + 1) * chunk_len)

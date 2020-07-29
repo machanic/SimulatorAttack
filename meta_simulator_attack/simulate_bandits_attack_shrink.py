@@ -84,7 +84,7 @@ class ImageIdxToOrigBatchIdx(object):
 
 
 # 更简单的方案，1000张图，分成100张一组的10组，每组用一个模型来跑，还可以多卡并行
-class SimulateBanditsAttackShrink(object):
+class MetaSimulatorBanditsAttack(object):
     def __init__(self, args, meta_finetuner):
         self.dataset_loader = DataLoaderMaker.get_test_attacked_data(args.dataset, args.batch_size)
         self.total_images = len(self.dataset_loader.dataset)
@@ -586,7 +586,7 @@ if __name__ == "__main__":
                                                       args.distillation_loss,
                                                       args.data_loss, args.norm, args.targeted,
                                                       args.data_loss == "xent", without_resnet=args.attack_defense)
-    attacker = SimulateBanditsAttackShrink(args, meta_finetuner)
+    attacker = MetaSimulatorBanditsAttack(args, meta_finetuner)
     for arch in archs:
         # bandit_result_path = bandit_expr_dir_path + "/{}_result.json".format(arch)
         # if os.path.exists(bandit_result_path):

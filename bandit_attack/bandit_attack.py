@@ -53,9 +53,6 @@ class BanditsAttack(object):
     def gd_prior_step(self, x, g, lr):
         return x + lr * g
 
-    def linf_step(self, x, g, lr):
-        return x + lr * torch.sign(g)
-
     def l2_prior_step(self, x, g, lr):
         new_x = x + lr * g / self.norm(g)
         norm_new_x = self.norm(new_x)
@@ -64,6 +61,9 @@ class BanditsAttack(object):
 
     def l2_image_step(self, x, g, lr):
         return x + lr * g / self.norm(g)
+
+    def linf_image_step(self, x, g, lr):
+        return x + lr * torch.sign(g)
 
     ##
     # Projection steps for l2 and linf constraints:
@@ -146,7 +146,7 @@ class BanditsAttack(object):
         prior = torch.zeros(args.batch_size, IN_CHANNELS[args.dataset], prior_size, prior_size).cuda()
         dim = prior.nelement() / args.batch_size               # nelement() --> total number of elements
         prior_step = self.gd_prior_step if args.norm == 'l2' else self.eg_prior_step
-        image_step = self.l2_image_step if args.norm == 'l2' else self.linf_step
+        image_step = self.l2_image_step if args.norm == 'l2' else self.linf_image_step
         proj_maker = self.l2_proj if args.norm == 'l2' else self.linf_proj  # 调用proj_maker返回的是一个函数
         proj_step = proj_maker(images, args.epsilon)
         criterion = self.cw_loss if args.loss == "cw" else self.xent_loss
@@ -187,7 +187,7 @@ class BanditsAttack(object):
             ## Continue query count
             query = query + 2 * not_done
             if args.targeted:
-                not_done = not_done * (1 - adv_pred.eq(target_labels)).float()  # not_done初始化为 correct, shape = (batch_size,)
+                not_done = not_done * (1 - adv_pred.eq(target_labels).float()).float()  # not_done初始化为 correct, shape = (batch_size,)
             else:
                 not_done = not_done * adv_pred.eq(true_labels).float()  # 只要是跟原始label相等的，就还需要query，还没有成功
             success = (1 - not_done) * correct

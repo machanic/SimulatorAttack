@@ -115,7 +115,7 @@ def draw_other_curve_figure(ablation_key, json_key, dump_file_path):
 
 def draw_meta_or_not_curve_figure(dump_file_path):
     data_dict = defaultdict(dict)
-    for mode in ["meta", "deep"]:
+    for mode in ["meta", "vanilla"]:
         json_file_path = "/home1/machen/meta_perturbations_black_box_attack/logs/AblationStudy_meta_or_not@CIFAR-10-cw_loss-l2-untargeted-mse/meta_mode_{}_WRN-28-10-drop_result.json".format(mode)
 
         with open(json_file_path, "r") as file_obj:
@@ -128,15 +128,18 @@ def draw_meta_or_not_curve_figure(dump_file_path):
     # plt.style.use('seaborn-whitegrid')
     with sns.axes_style("whitegrid", rc={"legend.framealpha": 0.5}):
         plt.figure(figsize=(10, 8))
-        colors = {"deep":'m', "meta":'r', "uninitial": 'y'}
+        colors = {"deep_benign_images":'m', "vanilla":"b", "meta":'r', "uninitial": 'y'}
+        xtick_max = 125
         for mode,  data_info in data_dict.items():
-            x  = np.arange(125) + 1
-            y  = np.array(data_info["MSE_error"][:125])
-            is_finetune_list = data_info["is_finetune"][:125]
+            x  = np.arange(xtick_max) + 1
+            y  = np.array(data_info["MSE_error"][:xtick_max])
+            is_finetune_list = data_info["is_finetune"][:xtick_max]
             if mode == "meta":
                 simulator_name = "MetaSimulator"
-            elif mode == "deep":
+            elif mode == "vanilla":
                 simulator_name = "Simulator$_{vanilla}$"
+            elif mode == "deep_benign_images":
+                simulator_name = "Simulator$_{benign}$"
             else:
                 simulator_name = "Simulator$_{rnd}$"
             line, = plt.plot(x, y, label=r"$\ell_2$ norm untargeted attack result of {}".format(simulator_name),
@@ -151,11 +154,11 @@ def draw_meta_or_not_curve_figure(dump_file_path):
                     plt.axvline(x=x_ + 1, color='#778899', linestyle='--', linewidth=1)
 
         plt.xlim(min(x.tolist()), max(x.tolist()))
-        plt.ylim(0, 30)
+        plt.ylim(0, 20)
         plt.gcf().subplots_adjust(bottom=0.15)
         # xtick = [0, 5000, 10000]
-        plt.xticks([1,10, 25,50,75,100,125], fontsize=15)
-        plt.yticks([0, 5, 10,15, 20,25,30], fontsize=15)
+        plt.xticks([1,10] + np.arange(25,xtick_max+1,25).tolist(), fontsize=15)
+        plt.yticks([0, 5, 10,15, 20], fontsize=15)
         plt.xlabel("attack iterations", fontsize=18)
         plt.ylabel("MSE between outputs of simulator and target model", fontsize=18)
         plt.legend(loc='upper right', prop={'size': 18}, fancybox=True, framealpha=0.5)
@@ -174,26 +177,26 @@ def parse_args():
 
 if __name__ == "__main__":
     args = parse_args()
-    x_label = "meta-predict interval"
-    y_label = "Attack Success Rate (%)"
-    dump_folder = "/home1/machen/meta_perturbations_black_box_attack/figures/ablation_study/"
-    os.makedirs(dump_folder, exist_ok=True)
-    file_path = dump_folder + "meta_predict_interval.pdf"
-    draw_meta_predict_interval_curve_figure("meta_predict_steps", "success_rate", file_path, x_label, y_label)
-    print("written to {}".format(file_path))
-
-
-    dump_folder = "/home1/machen/meta_perturbations_black_box_attack/figures/ablation_study/"
-    os.makedirs(dump_folder, exist_ok=True)
-    file_path = dump_folder + "warm_up.pdf"
-    draw_other_curve_figure("warm_up", "mean_query", file_path)
-    print("written to {}".format(file_path))
+    # x_label = "meta-predict interval"
+    # y_label = "Attack Success Rate (%)"
+    # dump_folder = "/home1/machen/meta_perturbations_black_box_attack/figures/ablation_study/"
+    # os.makedirs(dump_folder, exist_ok=True)
+    # file_path = dump_folder + "meta_predict_interval.pdf"
+    # draw_meta_predict_interval_curve_figure("meta_predict_steps", "success_rate", file_path, x_label, y_label)
+    # print("written to {}".format(file_path))
     #
-    dump_folder = "/home1/machen/meta_perturbations_black_box_attack/figures/ablation_study/"
-    os.makedirs(dump_folder, exist_ok=True)
-    file_path = dump_folder + "deque_length.pdf"
-    draw_other_curve_figure("meta_seq_len", "mean_query", file_path)
-    print("written to {}".format(file_path))
+    #
+    # dump_folder = "/home1/machen/meta_perturbations_black_box_attack/figures/ablation_study/"
+    # os.makedirs(dump_folder, exist_ok=True)
+    # file_path = dump_folder + "warm_up.pdf"
+    # draw_other_curve_figure("warm_up", "mean_query", file_path)
+    # print("written to {}".format(file_path))
+    # #
+    # dump_folder = "/home1/machen/meta_perturbations_black_box_attack/figures/ablation_study/"
+    # os.makedirs(dump_folder, exist_ok=True)
+    # file_path = dump_folder + "deque_length.pdf"
+    # draw_other_curve_figure("meta_seq_len", "mean_query", file_path)
+    # print("written to {}".format(file_path))
 
     dump_folder = "/home1/machen/meta_perturbations_black_box_attack/figures/ablation_study/"
     os.makedirs(dump_folder, exist_ok=True)

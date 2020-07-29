@@ -28,7 +28,7 @@ from dataset.standard_model import StandardModel
 
 class SimBA(object):
     def __init__(self, dataset, batch_size, pixel_attack, freq_dims, stride, order,
-                 max_iters, targeted, target_type, norm, pixel_epsilon,lp_bound, lower_bound=0.0, upper_bound=1.0):
+                 max_iters, targeted, target_type, norm, pixel_epsilon, l2_bound, linf_bound, lower_bound=0.0, upper_bound=1.0):
         """
             :param pixel_epsilon: perturbation limit according to lp-ball
             :param norm: norm for the lp-ball constraint
@@ -46,10 +46,8 @@ class SimBA(object):
         self.freq_dims = freq_dims
         self.stride = stride
         self.order = order
-        if self.norm == "linf":
-            self.linf_bound = lp_bound
-        elif self.norm == "l2":
-            self.l2_bound = lp_bound
+        self.linf_bound = linf_bound
+        self.l2_bound = l2_bound
         # self.early_stop_crit_fct = lambda model, x, y: 1 - model(x).max(1)[1].eq(y)
         self.max_iters = max_iters
         self.targeted = targeted
@@ -265,11 +263,6 @@ class SimBA(object):
                 l2_out_bounds_indexes = np.where(l2_out_bounds_mask == 1)[0]
                 if len(l2_out_bounds_indexes) > 0:
                     success[l2_out_bounds_indexes] = 0
-            # elif self.norm == "linf":
-            #     linf_out_bounds_mask = (delta.abs().max(-1)[0].max(-1)[0].max(-1)[0] > self.linf_bound).long().view(-1).detach().cpu().numpy()
-            #     linf_out_bounds_indexes = np.where(linf_out_bounds_mask == 1)[0]
-            #     if len(linf_out_bounds_indexes) > 0:
-            #         success[linf_out_bounds_indexes] = 0
 
             out_of_bound_indexes = np.where(query.detach().cpu().numpy() > args.max_queries)[0]
             if len(out_of_bound_indexes) > 0:
@@ -431,12 +424,8 @@ if __name__ == "__main__":
         max_iters = int(min(n_dims, args.num_iters))
     else:
         max_iters = int(n_dims)
-    if args.norm == "l2":
-        lp_bound = args.l2_bound
-    elif args.norm == "linf":
-        lp_bound = args.linf_bound
     attacker = SimBA(args.dataset, args.batch_size, args.pixel_attack, args.freq_dims, args.stride, args.order,max_iters,
-                     args.targeted,args.target_type, args.norm, args.pixel_epsilon, lp_bound, 0.0, 1.0)
+                     args.targeted,args.target_type, args.norm, args.pixel_epsilon, args.l2_bound, args.linf_bound, 0.0, 1.0)
     log.info('Command line is: {}'.format(' '.join(sys.argv)))
     log.info("Log file is written in {}".format(log_file_path))
     log.info('Called with args:')
@@ -455,6 +444,5 @@ if __name__ == "__main__":
             model = StandardModel(args.dataset, arch, no_grad=True)
         model.cuda()
         model.eval()
-
         attacker.attack_all_images(args, model, save_result_path)
         model.cpu()

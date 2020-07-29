@@ -51,3 +51,7 @@ def success_rate_avg_query(query_all, not_done_indexes, correct_indexes):
         avg_query = np.mean(query_all[np.where(query_all <= threshold)[0]])
         sucess_rate_avg_query_dict[success_rate] = avg_query.item()
     return sucess_rate_avg_query_dict
+
+
+def query_to_bins(query_all):
+    return np.histogram(query_all, bins=20, range=(0,10000), density=False)

@@ -32,9 +32,27 @@ class MemoryEfficientMetaModelFinetune(object):
             self.inner_lr = float(ma.group(2))
             meta_backbone = self.construct_model(arch, dataset)
             self.meta_network = MetaNetwork(meta_backbone)
-            self.pretrained_weights = torch.load(self.meta_model_path, map_location=lambda storage, location: storage)[
-                "state_dict"]
-        elif mode == "deep":
+            self.pretrained_weights = torch.load(self.meta_model_path, map_location=lambda storage, location: storage)
+            log.info("Load model in epoch {}.".format(self.pretrained_weights["epoch"]))
+            self.pretrained_weights = self.pretrained_weights["state_dict"]
+        elif mode == "vanilla":
+            target_str = "targeted" if targeted else "untargeted"
+            arch = meta_arch
+            # 2Q_DISTILLATION@CIFAR-100@TRAIN_I_TEST_II@model_resnet34@loss_pair_mse@dataloss_cw_l2_untargeted_attack@epoch_4@meta_batch_size_30@num_support_50@num_updates_12@lr_0.001@inner_lr_0.01.pth.tar
+            self.meta_model_path = "{root}/train_pytorch_model/vanilla_simulator/{dataset}@{norm}_norm_{target_str}@{meta_arch}*.tar".format(
+                root=PY_ROOT, dataset=dataset,
+                meta_arch=meta_arch,norm=norm, target_str=target_str)
+            log.info("start using {}".format(self.meta_model_path))
+            self.meta_model_path = glob.glob(self.meta_model_path)
+            assert len(self.meta_model_path) > 0
+            self.meta_model_path = self.meta_model_path[0]
+            log.info("load meta model {}".format(self.meta_model_path))
+            self.inner_lr = 0.01
+            self.meta_network = self.construct_model(meta_arch, dataset)
+            self.pretrained_weights = torch.load(self.meta_model_path, map_location=lambda storage, location: storage)
+            log.info("Load model in epoch {}.".format(self.pretrained_weights["epoch"]))
+            self.pretrained_weights = self.pretrained_weights["state_dict"]
+        elif mode == "deep_benign_images":
             arch = "resnet34"
             self.inner_lr = 0.01
             self.meta_network = self.construct_model(arch, dataset)

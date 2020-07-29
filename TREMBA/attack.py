@@ -72,7 +72,7 @@ def EmbedBA(function, encoder, decoder, image, label, config, latent=None):
                 lr = max(lr / config.lr_decay, config.lr_min)
             last_loss = []
 
-    return False, origin_image,function.current_counts
+    return False,function.current_counts
 
 
 def get_args():

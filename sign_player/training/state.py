@@ -6,13 +6,35 @@ class State(object):
         self.image = torch.zeros(size, dtype=torch.float32).cuda()
         self.p = norm_lp
         self.epsilon = epsilon
+        self.proj_maker = self.l2_proj if norm_lp == 'l2' else self.linf_proj  # 调用proj_maker返回的是一个函数
+
 
     def reset(self, x):
         self.image = x.cuda()
+        self.proj_step = self.proj_maker(x.cuda(), self.epsilon)
+
+
+    def l2_proj(self, image, eps):
+        orig = image.clone()
+        def proj(new_x):
+            delta = new_x - orig
+            out_of_bounds_mask = (self.normalize(delta) > eps).float()
+            x = (orig + eps * delta / self.normalize(delta)) * out_of_bounds_mask
+            x += new_x * (1 - out_of_bounds_mask)
+            return x
+        return proj
+
+    def linf_proj(self, image, eps):
+        orig = image.clone()
+        def proj(new_x):
+            return orig + torch.clamp(new_x - orig, -eps, eps)
+        return proj
+
 
     def step(self, action_map):
         action_map = action_map.float().cuda()
-        self.image = self.lp_step(self.image, action_map, self.epsilon, self.p)
+        image = self.lp_step(self.image, action_map, self.epsilon, self.p)
+        self.image = self.proj_step(image)
         return self.image
 
     def lp_step(self, x, g, lr, p):

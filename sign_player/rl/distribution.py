@@ -199,6 +199,7 @@ class SoftmaxDistribution(CategoricalDistribution):
             return -torch.sum(self.all_prob * self.all_log_prob, dim=1, keepdim=False)  # B,C,H,W
 
     def mylog_prob(self, action):
+        action = action.clone()
         action = action + 1 # convert (-1,0,1) to (0,1,2) range
         action = action.cuda().long() # B,C,H,W
         n_batch, n_actions, in_channels, h, w = self.all_log_prob.size()

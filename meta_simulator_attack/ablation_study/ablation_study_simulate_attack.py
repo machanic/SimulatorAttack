@@ -17,9 +17,8 @@ import numpy as np
 import torch
 from torch.nn import functional as F
 from torch.nn.modules import Upsample
-from config import IN_CHANNELS, CLASS_NUM, PY_ROOT, MODELS_TEST_STANDARD
+from config import IN_CHANNELS, CLASS_NUM
 from dataset.dataset_loader_maker import DataLoaderMaker
-from utils.statistics_toolkit import success_rate_and_query_coorelation, success_rate_avg_query
 from meta_simulator_attack.ablation_study.meta_finetuner import MemoryEfficientMetaModelFinetune
 import torch.multiprocessing as mp
 from torch import nn
@@ -176,7 +175,7 @@ class SimulateBanditsAttackShrink(object):
         model.cuda()
         model.eval()
         # 带有缩减功能的，攻击成功的图片自动删除掉
-        chunk_skip_indexes = self.chunks(skip_indexes, args.batch_size)
+        # chunk_skip_indexes = self.chunks(skip_indexes, args.batch_size)
         all_logits_error = []
         mse_error = nn.MSELoss(reduction='mean')
         for data_idx, data_tuple in enumerate(self.dataset_loader):
@@ -189,22 +188,22 @@ class SimulateBanditsAttackShrink(object):
                 images, true_labels = data_tuple[0], data_tuple[1]  # TODO 缩减
             if images.size(-1) != model.input_size[-1]:
                 images = F.interpolate(images, size=model.input_size[-1], mode='bilinear',align_corners=True)
-            skip_batch_index_list = np.nonzero(np.asarray(chunk_skip_indexes[data_idx]))[0].tolist()
+            # skip_batch_index_list = np.nonzero(np.asarray(chunk_skip_indexes[data_idx]))[0].tolist()
             selected = torch.arange(data_idx * args.batch_size,
                                     min((data_idx + 1) * args.batch_size, self.total_images))  # 选择这个batch的所有图片的index
             img_idx_to_batch_idx = ImageIdxToOrigBatchIdx(args.batch_size)
-            if len(skip_batch_index_list) > 0:
-                for skip_index in skip_batch_index_list:
-                    pos = selected[skip_index]
-                    self.query_all[pos] = args.max_queries
-                    self.correct_all[pos] = 0
-                    self.not_done_all[pos] = 1
-                    self.success_all[pos] = 0 # 让其定义为分类失败
-                    self.success_query_all[pos] = 0
-                    self.not_done_loss_all[pos] = 1.0
-                    self.not_done_prob_all[pos] = 1.0
-                images, true_labels = self.delete_tensor_by_index_list(skip_batch_index_list, images, true_labels)
-                img_idx_to_batch_idx.del_by_index_list(skip_batch_index_list)
+            # if len(skip_batch_index_list) > 0:
+            #     for skip_index in skip_batch_index_list:
+            #         pos = selected[skip_index]
+            #         self.query_all[pos] = args.max_queries
+            #         self.correct_all[pos] = 0
+            #         self.not_done_all[pos] = 1
+            #         self.success_all[pos] = 0 # 让其定义为分类失败
+            #         self.success_query_all[pos] = 0
+            #         self.not_done_loss_all[pos] = 1.0
+            #         self.not_done_prob_all[pos] = 1.0
+            #     images, true_labels = self.delete_tensor_by_index_list(skip_batch_index_list, images, true_labels)
+            #     img_idx_to_batch_idx.del_by_index_list(skip_batch_index_list)
 
             images, true_labels = images.cuda(), true_labels.cuda()
             first_finetune = True
@@ -259,8 +258,7 @@ class SimulateBanditsAttackShrink(object):
                 q1_images = adv_images + args.fd_eta * q1 / self.norm(q1)
                 q2_images = adv_images + args.fd_eta * q2 / self.norm(q2)
                 predict_by_target_model = False
-                if (step_index <= args.warm_up_steps or (step_index - args.warm_up_steps) % args.meta_predict_steps == 0) \
-                    or (len(np.where(not_done.detach().cpu().numpy().astype(np.int32) == 1)[0]) / float(args.batch_size) <= args.notdone_threshold):
+                if step_index <= args.warm_up_steps or (step_index - args.warm_up_steps) % args.meta_predict_steps == 0:
                     log.info("predict from target model")
                     predict_by_target_model = True
                     with torch.no_grad():
@@ -270,8 +268,7 @@ class SimulateBanditsAttackShrink(object):
                         q2_logits = q2_logits_model
 
                     finetune_queue.append(q1_images.detach(), q2_images.detach(), q1_logits.detach(), q2_logits.detach())
-                    if (step_index >= args.warm_up_steps and
-                        len(np.where(not_done.detach().cpu().numpy().astype(np.int32) == 1)[0]) / float(args.batch_size) > args.notdone_threshold):
+                    if step_index >= args.warm_up_steps:
                         q1_images_seq, q2_images_seq, q1_logits_seq, q2_logits_seq = finetune_queue.stack_history_track()
                         finetune_times = args.finetune_times if first_finetune else random.randint(1, 3)
                         self.meta_finetuner.finetune(q1_images_seq, q2_images_seq, q1_logits_seq, q2_logits_seq,
@@ -384,8 +381,6 @@ class SimulateBanditsAttackShrink(object):
 
         query_all_ = self.query_all.detach().cpu().numpy().astype(np.int32)
         not_done_all_ = self.not_done_all.detach().cpu().numpy().astype(np.int32)
-        query_threshold_success_rate, query_success_rate = success_rate_and_query_coorelation(query_all_, not_done_all_)
-        success_rate_to_avg_query = success_rate_avg_query(query_all_, not_done_all_)
         if args.study_subject == "meta_or_not":  # 计算所有sequence的均值
             logits_error_iteration_dict = defaultdict(list)  # key = iteration, value = logits error list
             logits_error_finetune_iteration_dict = OrderedDict()
@@ -422,9 +417,6 @@ class SimulateBanditsAttackShrink(object):
                           "correct_all": self.correct_all.detach().cpu().numpy().astype(np.int32).tolist(),
                           "not_done_all": self.not_done_all.detach().cpu().numpy().astype(np.int32).tolist(),
                           "query_all": self.query_all.detach().cpu().numpy().astype(np.int32).tolist(),
-                          "query_threshold_success_rate_dict": query_threshold_success_rate,
-                          "success_rate_to_avg_query": success_rate_to_avg_query,
-                          "query_success_rate_dict": query_success_rate,
                           "not_done_loss": self.not_done_loss_all[self.not_done_all.byte()].mean().item(),
                           "not_done_prob": self.not_done_prob_all[self.not_done_all.byte()].mean().item(),
                           "args": vars(args)}
@@ -512,7 +504,6 @@ if __name__ == "__main__":
     parser.add_argument('--tiling', action='store_true')
     parser.add_argument('--json-config', type=str, default='/home1/machen/meta_perturbations_black_box_attack/configures/meta_simulator_attack_conf.json',
                         help='a configures file to be passed in instead of arguments')
-    parser.add_argument("--notdone_threshold", type=float, default=None)
     parser.add_argument('--epsilon', type=float, help='the lp perturbation bound')
     parser.add_argument('--batch-size', type=int, help='batch size for bandits attack.')
     parser.add_argument('--dataset', type=str, required=True,
@@ -602,8 +593,7 @@ if __name__ == "__main__":
         # pool.close()
         # pool.join()
     elif args.study_subject == "meta_or_not":
-        # meta_modes = ["deep","uninitial","meta"]
-        meta_modes = [ "deep"]
+        meta_modes = ["meta","uninitial","vanilla","deep_benign_images"]
         # pool = mp.Pool(processes=len(meta_modes))
         for idx, meta_mode in enumerate(meta_modes):
             gpu = gpus[idx % len(gpus)]

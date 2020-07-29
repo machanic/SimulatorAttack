@@ -494,7 +494,8 @@ if __name__ == "__main__":
 
     os.environ["CUDA_DEVICE_ORDER"] = "PCI_BUS_ID"
     os.environ['CUDA_VISIBLE_DEVICES'] = str(args.gpu)
-    save_dir_path = "{}/data_bandit_attack/{}/{}".format(PY_ROOT, args.dataset, "targeted_attack" if args.targeted else "untargeted_attack")
+    save_dir_path = "{}/data_bandit_attack/{}/{}".format(PY_ROOT, args.dataset,
+                                                         "targeted_attack" if args.targeted else "untargeted_attack")
     os.makedirs(save_dir_path, exist_ok=True)
     log_path = osp.join(save_dir_path, get_log_path(args.dataset, args.loss, args.norm, args.targeted, args.target_type))  # 随机产生一个目录用于实验
     set_log_file(log_path)
