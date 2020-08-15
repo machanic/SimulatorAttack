@@ -28,7 +28,7 @@ class StandardModel(nn.Module):
     This model always accept standard image: in [0, 1] range, RGB order, un-normalized, NCHW format
     """
     def __init__(self, dataset, arch, no_grad=True,
-                 is_subspace_attack_ref_arch=False, ref_arch_train_data=None, ref_arch_epoch=None):
+                 is_subspace_attack_ref_arch=False, ref_arch_train_data=None, ref_arch_epoch=None, load_pretrained=True):
         super(StandardModel, self).__init__()
         # init cnn model
         self.in_channels = IN_CHANNELS[dataset]
@@ -52,7 +52,8 @@ class StandardModel(nn.Module):
                 trained_model_path = trained_model_path_ls[0]
 
         self.is_subspace_attack_ref_arch = is_subspace_attack_ref_arch
-        self.cnn = self.make_model(dataset, arch, self.in_channels, CLASS_NUM[dataset], trained_model_path=trained_model_path)
+        self.cnn = self.make_model(dataset, arch, self.in_channels, CLASS_NUM[dataset],
+                                   trained_model_path=trained_model_path, load_pretrained=load_pretrained)
         # init cnn model meta-information
         self.mean = torch.FloatTensor(self.cnn.mean).view(1, self.in_channels, 1, 1).cuda()
         self.mean.requires_grad =True
@@ -189,7 +190,7 @@ class StandardModel(nn.Module):
             model = models.__dict__[arch](num_classes=num_classes)
         return model
 
-    def make_model(self, dataset, arch, in_channel, num_classes, trained_model_path=None):
+    def make_model(self, dataset, arch, in_channel, num_classes, trained_model_path=None, load_pretrained=True):
         """
         Make model, and load pre-trained weights.
         :param dataset: cifar10 or imagenet
@@ -197,7 +198,8 @@ class StandardModel(nn.Module):
         :return: model (in cpu and training mode)
         """
         if dataset in ['CIFAR-10',"CIFAR-100", "MNIST","FashionMNIST"]:
-            assert trained_model_path is not None and os.path.exists(trained_model_path), "Pretrained weight model file {} does not exist!".format(trained_model_path)
+            if load_pretrained:
+                assert trained_model_path is not None and os.path.exists(trained_model_path), "Pretrained weight model file {} does not exist!".format(trained_model_path)
             if arch == 'gdas':
                 model = models.gdas(in_channel, num_classes)
                 model.mean = [125.3 / 255, 123.0 / 255, 113.9 / 255]
@@ -219,7 +221,8 @@ class StandardModel(nn.Module):
                 model.input_space = 'RGB'
                 model.input_range = [0, 1]
                 model.input_size = [in_channel, IMAGE_SIZE[dataset][0], IMAGE_SIZE[dataset][1]]
-            self.load_weight_from_pth_checkpoint(model, trained_model_path)
+            if load_pretrained:
+                self.load_weight_from_pth_checkpoint(model, trained_model_path)
         elif dataset == "TinyImageNet":
             model = MetaLearnerModelBuilder.construct_tiny_imagenet_model(arch, dataset)
             model.input_space = 'RGB'
@@ -227,10 +230,15 @@ class StandardModel(nn.Module):
             model.mean = [0,0,0]
             model.std = [1,1,1]
             model.input_size = [in_channel,IMAGE_SIZE[dataset][0], IMAGE_SIZE[dataset][1]]
-            model.load_state_dict(torch.load(trained_model_path, map_location=lambda storage, location: storage)["state_dict"])
+            if load_pretrained:
+                model.load_state_dict(torch.load(trained_model_path, map_location=lambda storage, location: storage)["state_dict"])
         elif dataset == 'ImageNet':
             os.environ["TORCH_HOME"] = "{}/train_pytorch_model/real_image_model/ImageNet-pretrained".format(PY_ROOT)
-            model = pretrainedmodels.__dict__[arch](num_classes=1000, pretrained="imagenet")
+            if load_pretrained:
+                pretrained = "imagenet"
+            else:
+                pretrained = None
+            model = pretrainedmodels.__dict__[arch](num_classes=1000, pretrained=pretrained)
         return model
 
 

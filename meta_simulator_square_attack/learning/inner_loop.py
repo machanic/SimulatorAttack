@@ -34,19 +34,19 @@ class InnerLoop(nn.Module):
         return loss
 
     
-    def forward(self, task_meta_train_images, task_meta_test_images, task_meta_train_gt_loss,
-                        task_meta_test_gt_loss):
+    def forward(self, task_meta_train_images, task_meta_test_images, task_meta_train_gt_logits,
+                        task_meta_test_gt_logits):
         fast_weights = OrderedDict((name, param) for (name, param) in self.network.named_parameters())
         for i in range(self.num_updates):
             if i==0:
-                loss = self.forward_pass(task_meta_train_images, task_meta_train_gt_loss)
+                loss = self.forward_pass(task_meta_train_images, task_meta_train_gt_logits)
                 grads = torch.autograd.grad(loss, self.parameters())
             else:
-                loss = self.forward_pass(task_meta_train_images, task_meta_train_gt_loss, fast_weights)
+                loss = self.forward_pass(task_meta_train_images, task_meta_train_gt_logits, fast_weights)
                 grads = torch.autograd.grad(loss, fast_weights.values())
             fast_weights = OrderedDict((name, param - self.step_size * grad) for ((name, param), grad) in zip(fast_weights.items(), grads))
         # Compute the meta gradient and return it
-        loss = self.forward_pass(task_meta_test_images, task_meta_test_gt_loss, fast_weights)
+        loss = self.forward_pass(task_meta_test_images, task_meta_test_gt_logits, fast_weights)
         loss = loss / self.meta_batch_size   # normalize loss
         grads = torch.autograd.grad(loss, self.parameters())
         meta_grads = {name:g for ((name, _), g) in zip(self.named_parameters(), grads)}

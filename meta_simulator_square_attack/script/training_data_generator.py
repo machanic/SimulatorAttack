@@ -162,9 +162,8 @@ class SquareAttack(object):
                     [1, 1, s, s]) * np.random.choice([-1, 1], size=[x.shape[0], c, 1, 1])
                 center_w += s
             center_h += s
-        images = []
-        # boxes = []  # T,B,4 transpose to B,T,4
-        losses = []  # each is B
+        saved_images = []
+        saved_logits = []
         x_best = np.clip(x + delta_init / np.sqrt(np.sum(delta_init ** 2, axis=(1, 2, 3), keepdims=True)) * eps, self.lower_bound, self.upper_bound)
 
         logits = model(torch.from_numpy(x_best).cuda().float())
@@ -217,13 +216,6 @@ class SquareAttack(object):
             delta_curr[:, :, center_h_2:center_h_2 + s2, center_w_2:center_w_2 + s2] = 0.0  # set window_2 to 0
             delta_curr[:, :, center_h:center_h + s, center_w:center_w + s] = new_deltas + 0  # update window_1
 
-            # box_value = delta_curr / np.sqrt(np.sum(delta_curr ** 2, axis=(1, 2, 3), keepdims=True)) * eps  # B,C,H,W
-            # box_value = box_value[:, :, 0, 0]  # B,C
-            # box = np.array([[center_h, center_w, center_h+s, center_w+s]])
-            # box = np.tile(box, (x_curr.shape[0],1))  # B,4
-            # box = np.concatenate([box, box_value],axis=1)  # B, 4+3 = 7
-            # boxes.append(box)
-
             x_new = x_curr + delta_curr / np.sqrt(np.sum(delta_curr ** 2, axis=(1, 2, 3), keepdims=True)) * eps
             x_new = np.clip(x_new, self.lower_bound, self.upper_bound)
 
@@ -248,16 +240,15 @@ class SquareAttack(object):
             time_total = time.time() - time_start
             metrics[i_iter] = [acc, acc_corr, mean_nq, mean_nq_ae, median_nq, margin_min.mean(), time_total]
             if i_iter >= slice_iteration_end - slice_len:
-                images.append(x_new)
-                losses.append(loss)
+                saved_images.append(x_new)
+                saved_logits.append(logits.detach().cpu().numpy())
 
         curr_norms_image = np.sqrt(np.sum((x_best - x) ** 2, axis=(1, 2, 3), keepdims=True))
         log.info('Maximal norm of the perturbations: {:.5f}'.format(np.amax(curr_norms_image)))
 
-        images = np.transpose(np.stack(images), (1, 0, 2, 3, 4))  # B,T,C,H,W
-        # boxes = np.transpose(np.stack(boxes), (1, 0, 2))  # B,T,7
-        losses = np.transpose(np.stack(losses), (1, 0))  # B,T
-        return images, losses
+        saved_images = np.transpose(np.stack(saved_images), (1, 0, 2, 3, 4))  # B,T,C,H,W
+        saved_logits = np.transpose(np.stack(saved_logits), (1, 0, 2))  # B,T, #classes
+        return saved_images, saved_logits
 
     def square_attack_linf(self, model, x, y, eps, max_queries, p_init, loss_type):
         """ The Linf square attack """
@@ -268,9 +259,8 @@ class SquareAttack(object):
         # [c, 1, w], i.e. vertical stripes work best for untargeted attacks
         init_delta = np.random.choice([-eps, eps], size=[x.shape[0], c, 1, w])
         x_best = np.clip(x + init_delta, self.lower_bound, self.upper_bound)
-        images = []
-        # boxes = []  # T,B,4 transpose to B,T,4
-        losses = []  # each is B
+        saved_images = []
+        saved_logits = []
         logits = model(torch.from_numpy(x_best).cuda().float())
         loss_min = self.loss(logits, torch.from_numpy(y).long().cuda(), loss_type=loss_type).detach().cpu().numpy()
 
@@ -306,8 +296,7 @@ class SquareAttack(object):
                     deltas[i_img, :, center_h:center_h + s, center_w:center_w + s] = value
                     value_ = np.squeeze(value)
                     box.append([center_h,center_w,center_h + s,center_w + s, value_[0], value_[1],value_[2]])
-            # box = np.stack(box)  # B,7 # 每次的B不同
-            # boxes.append(box)
+
             x_new = np.clip(x_curr + deltas, self.lower_bound, self.upper_bound)
             logits = model(torch.from_numpy(x_new).cuda().float())
             loss = self.loss(logits, torch.from_numpy(y_curr).long().cuda(), loss_type=loss_type).detach().cpu().numpy()
@@ -327,20 +316,19 @@ class SquareAttack(object):
             time_total = time.time() - time_start
             metrics[i_iter] = [acc, acc_corr, mean_nq, mean_nq_ae, median_nq_ae, margin_min.mean(), time_total]
             if i_iter >= slice_iteration_end - slice_len:
-                images.append(x_new)  # idx_to_fool 的存在，每次的batch不同，所以应该去掉idx_to_fool
-                losses.append(loss)
+                saved_images.append(x_new)  # idx_to_fool 的存在，每次的batch不同，所以应该去掉idx_to_fool
+                saved_logits.append(logits.detach().cpu().numpy())
 
-        images = np.transpose(np.stack(images),(1,0,2,3,4)) # B,T,C,H,W
-        # boxes = np.transpose(np.stack(boxes),(1,0,2)) # B,T,7
-        losses = np.transpose(np.stack(losses),(1,0))  # B,T
+        saved_images = np.transpose(np.stack(saved_images),(1,0,2,3,4)) # B,T,C,H,W
+        saved_logits = np.transpose(np.stack(saved_logits),(1,0,2))  # B,T,#classes
 
-        return images, losses
+        return saved_images, saved_logits
 
     def attack_all_images(self, args, model_data_dict, save_dir):
 
         for (arch_name, target_model), image_label_list in model_data_dict.items():
             all_image_list = []
-            all_loss_list = []
+            all_logits_list = []
             target_model.cuda()
             targeted_str = "untargeted" if not args.targeted else "targeted"
             save_path_prefix = "{}/dataset_{}@arch_{}@norm_{}@loss_{}@{}".format(save_dir, args.dataset,
@@ -348,8 +336,7 @@ class SquareAttack(object):
                                                                                  targeted_str)
             images_path = "{}@images.npy".format(save_path_prefix)
             shape_path = "{}@shape.txt".format(save_path_prefix)
-            # box_path = "{}@boxes.npy".format(save_path_prefix)
-            loss_path = "{}@loss.npy".format(save_path_prefix)
+            logits_path = "{}@logits.npy".format(save_path_prefix)
             log.info("Begin attack {}, the images will be saved to {}".format(arch_name, images_path))
             for batch_idx, (images, true_labels) in enumerate(image_label_list):
                 images = images.cuda()
@@ -375,19 +362,17 @@ class SquareAttack(object):
                 loss_type = "cw_loss" if not self.targeted else "xent_loss"
                 labels = true_labels if not self.targeted else target_labels
                 if self.norm == "l2":
-                    images_, losses_ = self.square_attack_l2(target_model, images.detach().cpu().numpy(),
+                    saved_images, saved_logits = self.square_attack_l2(target_model, images.detach().cpu().numpy(),
                                             labels.detach().cpu().numpy(), args.epsilon, args.max_queries, args.p, loss_type)
                 elif self.norm == "linf":
-                    images_, losses_ = self.square_attack_linf(target_model, images.detach().cpu().numpy(),
+                    saved_images, saved_logits = self.square_attack_linf(target_model, images.detach().cpu().numpy(),
                                                                 labels.detach().cpu().numpy(),
                                                                 args.epsilon, args.max_queries, args.p, loss_type)
-                all_image_list.extend(images_)  # B,T,C,H,W
-                # all_box_list.extend(boxes_)     # B,T,4 (which is ymin,xmin,ymax,xmax)
-                all_loss_list.extend(losses_)   # B,T
+                all_image_list.extend(saved_images)  # B,T,C,H,W
+                all_logits_list.extend(saved_logits)   # B,T,#classes
 
             all_image_list = np.stack(all_image_list)  # B,T,C,H,W
-            # all_box_list = np.stack(all_box_list)
-            all_loss_list = np.stack(all_loss_list)
+            all_logits_list = np.stack(all_logits_list)
 
             store_shape = str(all_image_list.shape)
             with open(shape_path, "w") as file_shape:
@@ -396,8 +381,7 @@ class SquareAttack(object):
             fp = np.memmap(images_path, dtype='float32', mode='w+', shape=all_image_list.shape)
             fp[:, :, :, :, :] = all_image_list[:, :, :, :, :]
             del fp
-            # np.save(box_path, all_box_list) # B,T,4
-            np.save(loss_path, all_loss_list) # B,T
+            np.save(logits_path, all_logits_list)
             log.info('{} is attacked finished, save to {}'.format(arch_name, images_path))
             target_model.cpu()
 

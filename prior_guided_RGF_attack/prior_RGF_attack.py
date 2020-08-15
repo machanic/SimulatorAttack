@@ -207,7 +207,7 @@ class PriorRGFAttack(object):
                             break
                     est_alpha = diff_prior / sigma / torch.clamp(torch.sqrt(torch.sum(torch.mul(prior,prior)) * norm_square), min=1e-12)
                     est_alpha = est_alpha.item()
-                    log.info("Estimated alpha = {:.3f}".format(est_alpha))
+                    # log.info("Estimated alpha = {:.3f}".format(est_alpha))
                     alpha = est_alpha   # alpha描述了替代模型的梯度是否有用，alpha越大λ也越大，λ=1表示相信这个prior
                     if alpha < 0:  #  夹角大于90度，cos变成负数
                         prior = -prior  # v = -v , negative the transfer gradient,

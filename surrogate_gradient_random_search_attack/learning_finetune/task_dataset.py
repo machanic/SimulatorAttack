@@ -14,7 +14,8 @@ from constant_enum import SPLIT_DATA_PROTOCOL, LOAD_TASK_MODE
 
 
 class MetaTaskDataset(data.Dataset):
-    def __init__(self, dataset, adv_norm, data_loss_type, tot_num_tasks, load_mode, protocol, targeted, target_type="random", without_resnet=False):
+    def __init__(self, dataset, adv_norm, data_loss_type, tot_num_tasks, load_mode, protocol, targeted, target_type="increment",
+                 without_resnet=False):
         """
         Args:
             num_samples_per_class: num samples to generate "per class" in one batch
@@ -35,34 +36,33 @@ class MetaTaskDataset(data.Dataset):
                 self.model_names = MODELS_TEST_STANDARD[dataset]
             elif protocol == SPLIT_DATA_PROTOCOL.TRAIN_ALL_TEST_ALL:
                 self.model_names = MODELS_TRAIN_WITHOUT_RESNET[dataset] + MODELS_TEST_STANDARD[dataset]
-        self.data_root_dir = "{}/data_square_attack/{}/{}".format(PY_ROOT, dataset, "targeted_attack" if targeted else "untargeted_attack")
+        self.data_root_dir = "{}/data_surroage_gradient_targeted_increment/{}/{}".format(PY_ROOT, dataset, "targeted_attack" if targeted else "untargeted_attack")
         self.pattern = re.compile(".*arch_(.*?)@.*")
         self.train_files = []
         self.targeted = targeted
         self.tot_num_trn_tasks = tot_num_tasks
-        print("dataset root is {}".format(self.data_root_dir))
-        print("all models are {}".format(" , ".join(self.model_names)))
+
         for img_file_path in glob.glob(self.data_root_dir + "/dataset_{dataset}@*@norm_{norm}@loss_{loss_type}@{target_str}@images.npy".format(
                 dataset=dataset, norm=adv_norm, loss_type=data_loss_type, target_str="targeted" if targeted else "untargeted")):
             file_name = os.path.basename(img_file_path)
             ma = self.pattern.match(file_name)
             model_name = ma.group(1)
             if model_name in self.model_names:
-                logits_path = img_file_path.replace("images.npy","logits.npy")
+                gradient_path = img_file_path.replace("images.npy", "gradients.npy")
+                logits_loss_path = img_file_path.replace("images.npy","logits_loss.npz")
                 shape_path = img_file_path.replace("images.npy", "shape.txt")
                 with open(shape_path, "r") as file_obj:
                     shape = eval(file_obj.read().strip())
                 count = shape[0]
                 seq_len = shape[1]
-                logits_val = np.load(logits_path)  # B,T
-                assert logits_val.ndim == 3
-                each_file_json = {"count": count, "seq_len":seq_len, "image_path":img_file_path, "logits_path":logits_path,
-                                  "logits":logits_val, "arch":model_name}
+                # logits_loss_data = np.load(logits_loss_path)  # logits shape = B,T,#class,  loss shape = (B,T), target_label shape = (B,T)
+                each_file_json = {"count": count, "seq_len":seq_len, "image_path":img_file_path,
+                                  "logits_loss_path":logits_loss_path, "gradient_path": gradient_path,
+                                   "arch":model_name}
                 self.train_files.append(each_file_json)
-                print("read {}".format(img_file_path))
         self.data_attack_type = adv_norm
         target_str = "untargeted" if not targeted else "target_{}".format(target_type)
-        self.task_dump_txt_path = "{}/task_square_attack/{}_{}/{}_data_loss_type_{}_norm_{}_{}_tot_num_tasks_{}.pkl".format(PY_ROOT, protocol,
+        self.task_dump_txt_path = "{}/task_surrogate_grad_finetune_attack/{}_{}/{}_data_loss_type_{}_norm_{}_{}_tot_num_tasks_{}.pkl".format(PY_ROOT, protocol,
                                                dataset, dataset, data_loss_type, adv_norm, target_str, tot_num_tasks)
         self.store_tasks(load_mode, self.task_dump_txt_path, self.train_files)
 
@@ -81,7 +81,6 @@ class MetaTaskDataset(data.Dataset):
             self.all_tasks[i] = entry
         self.dump_task(self.all_tasks, task_dump_txt_path)
 
-
     def dump_task(self, all_tasks, task_dump_txt_path):
         os.makedirs(os.path.dirname(task_dump_txt_path),exist_ok=True)
         with open(task_dump_txt_path, "wb") as file_obj:
@@ -91,8 +90,8 @@ class MetaTaskDataset(data.Dataset):
         dict_with_img_index = {}
         dict_with_img_index.update(file_entry)
         count = file_entry["count"]
-        img_idx = random.randint(0, count-1)
-        dict_with_img_index["index"] = img_idx
+        image_index = random.randint(0, count-1)
+        dict_with_img_index["image_index"] = image_index
         return dict_with_img_index
 
     def __len__(self):
@@ -100,15 +99,26 @@ class MetaTaskDataset(data.Dataset):
 
     def __getitem__(self, task_index):
         task_data = self.all_tasks[task_index]
+        image_index = task_data["image_index"]
         seq_len = task_data["seq_len"]
-        index = task_data["index"]
         with open(task_data["image_path"], "rb") as file_obj:
             adv_images = np.memmap(file_obj, dtype='float32', mode='r', shape=(seq_len, IN_CHANNELS[self.dataset],
                                             IMAGE_SIZE[self.dataset][0], IMAGE_SIZE[self.dataset][1]),
-                                   offset=index * seq_len * IN_CHANNELS[self.dataset] * IMAGE_SIZE[self.dataset][0] * \
+                                   offset= image_index * seq_len * IN_CHANNELS[self.dataset] * IMAGE_SIZE[self.dataset][0] * \
                                           IMAGE_SIZE[self.dataset][1] * 32 // 8)
-        logits = task_data["logits"][index]  # shape = (T,#class)
-        adv_images = torch.from_numpy(adv_images)
-        logits = torch.from_numpy(logits)
-        return adv_images, logits
+            adv_images = torch.from_numpy(adv_images)
+        with open(task_data["gradient_path"], "rb") as file_obj:
+            gradients = np.memmap(file_obj, dtype='float32', mode='r', shape=(seq_len, IN_CHANNELS[self.dataset],
+                                            IMAGE_SIZE[self.dataset][0], IMAGE_SIZE[self.dataset][1]),
+                                   offset= image_index * seq_len * IN_CHANNELS[self.dataset] * IMAGE_SIZE[self.dataset][0] * \
+                                          IMAGE_SIZE[self.dataset][1] * 32 // 8)
+            gradients = torch.from_numpy(gradients)
+
+        data = np.load(task_data["logits_loss_path"])
+        logits = torch.from_numpy(data["logits"][image_index])  # T,#class
+        true_labels = torch.from_numpy(data["true_labels"][image_index])  # T
+        if self.targeted:
+            target_labels = torch.from_numpy(data["target_labels"][image_index])
+            return adv_images, gradients, logits, true_labels, target_labels
+        return adv_images, gradients, logits, true_labels
 
