@@ -14,7 +14,8 @@ from constant_enum import SPLIT_DATA_PROTOCOL, LOAD_TASK_MODE
 
 
 class MetaTaskDataset(data.Dataset):
-    def __init__(self, dataset, adv_norm, data_loss_type, tot_num_tasks, load_mode, protocol, targeted, target_type="random", without_resnet=False):
+    def __init__(self, dataset, adv_norm, data_loss_type, tot_num_tasks, load_mode, protocol, targeted, target_type="random",
+                 without_resnet=False):
         """
         Args:
             num_samples_per_class: num samples to generate "per class" in one batch

@@ -3,7 +3,7 @@ sys.path.append("/home1/machen/meta_perturbations_black_box_attack")
 from meta_simulator_square_attack.learning.task_dataset import MetaTaskDataset
 from torch.utils.data import DataLoader
 from cifar_models_myself import *
-from meta_simulator_learning.meta_network import MetaNetwork
+from meta_simulator_learning import MetaNetwork
 import numpy as np
 from meta_simulator_square_attack.learning.inner_loop import InnerLoop
 from torch.optim import Adam
@@ -29,7 +29,7 @@ class MetaLearner(object):
                                       target_type, without_resnet)
         self.train_loader = DataLoader(trn_dataset, batch_size=meta_batch_size, shuffle=True, num_workers=0, pin_memory=True)
         self.loss_fn = nn.MSELoss()
-        self.fast_net = InnerLoop(self.network, self.num_inner_updates,self.inner_step_size, self.meta_batch_size)  # 并行执行每个task
+        self.fast_net = InnerLoop(self.network, self.num_inner_updates,self.inner_step_size, self.meta_batch_size)
         self.fast_net.cuda()
         self.opt = Adam(self.network.parameters(), lr=meta_step_size)
 
@@ -76,12 +76,12 @@ class MetaLearner(object):
                 itr = epoch * len(self.train_loader) + i
                 self.adjust_learning_rate(itr, self.meta_step_size, self.lr_decay_itr)
                 grads = []
-                seq_len = adv_images.size(1)
+                seq_len = adv_images.size(1)  # Task,100,C,H,W
                 meta_train_index_list = np.arange(seq_len//2).tolist()
                 meta_test_index_list = np.arange(seq_len // 2, seq_len).tolist()
                 meta_train_images = adv_images[:, meta_train_index_list, :, :, :]  #B,T,C,H,W
                 meta_test_images = adv_images[:, meta_test_index_list, :, :, :]
-                meta_train_logits = gt_logits[:, meta_train_index_list]   # B,T
+                meta_train_logits = gt_logits[:, meta_train_index_list]   # B,T, #class
                 meta_test_logits = gt_logits[:, meta_test_index_list]
                 for task_idx in range(meta_train_images.size(0)):  # 每个task的teacher model不同，所以
                     task_meta_train_images = meta_train_images[task_idx].cuda() # T, C, H, W
@@ -93,8 +93,8 @@ class MetaLearner(object):
                                               task_meta_test_logits)
                     grads.append(g)
                 # Perform the meta update
-                dummy_meta_test_images = meta_test_images[0].cuda()
-                dummy_meta_test_logits = meta_test_logits[0].cuda()
+                dummy_meta_test_images = meta_test_images[0].cuda()  # T,C,H,W
+                dummy_meta_test_logits = meta_test_logits[0].cuda()  # T
                 self.meta_update(grads, dummy_meta_test_images, dummy_meta_test_logits)
                 grads.clear()
             torch.save({

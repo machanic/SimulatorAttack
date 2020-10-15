@@ -2,9 +2,10 @@ import torch
 from torch import nn
 
 class TentativePerturbationGenerator():
-    def __init__(self, extractors, part_size=100, preprocess=True, device=0):
+    def __init__(self, extractors, norm, part_size=100, preprocess=True, device=0):
         self.r = None
         self.extractors = extractors
+        self.norm = norm
         self.part_size = part_size  # The number of frames are processed each time
         self.preprocess = preprocess
         self.device = device
@@ -57,6 +58,12 @@ class TentativePerturbationGenerator():
         adv_directions = torch.cat(adv_directions, 0)
         return adv_directions
 
+    def normalize(self, t):
+        assert len(t.shape) == 4
+        norm_vec = torch.sqrt(t.pow(2).sum(dim=[1, 2, 3])).view(-1, 1, 1, 1)
+        norm_vec += (norm_vec == 0).float() * 1e-8
+        return norm_vec
+
     def backpropagate2frames(self, part_vid, start_idx, end_idx, random):
         part_vid.requires_grad = True
         processed_vid = part_vid.clone()
@@ -74,23 +81,25 @@ class TentativePerturbationGenerator():
             if self.target:
                 if random:
                     mask = torch.rand_like(o) <= self.random_mask
-                    perturb_loss += nn.MSELoss(reduction='elementwise_mean')(torch.masked_select(o, mask),
+                    perturb_loss += nn.MSELoss(reduction='mean')(torch.masked_select(o, mask),
                                                                              torch.masked_select(
                                                                                  self.target_feature[idx][
                                                                                  start_idx:end_idx], mask))
                 else:
-                    perturb_loss += nn.MSELoss(reduction='elementwise_mean')(o, self.target_feature[idx][
+                    perturb_loss += nn.MSELoss(reduction='mean')(o, self.target_feature[idx][
                                                                                 start_idx:end_idx])
             else:
                 r = torch.randn_like(o) * self.scale + self.translate
                 r = torch.where(r >= 0, r, -r)
-                perturb_loss += nn.MSELoss(reduction='elementwise_mean')(o, r)
+                perturb_loss += nn.MSELoss(reduction='mean')(o, r)
 
             perturb_loss.backward()
             extractor.zero_grad()
-        sign_grad = torch.sign(part_vid.grad)
-
-        return sign_grad
+        if self.norm == "linf":
+            grad = torch.sign(part_vid.grad)
+        elif self.norm == "l2":
+            grad = part_vid.grad.clone()
+        return grad
 
     def __call__(self, vid):
         return self.create_adv_directions(vid)

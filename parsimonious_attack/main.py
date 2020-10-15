@@ -152,6 +152,8 @@ if __name__ == "__main__":
     args.block_size = int(IMAGE_SIZE[args.dataset][0] // 8)
     if args.dataset == "ImageNet":
         args.epsilon = 0.05
+        if args.targeted:
+            args.max_queries = 50000
     torch.random.manual_seed(args.seed)
     np.random.seed(args.seed)
     args.exp_dir = osp.join(args.exp_dir,

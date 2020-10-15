@@ -118,9 +118,6 @@ class SimBA(object):
             dim = indices[k]
             expanded = (images[remaining_indices] + self.trans(self.expand_vector(x[remaining_indices], expand_dims, image_size),
                                                                image_size)).clamp(0, 1)
-            # perturbation = self.trans(self.expand_vector(x, expand_dims), image_size)
-            # l2_norms[:, k] = perturbation.view(batch_size, -1).norm(2, 1)
-            # linf_norms[:, k] = perturbation.view(batch_size, -1).abs().max(1)[0]
             queries_k = torch.zeros(batch_size)
             with torch.no_grad():
                 logit = model(expanded)
@@ -163,7 +160,8 @@ class SimBA(object):
             if improved.sum().item() < remaining_indices.size(0):
                 queries_k[remaining_indices[~improved]] += 1
             # try positive directions
-            adv = (images[remaining_indices] + self.trans(self.expand_vector(right_vec, expand_dims, image_size), image_size)).clamp(0, 1)
+            adv = (images[remaining_indices] + self.trans(self.expand_vector(right_vec, expand_dims, image_size),
+                                                          image_size)).clamp(0, 1)
             right_probs = self.get_probs(model, adv, labels[remaining_indices])
             if self.targeted:
                 right_improved = right_probs.gt(torch.max(prev_probs[remaining_indices], left_probs))
@@ -258,11 +256,11 @@ class SimBA(object):
             else:
                 adv_images, success, query = self.attack_batch_images(model, images.cuda(), true_labels.cuda())
             delta = adv_images.view_as(images) - images
-            if self.norm == "l2":
-                l2_out_bounds_mask = (self.normalize(delta) > self.l2_bound).long().view(-1).detach().cpu().numpy()  # epsilon of L2 norm attack = 4.6
-                l2_out_bounds_indexes = np.where(l2_out_bounds_mask == 1)[0]
-                if len(l2_out_bounds_indexes) > 0:
-                    success[l2_out_bounds_indexes] = 0
+            # if self.norm == "l2":
+            #     l2_out_bounds_mask = (self.normalize(delta) > self.l2_bound).long().view(-1).detach().cpu().numpy()  # epsilon of L2 norm attack = 4.6
+            #     l2_out_bounds_indexes = np.where(l2_out_bounds_mask == 1)[0]
+            #     if len(l2_out_bounds_indexes) > 0:
+            #         success[l2_out_bounds_indexes] = 0
 
             out_of_bound_indexes = np.where(query.detach().cpu().numpy() > args.max_queries)[0]
             if len(out_of_bound_indexes) > 0:
@@ -362,7 +360,9 @@ if __name__ == "__main__":
         defaults.update(arg_vars)
         args = SimpleNamespace(**defaults)
     if args.targeted:
-        args.num_iters = 30000
+        args.num_iters = 100000
+        if args.dataset == "ImageNet":
+            args.max_queries = 50000
     if args.norm == "linf":
         assert not args.pixel_attack, "L_inf norm attack cannot be used with --pixel_attack together"
     args.exp_dir = os.path.join(args.exp_dir,

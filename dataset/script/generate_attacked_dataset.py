@@ -134,11 +134,11 @@ def load_models(dataset):
 
 if __name__ == "__main__":
     os.environ["CUDA_DEVICE_ORDER"] = "PCI_BUS_ID"
-    os.environ['CUDA_VISIBLE_DEVICES'] = "2"
+    os.environ['CUDA_VISIBLE_DEVICES'] = "3"
 
-    dataset = "TinyImageNet"
+    dataset = "ImageNet"
     models = load_models(dataset)
-    selected_images, selected_images_big, selected_true_labels, selected_img_id = generate_attacked_dataset(dataset, 50000, models)
+    selected_images, selected_images_big, selected_true_labels, selected_img_id = generate_attacked_dataset(dataset, 30000, models)
     save_path = "{}/attacked_images/{}/{}_images_for_candidate.npz".format(PY_ROOT, dataset, dataset)
     os.makedirs(os.path.dirname(save_path), exist_ok=True)
     save_selected_images(dataset, selected_images, selected_images_big, selected_true_labels, selected_img_id, save_path)

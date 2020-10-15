@@ -280,7 +280,6 @@ class SquareAttack(object):
             deltas = x_best_curr - x_curr
 
             p = self.p_selection(p_init, i_iter, n_iters)
-            box = []
             for i_img in range(x_best_curr.shape[0]):
                 s = int(round(np.sqrt(p * n_features / c)))
                 s = min(max(s, 1), h - 1)  # at least c x 1 x 1 window is taken and at most c x h-1 x h-1
@@ -295,7 +294,6 @@ class SquareAttack(object):
                     value = np.random.choice([-eps, eps], size=[c, 1, 1])
                     deltas[i_img, :, center_h:center_h + s, center_w:center_w + s] = value
                     value_ = np.squeeze(value)
-                    box.append([center_h,center_w,center_h + s,center_w + s, value_[0], value_[1],value_[2]])
 
             x_new = np.clip(x_curr + deltas, self.lower_bound, self.upper_bound)
             logits = model(torch.from_numpy(x_new).cuda().float())

@@ -30,7 +30,7 @@ class NES(object):
         self.dataset_loader = DataLoaderMaker.get_test_attacked_data(dataset_name, 1)
 
         log.info("label index dict data build begin")
-        if self.dataset_name == "TinyImageNet":
+        if "ImageNet" in self.dataset_name: # ImageNet and TinyImageNet datasets
             self.candidate_loader = DataLoaderMaker.get_candidate_attacked_data(dataset_name, 1)
             self.dataset = self.candidate_loader.dataset
         else:
@@ -100,21 +100,12 @@ class NES(object):
             images.append(image)
         return torch.stack(images).cuda()  # B,C,H,W
 
-    # def xent_loss(self, logits, noise, true_labels, target_labels, top_k):
-    #     if self.targeted:
-    #         return -F.cross_entropy(logits, target_labels, reduction='none'), noise
-    #     else:
-    #         assert target_labels is None, "target label must set to None in untargeted attack"
-    #         return F.cross_entropy(logits, true_labels, reduction='none'), noise
-
     def xent_loss(self, logits, noise, true_labels, target_labels, top_k):
         if self.targeted:
             return F.cross_entropy(logits, target_labels, reduction='none'), noise  # FIXME 修改测试
         else:
             assert target_labels is None, "target label must set to None in untargeted attack"
             return F.cross_entropy(logits, true_labels, reduction='none'), noise
-
-
 
     def partial_info_loss(self, logits, noise, true_labels, target_labels, top_k):
         # logit 是融合了batch_size of noise 的, shape = (batch_size, num_classes)
@@ -204,8 +195,6 @@ class NES(object):
             with torch.no_grad():
                 self.make_adversarial_examples(batch_idx, images.cuda(), true_labels.cuda(), target_labels, args, target_model)
 
-
-
         log.info('{} is attacked finished ({} images)'.format(arch_name, self.total_images))
         log.info('        avg correct: {:.4f}'.format(self.correct_all.mean().item()))
         log.info('       avg not_done: {:.4f}'.format(self.not_done_all.mean().item()))  # 有多少图没做完
@@ -250,7 +239,7 @@ class NES(object):
             return x - lr * g / self.norm(g)
         return x + lr * g / self.norm(g)
 
-    def linf_step(self, x, g, lr):
+    def linf_image_step(self, x, g, lr):
         if self.targeted:
             return x - lr * torch.sign(g)
         return x + lr * torch.sign(g)
@@ -307,11 +296,11 @@ class NES(object):
         g = torch.zeros_like(adv_images).cuda()
         last_ls = []
         true_labels = true_labels.repeat(batch_size)  # for noise sampling points
-        max_iters = int(np.ceil(args.max_queries / args.samples_per_draw)) if k == self.num_classes else int(np.ceil(args.max_queries / (args.samples_per_draw + 1)))
-        if self.targeted:
-            max_iters = int(np.ceil(args.max_queries / (args.samples_per_draw + 1)))
+        # max_iters = int(np.ceil(args.max_queries / args.samples_per_draw)) if k == self.num_classes else int(np.ceil(args.max_queries / (args.samples_per_draw + 1)))
+        # if self.targeted:
+        #     max_iters = int(np.ceil(args.max_queries / (args.samples_per_draw + 1)))
         loss_fn = self.partial_info_loss if k < self.num_classes else self.xent_loss  # 若非paritial_information模式，k = num_classes
-        image_step = self.l2_image_step if args.norm == 'l2' else self.linf_step
+        image_step = self.l2_image_step if args.norm == 'l2' else self.linf_image_step
         proj_maker = self.l2_proj if args.norm == 'l2' else self.linf_proj  # 调用proj_maker返回的是一个函数
         proj_step = proj_maker(images, args.epsilon)
         while query[0].item() < args.max_queries:
@@ -357,7 +346,7 @@ class NES(object):
                     query += 1 # we must query for check robust_in_top_k
                 if self.robust_in_top_k(target_model, proposed_adv, target_labels, k):
                     if prop_de > 0:
-                        delta_epsilon = max(prop_de, args.min_delta_eps)# FIXME 换掉
+                        delta_epsilon = max(prop_de, args.min_delta_eps)
                         # delta_epsilon = prop_de
                     adv_images = proposed_adv
                     if self.targeted:
@@ -367,10 +356,6 @@ class NES(object):
                     break
                 elif current_lr >= args.min_lr * 2:
                     current_lr = current_lr / 2
-                    # log.info("[log] backtracking lr to %3f" % (current_lr,))
-                    # if is_first_call:
-                    #     epsilon += 1.0
-                    # is_first_call = False
                 else:
                     prop_de = prop_de / 2
                     if prop_de == 0:
@@ -379,19 +364,6 @@ class NES(object):
                         prop_de = 0
                     current_lr = max_lr
                     log.info("[log] backtracking eps to {:.3f}".format(epsilon - prop_de,))
-                    # if is_first_call:
-                    #     epsilon += 1.0
-                    # is_first_call = False
-                # elif proposed_epsilon > goal_epsilon and prop_de > 0:   # FIXME 这个elif 和最后一个else的顺序我自己跳闸了下
-                #     prop_de = prop_de / 2
-                #     if prop_de == 0:
-                #         break
-                #     if prop_de < 2e-3:
-                #         prop_de = 0
-                #     current_lr = max_lr
-                #     log.info("[log] backtracking eps to {:.3f}".format(epsilon - prop_de))
-                # elif current_lr > args.min_lr * 2:  # FIXME 这个elif 和最后一个else的顺序我自己跳闸了下
-                #     current_lr = current_lr / 2
 
 
             with torch.no_grad():
@@ -421,14 +393,12 @@ class NES(object):
 
 def get_exp_dir_name(dataset, norm, targeted, target_type, args):
 
-
     target_str = "untargeted" if not targeted else "targeted_{}".format(target_type)
     if args.attack_defense:
         dirname = 'NES-attack_on_defensive_model-{}-{}-{}'.format(dataset, norm, target_str)
     else:
         dirname = 'NES-attack-{}-{}-{}'.format(dataset, norm, target_str)
     return dirname
-
 
 def set_log_file(fname):
     import subprocess

@@ -109,7 +109,7 @@
           "starting_eps": 1.0,
           "epsilon": 0.05,
           "starting_delta_eps": 0.1,
-        "min_delta_eps": 0.001,
+          "min_delta_eps": 0.001,
           "max_lr": 1e-1,
           "min_lr": 1e-2
       }}

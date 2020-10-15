@@ -175,14 +175,12 @@ class SquareAttack(object):
             center_h += s
 
         x_best = np.clip(x + delta_init / np.sqrt(np.sum(delta_init ** 2, axis=(1, 2, 3), keepdims=True)) * eps, self.lower_bound, self.upper_bound)
-
         logits = model(torch.from_numpy(x_best).cuda().float())
         loss_min = self.loss(logits, torch.from_numpy(y).long().cuda(), loss_type=loss_type).detach().cpu().numpy()
-        margin_min = self.loss(logits, torch.from_numpy(y).long().cuda(), loss_type='cw_loss').detach().cpu().numpy()
+        margin_min = self.loss(logits, torch.from_numpy(y).long().cuda(), loss_type='cw_loss').detach().cpu().numpy()  # 用来判断有没有攻击成功
         n_queries = np.ones(x.shape[0])  # ones because we have already used 1 query
 
         time_start = time.time()
-        s_init = int(np.sqrt(p_init * n_features / c))
         n_iters = max_queries - 1
         metrics = np.zeros([n_iters, 7])
         for i_iter in range(n_iters):
@@ -228,10 +226,8 @@ class SquareAttack(object):
             delta_curr[:, :, center_h_2:center_h_2 + s2, center_w_2:center_w_2 + s2] = 0.0  # set window_2 to 0
             delta_curr[:, :, center_h:center_h + s, center_w:center_w + s] = new_deltas + 0  # update window_1
 
-            # hps_str = 's={}->{}'.format(s_init, s)
             x_new = x_curr + delta_curr / np.sqrt(np.sum(delta_curr ** 2, axis=(1, 2, 3), keepdims=True)) * eps
             x_new = np.clip(x_new, self.lower_bound, self.upper_bound)
-            # curr_norms_image = np.sqrt(np.sum((x_new - x_curr) ** 2, axis=(1, 2, 3), keepdims=True))
 
             logits = model(torch.from_numpy(x_new).cuda().float())
             loss = self.loss(logits, torch.from_numpy(y_curr).long().cuda(), loss_type=loss_type).detach().cpu().numpy()
@@ -303,8 +299,8 @@ class SquareAttack(object):
                 x_curr_window = x_curr[i_img, :, center_h:center_h + s, center_w:center_w + s]
                 x_best_curr_window = x_best_curr[i_img, :, center_h:center_h + s, center_w:center_w + s]
                 # prevent trying out a delta if it doesn't change x_curr (e.g. an overlapping patch)
-                while np.sum(np.abs(np.clip(x_curr_window + deltas[i_img, :, center_h:center_h + s, center_w:center_w + s], self.lower_bound,
-                                self.upper_bound) - x_best_curr_window) < 10 ** -7) == c * s * s:
+                while np.sum(np.abs(np.clip(x_curr_window + deltas[i_img, :, center_h:center_h + s, center_w:center_w + s],
+                                            self.lower_bound, self.upper_bound) - x_best_curr_window) < 10 ** -7) == c * s * s:
                     deltas[i_img, :, center_h:center_h + s, center_w:center_w + s] = np.random.choice([-eps, eps],
                                                                                                       size=[c, 1, 1])
 

@@ -1,10 +1,14 @@
+import sys
+sys.path.append("/home1/machen/meta_perturbations_black_box_attack")
 import argparse
 import collections
 import logging
 import json
-import sys
+
 import os.path as osp
 import glob
+from types import SimpleNamespace
+
 import numpy as np
 import os
 
@@ -38,6 +42,8 @@ class VBADAttack(object):
         self.delta_eps = args.delta_eps
         self.max_lr = args.max_lr
         self.min_lr = args.min_lr
+        self.targeted = args.targeted
+        self.norm = args.norm
 
         self.dataset_loader = DataLoaderMaker.get_test_attacked_data(args.dataset, 1)
         self.total_images = len(self.dataset_loader.dataset)
@@ -115,7 +121,7 @@ class VBADAttack(object):
             grads = torch.zeros(len(group_gen), device='cuda') # len(group_len) = frame_number * patch_number of a image
             count_in = 0
             loss_total = 0
-            log.info('sampling....')
+            # log.info('sampling....')
             batch_loss = []
             batch_noise = []
             batch_idx = []
@@ -169,9 +175,40 @@ class VBADAttack(object):
 
             if count_in == 0:
                 return None, None
-            log.info('count in: {}'.format(count_in))
+            # log.info('count in: {}'.format(count_in))
             return loss_total / count_in, grads
 
+    def normalize(self, t):
+        assert len(t.shape) == 4
+        norm_vec = torch.sqrt(t.pow(2).sum(dim=[1, 2, 3])).view(-1, 1, 1, 1)
+        norm_vec += (norm_vec == 0).float() * 1e-8
+        return norm_vec
+
+    def l2_image_step(self, x, g, lr):
+        if self.targeted:
+            return x - lr * g / self.normalize(g)
+        return x + lr * g / self.normalize(g)
+
+    def linf_image_step(self, x, g, lr):
+        if self.targeted:
+            return x - lr * torch.sign(g)
+        return x + lr * torch.sign(g)
+
+    def l2_proj(self, image, eps):
+        orig = image.clone()
+        def proj(new_x):
+            delta = new_x - orig
+            out_of_bounds_mask = (self.normalize(delta) > eps).float()
+            x = (orig + eps * delta / self.normalize(delta)) * out_of_bounds_mask
+            x += new_x * (1 - out_of_bounds_mask)
+            return x
+        return proj
+
+    def linf_proj(self, image, eps):
+        orig = image.clone()
+        def proj(new_x):
+            return orig + torch.clamp(new_x - orig, -eps, eps)
+        return proj
 
     def output_top_values(self, model, images, k=1):
         if images.dim() == 5:
@@ -188,7 +225,8 @@ class VBADAttack(object):
     def targeted_attack(self, target_model, images, target_class_images, target_labels):
         assert target_labels.size(0) == 1
         target_class = target_labels[0].item()
-
+        image_step = self.l2_image_step if self.norm == 'l2' else self.linf_image_step
+        proj_maker = self.l2_proj if self.norm == 'l2' else self.linf_proj
         delta_eps = self.delta_eps
         adv_images = target_class_images.clone()
         query_num = torch.zeros(adv_images.size(0))  # shape = 1
@@ -211,6 +249,7 @@ class VBADAttack(object):
             query_num += 1
 
             tentative_directions = self.directions_generator(adv_images).cuda()  # shape = (frame_number, C, H, W)
+            # tentative_directions is signed gradient (Linf) or normalized gradient (L2) according to args.norm
             group_gen.initialize(tentative_directions)
 
             l, g = self.sim_rectification_vector(target_model, adv_images, tentative_directions, self.sample_per_draw, self.sigma,
@@ -222,33 +261,27 @@ class VBADAttack(object):
 
             # Rectify tentative perturabtions
             assert g.size(0) == len(group_gen), 'rectification vector size error!'
-            rectified_directions = group_gen.apply_group_change(tentative_directions, torch.sign(g))
+            rectified_directions = group_gen.apply_group_change(tentative_directions, torch.sign(g) if self.norm == "linf" else g)
 
             if target_class == top_idx[0][0] and cur_eps <= self.eps:
                 log.info('early stop at iterartion {}'.format(query_num))
-                return True, query_num, adv_images
+                return True & bool(query_num[0].item() <= self.max_iter), query_num, adv_images
             idx = (top_idx == target_class).nonzero()
             pre_score = top_val[0][idx[0][1]]
             log.info('cur target prediction: {}'.format(pre_score))
             log.info('cur eps: {}'.format(cur_eps))
-
             cur_lr = cur_max_lr
             prop_de = delta_eps
 
             while True:
-
                 proposed_adv_images = adv_images.clone()  # 1,C,H,W
-
                 assert proposed_adv_images.size() == rectified_directions.size(), 'rectification error!'
                 # PGD
-                proposed_adv_images -= cur_lr * rectified_directions
+                proposed_adv_images = image_step(proposed_adv_images, rectified_directions, cur_lr)
                 proposed_eps = max(cur_eps - prop_de, self.eps)
-                bottom_bounded_adv = torch.where((images - proposed_eps) > proposed_adv_images, images - proposed_eps,
-                                                 proposed_adv_images)
-                bounded_adv = torch.where((images + proposed_eps) < bottom_bounded_adv, images + proposed_eps, bottom_bounded_adv)
-                clip_frame = torch.clamp(bounded_adv, 0., 1.)
-                proposed_adv_images = clip_frame.clone()
-
+                proj_step = proj_maker(images, proposed_eps)
+                proposed_adv_images = proj_step(proposed_adv_images)
+                proposed_adv_images = torch.clamp(proposed_adv_images, 0., 1.)
                 top_val, top_idx, _ = self.output_top_values(target_model, proposed_adv_images)
                 query_num += 1
                 if target_class in top_idx[0]:  # top_idx shape = (1, 1) 取第一帧，看看是否== target_class
@@ -306,7 +339,12 @@ class VBADAttack(object):
     def untargeted_attack(self, target_model, images, true_labels):
         assert true_labels.size(0) == 1
         ori_class = true_labels[0].item()
-        adv_images = torch.clamp(images.clone() + (torch.rand_like(images) * 2 - 1) * self.eps, 0., 1.)
+        image_step = self.l2_image_step if self.norm == 'l2' else self.linf_image_step
+        proj_maker = self.l2_proj if self.norm == 'l2' else self.linf_proj
+        proj_step = proj_maker(images, self.eps)
+        adv_images = image_step(images, torch.rand_like(images) * 2 - 1, self.eps)
+        adv_images = proj_step(adv_images)
+        adv_images = torch.clamp(adv_images, 0, 1)
         query_num = torch.zeros(adv_images.size(0))  # shape = 1
         cur_lr = self.max_lr
         last_p = []
@@ -318,16 +356,16 @@ class VBADAttack(object):
             top_val, top_idx, _ = self.output_top_values(target_model, adv_images)
             query_num += 1
             if ori_class != top_idx[0][0]:
-                log.info('early stop at iterartion {}'.format(query_num[0].item()))
-                return True, query_num, adv_images
+                # log.info('early stop at iterartion {}'.format(query_num[0].item()))
+                return True & bool(query_num[0].item() <= self.max_iter), query_num, adv_images
             idx = (top_idx == ori_class).nonzero()
             pre_score = top_val[0][idx[0][1]]
-            log.info('cur target prediction: {}'.format(pre_score))
+            # log.info('cur target prediction: {}'.format(pre_score))
 
             last_score.append(pre_score)
             last_score = last_score[-200:]
             if last_score[-1] >= last_score[0] and len(last_score) == 200:
-                log.info('FAIL: No Descent, Stop iteration')
+                # log.info('FAIL: No Descent, Stop iteration')
                 return False, query_num, adv_images
 
             # Annealing max learning rate
@@ -335,10 +373,10 @@ class VBADAttack(object):
             last_p = last_p[-20:]
             if last_p[-1] <= last_p[0] and len(last_p) == 20:
                 if cur_lr > self.min_lr:
-                    print("[log] Annealing max_lr")
+                    # print("[log] Annealing max_lr")
                     cur_lr = max(cur_lr / 2., self.min_lr)
                 last_p = []
-
+            # tentative_directions is signed gradient (Linf) or normalized gradient (L2) according to args.norm
             tentative_directions = self.directions_generator(adv_images).cuda()
             group_gen.initialize(tentative_directions)
 
@@ -346,27 +384,22 @@ class VBADAttack(object):
                                             ori_class, self.rank_transform, self.sub_num_sample, group_gen, untargeted=True)
             query_num += self.sample_per_draw
             if l is None and g is None:
-                log.info('nes sim fails, try again....')
                 continue
 
             # Rectify tentative perturabtions
             assert g.size(0) == len(group_gen), 'rectification vector size error!'
-            rectified_directions = group_gen.apply_group_change(tentative_directions, torch.sign(g))
-            proposed_adv_vid = adv_images
+            rectified_directions = group_gen.apply_group_change(tentative_directions, torch.sign(g) if self.norm == "linf" else g)
+            proposed_adv_images = adv_images
+            assert proposed_adv_images.size() == rectified_directions.size(), 'rectification error!'
 
-            assert proposed_adv_vid.size() == rectified_directions.size(), 'rectification error!'
-            # PGD
-            proposed_adv_vid += cur_lr * rectified_directions
-            bottom_bounded_adv = torch.where((images - self.eps) > proposed_adv_vid, images - self.eps,
-                                             proposed_adv_vid)
-            bounded_adv = torch.where((images + self.eps) < bottom_bounded_adv, images + self.eps, bottom_bounded_adv)
-            clip_frame = torch.clamp(bounded_adv, 0., 1.)
-            adv_images = clip_frame.clone()
-            log.info('step {} : loss {} | lr {}'.format(query_num[0].item(), l, cur_lr))
+            proposed_adv_images = image_step(proposed_adv_images, rectified_directions, cur_lr)
+            proposed_adv_images = proj_step(proposed_adv_images)
+            proposed_adv_images = torch.clamp(proposed_adv_images, 0., 1.)
+            adv_images = proposed_adv_images.clone()
         return False, query_num, adv_images
 
     def attack_all_images(self, args, arch_name, target_model, result_dump_path):
-        while target_model.input_size[-1] % args.image_split != 0:
+        while target_model.input_size[-1] % self.image_split != 0:
             args.image_split = args.image_split + 1
             self.image_split = args.image_split
         for batch_index, data_tuple in enumerate(self.dataset_loader):
@@ -417,23 +450,24 @@ class VBADAttack(object):
                 is_success, query, adv_images = self.targeted_attack(target_model, images, target_class_images, target_labels)
             else:
                 self.directions_generator.set_untargeted_params(images, self.random_mask, scale=5.)
-                is_success, query, adv_images =self.untargeted_attack(target_model, images, true_labels)
+                is_success, query, adv_images = self.untargeted_attack(target_model, images, true_labels)
 
             with torch.no_grad():
                 adv_logit = target_model(adv_images)
-            adv_pred = adv_logit.argmax(dim=1)
+            # adv_pred = adv_logit.argmax(dim=1)
             adv_prob = F.softmax(adv_logit, dim=1)
-            if args.targeted:
-                not_done = not_done * (1 - adv_pred.eq(target_labels).float()).float()  # not_done初始化为 correct, shape = (batch_size,)
-            else:
-                not_done = not_done * adv_pred.eq(true_labels).float()
+            not_done.fill_(1.0 - float(is_success))
+            # if args.targeted:
+            #     not_done = not_done * (1 - adv_pred.eq(target_labels).float()).float()  # not_done初始化为 correct, shape = (batch_size,)
+            # else:
+            #     not_done = not_done * adv_pred.eq(true_labels).float()
             success = (1 - not_done) * correct
             success_query = success * query.cuda()
             not_done_prob = adv_prob[torch.arange(1), true_labels] * not_done
 
-            log.info('Attacking image {} - {} / {}, query {}'.format(
-                batch_index, batch_index + 1, self.total_images,  int(query.min().item())
-            ))
+            log.info('Attacking {}-th image, query {}, success: {}'.format(
+                batch_index,  int(query.min().item()), is_success)
+            )
             log.info('        correct: {:.4f}'.format(correct.mean().item()))
             log.info('       not_done: {:.4f}'.format(not_done[correct.byte()].mean().item()))
             if success.sum().item() > 0:
@@ -477,21 +511,24 @@ def get_args_parse():
     parser = argparse.ArgumentParser()
     parser.add_argument('--targeted', action='store_true')
     parser.add_argument('--target_type', type=str, default='increment', choices=['random', 'least_likely', "increment"])
-    parser.add_argument('--arch', type=str, required=True)
+    parser.add_argument('--arch', type=str)
     parser.add_argument('--test_archs', action='store_true')
-    parser.add_argument('--surrogate_arch',type=str,required=True, choices=['resnet50','densenet121','densenet169'])
+    parser.add_argument('--json_config', type=str,
+                        default='/home1/machen/meta_perturbations_black_box_attack/configures/V-BAD_attack_conf.json',
+                        help='a configures file to be passed in instead of arguments')
+    parser.add_argument('--surrogate_arch',type=str,required=True, choices=['resnet50', 'resnet101', 'densenet121','densenet169'])
     parser.add_argument('--epsilon',type=float, default=0.05)
-    parser.add_argument('--delta_eps',type=float,default=0.5)
-    parser.add_argument('--max_lr',type=float,default=1e-2)
-    parser.add_argument('--min_lr',type=float,default=1e-3)
+    parser.add_argument('--delta_eps',type=float)
+    parser.add_argument('--max_lr',type=float,default=None)
+    parser.add_argument('--min_lr',type=float,default=5e-5)
     parser.add_argument('--starting_eps',type=float,default=1.0)
     parser.add_argument('--random_mask', default=0.9, type=float)
     parser.add_argument('--no_rank_transform', action='store_true')
     parser.add_argument('--max_queries',type=int, default=10000)
-    parser.add_argument('--sigma', type=float, default=1e-6)
-    parser.add_argument('--sample_per_draw', type=int, default=48, help='Number of samples used for NES')
+    parser.add_argument('--sigma', type=float, default=1e-3)
+    parser.add_argument('--sample_per_draw', type=int, default=50, help='Number of samples used for NES')
     parser.add_argument('--image_split', type=int, default=8)
-    parser.add_argument('--sub_num_sample', type=int, default=12,
+    parser.add_argument('--sub_num_sample', type=int, default=10,
                         help='Number of samples processed each time. Adjust this number if the gpu memory is limited.'
                              'This number should be even and sample_per_draw can be divisible by it.')
     parser.add_argument('--attack_defense', action="store_true")
@@ -499,16 +536,18 @@ def get_args_parse():
     parser.add_argument('--dataset',type=str, required=True)
     parser.add_argument('--gpu', type=int, required=True)
     parser.add_argument('--exp-dir', default='logs', type=str, help='directory to save results and logs')
+    parser.add_argument('--norm', type=str, choices=["linf","l2"], required=True)
+
     args = parser.parse_args()
     return args
 
 
-def get_exp_dir_name(dataset, norm, targeted, target_type, args):
+def get_exp_dir_name(dataset, surrogate_arch, norm, targeted, target_type, args):
     target_str = "untargeted" if not targeted else "targeted_{}".format(target_type)
     if args.attack_defense:
-        dirname = 'VBAD_attack_on_defensive_model-{}-{}-{}'.format(dataset, norm, target_str)
+        dirname = 'VBAD_attack_on_defensive_model_{}_surrogate_arch_{}_{}_{}'.format(dataset, surrogate_arch, norm, target_str)
     else:
-        dirname = 'VBAD_attack-{}-{}-{}'.format(dataset, norm, target_str)
+        dirname = 'VBAD_attack_{}_surrogate_arch_{}_{}_{}'.format(dataset, surrogate_arch, norm, target_str)
     return dirname
 
 def set_log_file(fname):
@@ -561,7 +600,17 @@ def main():
     args = get_args_parse()
     os.environ["TORCH_HOME"] = "/home1/machen/meta_perturbations_black_box_attack/train_pytorch_model/real_image_model/ImageNet-pretrained"
     os.environ["CUDA_VISIBLE_DEVICES"] = str(args.gpu)
-    args.exp_dir = osp.join(args.exp_dir, get_exp_dir_name(args.dataset, "linf", args.targeted, args.target_type, args))  # 随机产生一个目录用于实验
+    target_str = "targeted" if args.targeted else "untargeted"
+    json_conf = json.load(open(args.json_config))[args.dataset][target_str][args.norm]
+    args = vars(args)
+    args.update(json_conf)
+    args = SimpleNamespace(**args)
+    if args.targeted:
+        if args.dataset == "ImageNet":
+            args.max_queries = 50000
+
+    args.exp_dir = osp.join(args.exp_dir, get_exp_dir_name(args.dataset, args.surrogate_arch, args.norm, args.targeted, args.target_type, args))  # 随机产生一个目录用于实验
+    os.makedirs(args.exp_dir, exist_ok=True)
     if args.test_archs:
         if args.attack_defense:
             log_file_path = osp.join(args.exp_dir, 'run_defense_{}.log'.format(args.defense_model))
@@ -586,6 +635,10 @@ def main():
         resnet50 = models.resnet50(pretrained=True).eval()
         resnet50_extractor = ResNetFeatureExtractor(resnet50, layer).eval().cuda()
         extractors.append(resnet50_extractor)
+    elif args.surrogate_arch == "resnet101":
+        resnet101 = models.resnet101(pretrained=True).eval()
+        resnet101_extractor = ResNetFeatureExtractor(resnet101, layer).eval().cuda()
+        extractors.append(resnet101_extractor)
     elif args.surrogate_arch == "densenet121":
         densenet121 = models.densenet121(pretrained=True).eval()
         densenet121_extractor = DensenetFeatureExtractor(densenet121, layer).eval().cuda()
@@ -595,7 +648,7 @@ def main():
         densenet169_extractor = DensenetFeatureExtractor(densenet169, layer).eval().cuda()
         extractors.append(densenet169_extractor)
 
-    directions_generator = TentativePerturbationGenerator(extractors, part_size=32, preprocess=True)
+    directions_generator = TentativePerturbationGenerator(extractors, norm=args.norm, part_size=32, preprocess=True)
     attacker = VBADAttack(args, directions_generator)
     for arch in archs:
         if args.attack_defense:
