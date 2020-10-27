@@ -1,5 +1,5 @@
 """
-Implements SimBA attack
+Implements SimBA ODS attack
 """
 import json
 import os
@@ -20,7 +20,6 @@ from torch.nn import functional as F
 import glog as log
 import torch
 from dataset.standard_model import StandardModel
-from simba_attack.utils import diagonal_order, block_order
 
 
 class SimBAODS(object):
@@ -82,7 +81,7 @@ class SimBAODS(object):
             second_max_index = target_is_max.long() * argsort[:, 1] + (1 - target_is_max).long() * argsort[:, 0]
             target_logit = logits[torch.arange(logits.shape[0]), target]
             second_max_logit = logits[torch.arange(logits.shape[0]), second_max_index]
-            return second_max_logit - target_logit
+            return torch.sum(target_logit - second_max_logit)
         else:
             # untargeted cw loss: max_{i\neq y}logit_i - logit_y
             _, argsort = logits.sort(dim=1, descending=True)
@@ -90,26 +89,26 @@ class SimBAODS(object):
             second_max_index = gt_is_max.long() * argsort[:, 1] + (1 - gt_is_max).long() * argsort[:, 0]
             gt_logit = logits[torch.arange(logits.shape[0]), label]
             second_max_logit = logits[torch.arange(logits.shape[0]), second_max_index]
-            return gt_logit - second_max_logit
+            return torch.sum(second_max_logit - gt_logit)
 
     def xent_loss(self, logits, label, target=None):
         if target is not None:
-            return F.cross_entropy(logits, target, reduction='none')
+            return -F.cross_entropy(logits, target)
         else:
-            return -F.cross_entropy(logits, label, reduction='none')
+            return F.cross_entropy(logits, label)
 
     def loss(self, logits, true_labels, target_labels):
         if self.targeted:
-            return self.xent_loss(logits, true_labels, target_labels)
+            return self.xent_loss(logits, true_labels, target_labels).item()
         else:
-            return self.cw_loss(logits, true_labels, target_labels)
+            return self.cw_loss(logits, true_labels, target_labels).item()
 
     def l2_proj(self, image, eps):
         orig = image.clone()
         def proj(new_x):
             delta = new_x - orig
-            out_of_bounds_mask = (self.norm(delta) > eps).float()
-            x = (orig + eps * delta / self.norm(delta)) * out_of_bounds_mask
+            out_of_bounds_mask = (self.normalize(delta) > eps).float()
+            x = (orig + eps * delta / self.normalize(delta)) * out_of_bounds_mask
             x += new_x * (1 - out_of_bounds_mask)
             return x
         return proj
@@ -156,7 +155,7 @@ class SimBAODS(object):
         pred = logits.argmax(dim=1)
         correct = pred.eq(true_labels).float()
         loss_best = self.loss(logits, true_labels, target_labels)
-        queries = 0
+        queries = 1 # https://github.com/ermongroup/ODS/issues/4
         for m in range(max_iters):
             delta = self.get_perturbation(x_best, images.size(-1))
             for sign in [1,-1]:
@@ -183,10 +182,11 @@ class SimBAODS(object):
         if dist > self.l2_bound:
             x_best = proj_step(x_best)
             logits = model(x_best)
+            adv_pred = logits.argmax(dim=1)
             if args.targeted:
-                not_done =  (1 - logits.eq(target_labels).float()).float()  # not_done初始化为 correct, shape = (batch_size,)
+                not_done =  (1 - adv_pred.eq(target_labels).float()).float()  # not_done初始化为 correct, shape = (batch_size,)
             else:
-                not_done =  logits.eq(true_labels).float()
+                not_done =  adv_pred.eq(true_labels).float()
             success = (1 - not_done) * correct
         query = torch.zeros(1).float()
         query.fill_(queries)

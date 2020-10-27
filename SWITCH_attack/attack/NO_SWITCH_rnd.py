@@ -1,4 +1,7 @@
 import sys
+
+import random
+
 sys.path.append("/home1/machen/meta_perturbations_black_box_attack")
 import os
 import glog as log
@@ -8,7 +11,7 @@ import json
 import glob
 import os.path as osp
 import numpy as np
-from config import PY_ROOT, MODELS_TEST_STANDARD, CLASS_NUM, MODELS_TRAIN_STANDARD, MODELS_TRAIN_WITHOUT_RESNET
+from config import PY_ROOT, MODELS_TEST_STANDARD, CLASS_NUM
 from dataset.dataset_loader_maker import DataLoaderMaker
 from dataset.defensive_model import DefensiveModel
 from dataset.standard_model import StandardModel
@@ -34,7 +37,7 @@ class ImageIdxToOrigBatchIdx(object):
         return self.proj_dict[img_idx]
 
 
-class SWITCH_rnd_attack(object):
+class NoSWITCH_rnd_attack(object):
     def __init__(self, dataset, batch_size, targeted, target_type, epsilon, norm, lower_bound=0.0, upper_bound=1.0,
                  max_queries=10000):
         assert norm in ['linf', 'l2'], "{} is not supported".format(norm)
@@ -153,29 +156,8 @@ class SWITCH_rnd_attack(object):
                                 min((batch_index + 1) * args.batch_size, self.total_images))  # 选择这个batch的所有图片的index
         step_index = 0
         while query.min().item() < args.max_queries:
-            surrogate_gradients_1 = self.get_grad(surrogate_models[0], criterion, adv_images, true_labels, target_labels)
-            attempt_images = image_step(adv_images, surrogate_gradients_1, args.image_lr)
-            with torch.no_grad():
-                attempt_logits = target_model(attempt_images)
-            attempt_positive_loss = criterion(attempt_logits, true_labels, target_labels)
-
-            surrogate_gradients_2 = self.get_grad(surrogate_models[1], criterion, adv_images, true_labels, target_labels)
-            attempt_images = image_step(adv_images, surrogate_gradients_2, args.image_lr)
-            with torch.no_grad():
-                attempt_logits = target_model(attempt_images)
-            attempt_negative_loss = criterion(attempt_logits, true_labels, target_labels)
-
-            idx_positive_improved = (attempt_positive_loss >= l).float().view(-1, 1, 1, 1)
-            idx_negative_improved = (attempt_negative_loss >= l).float().view(-1, 1, 1, 1)
-            query = query + not_done
-            query = query + (1 - idx_positive_improved).view(-1) * not_done
-            idx_positive_larger_negative = (attempt_positive_loss >= attempt_negative_loss).float().view(-1, 1, 1, 1)
-
-            grad = idx_positive_improved * surrogate_gradients_1 + \
-                   (1 - idx_positive_improved) * idx_negative_improved * surrogate_gradients_2 + \
-                   (1 - idx_positive_improved) * (1 - idx_negative_improved) * idx_positive_larger_negative * surrogate_gradients_1 + \
-                   (1 - idx_positive_improved) * (1 - idx_negative_improved) * (1 - idx_positive_larger_negative) * surrogate_gradients_2
-
+            surrogate_model = random.choice(surrogate_models)
+            grad = self.get_grad(surrogate_model, criterion, adv_images, true_labels, target_labels)
             adv_images = image_step(adv_images, grad, args.image_lr)
             adv_images = proj_step(images, args.epsilon, adv_images)
             adv_images = torch.clamp(adv_images, 0, 1).detach()
@@ -300,13 +282,12 @@ class SWITCH_rnd_attack(object):
 
 
 
-def get_exp_dir_name(dataset, lr, loss, norm, targeted, target_type, args):
+def get_exp_dir_name(dataset, lr, loss, norm, targeted, target_type, surrogate_models, args):
     target_str = "untargeted" if not targeted else "targeted_{}".format(target_type)
-
     if args.attack_defense:
-        dirname = 'SWITCH_rnd_on_defensive_model-{}-{}_lr_{}-loss-{}-{}'.format(dataset, loss, lr, norm, target_str)
+        dirname = 'NO_SWITCH_rnd_using_{}_on_defensive_model-{}-{}_lr_{}-loss-{}-{}'.format(",".join(surrogate_models), dataset, lr,  loss, norm, target_str)
     else:
-        dirname = 'SWITCH_rnd-{}-{}_lr_{}-loss-{}-{}'.format(dataset, loss, lr, norm, target_str)
+        dirname = 'NO_SWITCH_rnd_using_{}-{}-{}_lr_{}-loss-{}-{}'.format(",".join(surrogate_models), dataset, lr, loss, norm, target_str)
     return dirname
 
 def print_args(args):
@@ -368,8 +349,16 @@ if __name__ == "__main__":
     if args.targeted:
         if args.dataset == "ImageNet":
             args.max_queries = 50000
+
+    train_model_names = {"CIFAR-10": ["resnet-110", "vgg19_bn"],
+                         "CIFAR-100": ["resnet-110", "vgg19_bn"],
+                         "TinyImageNet": ["resnet101", "vgg19_bn"]}
+    if args.attack_defense:
+        train_model_names = {"CIFAR-10": ["densenet-bc-100-12", "vgg19_bn"],
+                             "CIFAR-100": ["densenet-bc-100-12", "vgg19_bn"],
+                             "TinyImageNet": ["densenet169", "vgg19_bn"]}
     args.exp_dir = osp.join(args.exp_dir, get_exp_dir_name(args.dataset, args.image_lr, args.loss, args.norm,
-                                                           args.targeted, args.target_type, args))  # 随机产生一个目录用于实验
+                                                           args.targeted, args.target_type,train_model_names[args.dataset], args))  # 随机产生一个目录用于实验
     os.makedirs(args.exp_dir, exist_ok=True)
     if args.test_archs:
         if args.attack_defense:
@@ -419,13 +408,7 @@ if __name__ == "__main__":
     print_args(args)
 
     surrogate_models = []
-    train_model_names = {"CIFAR-10": ["resnet-110", "vgg19_bn"],
-                        "CIFAR-100": ["resnet-110",  "vgg19_bn"],
-                        "TinyImageNet": ["resnet101","vgg19_bn"]}
-    if args.attack_defense:
-        train_model_names = {"CIFAR-10": ["densenet-bc-100-12", "vgg19_bn"],
-                             "CIFAR-100": ["densenet-bc-100-12", "vgg19_bn"],
-                             "TinyImageNet": ["densenet169", "vgg19_bn"]}
+
     for surr_arch in train_model_names[args.dataset]:
         if surr_arch in archs:
             continue
@@ -433,8 +416,8 @@ if __name__ == "__main__":
         surrogate_model.eval()
         surrogate_models.append(surrogate_model)
 
-    attacker = SWITCH_rnd_attack(args.dataset, args.batch_size, args.targeted, args.target_type, args.epsilon,
-                                 args.norm, 0.0, 1.0, args.max_queries)
+    attacker = NoSWITCH_rnd_attack(args.dataset, args.batch_size, args.targeted, args.target_type, args.epsilon,
+                                   args.norm, 0.0, 1.0, args.max_queries)
     for arch in archs:
         if args.attack_defense:
             save_result_path = args.exp_dir + "/{}_{}_result.json".format(arch, args.defense_model)

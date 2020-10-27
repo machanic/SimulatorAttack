@@ -35,7 +35,7 @@ class ImageIdxToOrigBatchIdx(object):
         return self.proj_dict[img_idx]
 
 
-class SurrogateGradientAttack(object):
+class SwitchNeg(object):
     def __init__(self, dataset, batch_size, targeted, target_type, epsilon, norm, lower_bound=0.0, upper_bound=1.0,
                  max_queries=10000):
         assert norm in ['linf', 'l2'], "{} is not supported".format(norm)
@@ -54,10 +54,11 @@ class SurrogateGradientAttack(object):
         self.success_all = torch.zeros_like(self.query_all)
         self.success_query_all = torch.zeros_like(self.query_all)
         self.not_done_prob_all = torch.zeros_like(self.query_all)
-        # self.cos_similarity_all = torch.zeros(self.total_images, max_queries)   # N, T
+
         self.improve_loss_record_all = OrderedDict()
+        self.loss_x_pos_temp_record_all = OrderedDict()
+        self.loss_x_neg_temp_record_all = OrderedDict()
         self.improve_loss_after_switch_record_all = OrderedDict()
-        self.loss_x_temp_record_all = OrderedDict()
         self.loss_after_switch_grad_record_all = OrderedDict()
 
 
@@ -148,36 +149,50 @@ class SurrogateGradientAttack(object):
         pred = logit.argmax(dim=1)
         correct = pred.eq(true_labels).float()  # shape = (batch_size,)
         not_done = correct.clone()
-        improve_loss_record = defaultdict(list)  # 记录到底有没有switch
+
+        improve_loss_record = defaultdict(list)  # 记录到底有没有switch切换方向
         improve_loss_after_switch_record = defaultdict(list)
-        loss_x_temp_record = defaultdict(list)
+        loss_x_pos_temp_record = defaultdict(list)
+        loss_x_neg_temp_record = defaultdict(list)
         loss_after_switch_grad_record = defaultdict(list)
+
         selected = torch.arange(batch_index * args.batch_size,
                                 min((batch_index + 1) * args.batch_size, self.total_images))  # 选择这个batch的所有图片的index
-        for step_index in range(args.max_queries):
+        step_index = 0
+        while query.min().item() < args.max_queries:
             surrogate_gradients = self.get_grad(surrogate_model, criterion, adv_images, true_labels, target_labels)
             attempt_images = image_step(adv_images, surrogate_gradients, args.image_lr)
             with torch.no_grad():
                 attempt_logits = target_model(attempt_images)
-            attempt_loss = criterion(attempt_logits, true_labels, target_labels)
+            attempt_positive_loss = criterion(attempt_logits, true_labels, target_labels)
 
-            idx_improved = (attempt_loss >= l).float().view(-1,1,1,1)
+            attempt_images = image_step(adv_images, -surrogate_gradients, args.image_lr)
+            with torch.no_grad():
+                attempt_logits = target_model(attempt_images)
+            attempt_negative_loss = criterion(attempt_logits, true_labels, target_labels)
+
+            idx_positive_improved = (attempt_positive_loss >= l).float().view(-1, 1, 1, 1)
+            idx_negative_improved = (attempt_negative_loss >= l).float().view(-1, 1, 1, 1)
+            query = query + not_done
+            query = query + (1 - idx_positive_improved).view(-1) * not_done
+            idx_positive_larger_negative = (attempt_positive_loss >= attempt_negative_loss).float().view(-1, 1, 1, 1)
+            grad = idx_positive_improved * surrogate_gradients + \
+                   (1 - idx_positive_improved) * idx_negative_improved * (-surrogate_gradients) + \
+                   (1 - idx_positive_improved) * (1 - idx_negative_improved) * idx_positive_larger_negative * surrogate_gradients + \
+                   (1 - idx_positive_improved) * (1 - idx_negative_improved) * (1 - idx_positive_larger_negative) * (
+                       -surrogate_gradients)
+
             for image_idx_, batch_idx_ in sorted(img_idx_to_batch_idx.proj_dict.items(), key=lambda e:e[0]):
-                improve_loss_record[batch_idx_].append(int(idx_improved[image_idx_].item()))
-                loss_x_temp_record[batch_idx_].append(attempt_loss[image_idx_].item())
-
-            if args.no_negative:
-                grad = surrogate_gradients
-            else:
-                grad = surrogate_gradients * idx_improved + (1-idx_improved) * (-surrogate_gradients)
-            # similarity = self.compute_gradient_similarity(grad, true_gradients)  # B
-            # cos_similarity[:, step_index] = similarity.detach().cpu()
+                improve_loss_record[batch_idx_].append(int(idx_positive_improved[image_idx_].item()))
+                loss_x_pos_temp_record[batch_idx_].append(attempt_positive_loss[image_idx_].item())
+                loss_x_neg_temp_record[batch_idx_].append(attempt_negative_loss[image_idx_].item())
 
             adv_images = image_step(adv_images, grad, args.image_lr)
+
             with torch.no_grad():
                 attempt_logits_2 = target_model(adv_images)
             attempt_loss_2 = criterion(attempt_logits_2, true_labels, target_labels)
-            idx_improved_2 = (attempt_loss_2 >= l).float()
+            idx_improved_2 = (attempt_loss_2 >= l).long()
             for image_idx_, batch_idx_ in sorted(img_idx_to_batch_idx.proj_dict.items(), key=lambda e:e[0]):
                 improve_loss_after_switch_record[batch_idx_].append(int(idx_improved_2[image_idx_].item()))
                 loss_after_switch_grad_record[batch_idx_].append(attempt_loss_2[image_idx_].item())
@@ -199,8 +214,7 @@ class SurrogateGradientAttack(object):
             not_done_prob = adv_prob[torch.arange(adv_images.size(0)), true_labels] * not_done
             log.info('Attacking image {} - {} / {}, step {}, max query {}'.format(
                 batch_index * args.batch_size, (batch_index + 1) * args.batch_size,
-                self.total_images, step_index + 1, int(query.max().item())
-            ))
+                self.total_images, step_index + 1, int(query.max().item())))
             log.info('        correct: {:.4f}'.format(correct.mean().item()))
             log.info('       not_done: {:.4f}'.format(float(not_done.detach().cpu().sum().item()) / float(args.batch_size)))
             if success.sum().item() > 0:
@@ -237,7 +251,8 @@ class SurrogateGradientAttack(object):
                 value = eval(key)[img_idx].item()
                 value_all[pos] = value  # 由于value_all是全部图片都放在一个数组里，当前batch选择出来
         img_idx_to_batch_idx.proj_dict.clear()
-        for key in ["improve_loss_record", "improve_loss_after_switch_record","loss_x_temp_record","loss_after_switch_grad_record"]:
+        for key in ["improve_loss_record", "improve_loss_after_switch_record","loss_x_pos_temp_record",
+                    "loss_x_neg_temp_record", "loss_after_switch_grad_record"]:
             values = eval(key)
             for batch_idx, value in sorted(values.items(), key=lambda e:e[0]):
                 pos = selected[batch_idx].item()
@@ -277,7 +292,8 @@ class SurrogateGradientAttack(object):
                 target_labels = None
 
             self.attack_images(batch_idx, images, true_labels, target_labels, target_model, surrogate_model, args)
-
+        self.not_done_all[(self.query_all > args.max_queries).byte()] = 1
+        self.success_all[(self.query_all > args.max_queries).byte()] = 0
         log.info('{} is attacked finished ({} images)'.format(arch_name, self.total_images))
         log.info('        avg correct: {:.4f}'.format(self.correct_all.mean().item()))
         log.info('       avg not_done: {:.4f}'.format(self.not_done_all.mean().item()))  # 有多少图没做完
@@ -302,7 +318,8 @@ class SurrogateGradientAttack(object):
                           "not_done_prob": self.not_done_prob_all[self.not_done_all.byte()].mean().item(),
                           "improve_loss_record": self.improve_loss_record_all,
                           "improve_loss_after_switch_record": self.improve_loss_after_switch_record_all,
-                          "loss_x_temp_record": self.loss_x_temp_record_all,
+                          "loss_x_pos_temp_record": self.loss_x_pos_temp_record_all,
+                          "loss_x_neg_temp_record": self.loss_x_neg_temp_record_all,
                           "loss_after_switch_grad_record": self.loss_after_switch_grad_record_all,
                           "args": vars(args)}
         with open(result_dump_path, "w") as result_file_obj:
@@ -312,7 +329,7 @@ class SurrogateGradientAttack(object):
 
 def get_exp_dir_name(dataset, loss, norm, targeted, target_type, args):
     target_str = "untargeted" if not targeted else "targeted_{}".format(target_type)
-    if args.no_negative:
+    if args.NO_SWITCH:
         if args.attack_defense:
             dirname = 'NO_SWITCH_neg_stats_attack_on_defensive_model-{}-{}_loss-{}-{}'.format(dataset, loss, norm,
                                                                                              target_str)
@@ -363,7 +380,7 @@ if __name__ == "__main__":
                         help='directory to save results and logs')
     parser.add_argument('--attack_defense',action="store_true")
     parser.add_argument('--defense_model',type=str, default=None)
-    parser.add_argument('--no_negative',action="store_true")
+    parser.add_argument('--NO_SWITCH',action="store_true")
     args = parser.parse_args()
     os.environ["CUDA_DEVICE_ORDER"] = "PCI_BUS_ID"
     os.environ['CUDA_VISIBLE_DEVICES'] = str(args.gpu)
@@ -437,8 +454,8 @@ if __name__ == "__main__":
     surrogate_model.cuda()
     surrogate_model.eval()
 
-    attacker = SurrogateGradientAttack(args.dataset, args.batch_size, args.targeted, args.target_type, args.epsilon,
-                                       args.norm, 0.0, 1.0, args.max_queries)
+    attacker = SwitchNeg(args.dataset, args.batch_size, args.targeted, args.target_type, args.epsilon,
+                         args.norm, 0.0, 1.0, args.max_queries)
     for arch in archs:
         if args.attack_defense:
             save_result_path = args.exp_dir + "/{}_{}_result.json".format(arch, args.defense_model)

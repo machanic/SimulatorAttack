@@ -13,12 +13,10 @@ from adversarial_defense.feature_distillation.jpeg import convert_images
 from adversarial_defense.feature_scatter.attack_methods import Attack_FeaScatter
 from adversarial_defense.model.denoise_resnet import DenoiseResNet50, DenoiseResNet101, DenoiseResNet152, \
     DenoiseResNet34
-from adversarial_defense.model.feature_defense_model import FeatureDefenseModel
 from adversarial_defense.model.guided_denoiser_network import Net
 from adversarial_defense.model.pcl_resnet import PrototypeConformityLossResNet
 from adversarial_defense.post_averaging.post_averaged_models import PostAveragedNetwork
 from cifar_models_myself.efficient_densenet import EfficientDenseNet
-from cifar_models_myself.ghostnet import ghost_net
 from cifar_models_myself.miscellaneous import Identity
 from config import pretrained_cifar_model_conf, IN_CHANNELS, IMAGE_SIZE, CLASS_NUM, PY_ROOT
 from tiny_imagenet_models.densenet import densenet161, densenet121, densenet169, densenet201
@@ -451,9 +449,6 @@ class MetaLearnerModelBuilder(object):
             depth = 40
             block_config = [(depth - 4) // 6 for _ in range(3)]
             return EfficientDenseNet(IN_CHANNELS[dataset],block_config=block_config, num_classes=CLASS_NUM[dataset], small_inputs=False, efficient=False)
-        elif arch ==  "ghost_net":
-            network = ghost_net(IN_CHANNELS[dataset], CLASS_NUM[dataset])
-            return network
         model = vision_models.__dict__[arch](pretrained=False)
         return model
 
@@ -478,8 +473,6 @@ class MetaLearnerModelBuilder(object):
             network = resnext101_32x4d(pretrained=None)
         elif arch == "resnext64_4":
             network = resnext101_64x4d(pretrained=None)
-        elif arch == "ghost_net":
-            network = ghost_net(IN_CHANNELS[dataset], CLASS_NUM[dataset])
         elif arch.startswith("inception"):
             network = inception_v3(pretrained=False)
         elif arch == "WRN-28-10-drop":

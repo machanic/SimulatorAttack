@@ -9,7 +9,7 @@ import json
 import glob
 import os.path as osp
 import numpy as np
-from config import PY_ROOT, MODELS_TEST_STANDARD, CLASS_NUM, MODELS_TRAIN_STANDARD, MODELS_TRAIN_WITHOUT_RESNET
+from config import PY_ROOT, MODELS_TEST_STANDARD, CLASS_NUM
 from dataset.dataset_loader_maker import DataLoaderMaker
 from dataset.defensive_model import DefensiveModel
 from dataset.standard_model import StandardModel
@@ -38,7 +38,7 @@ class ImageIdxToOrigBatchIdx(object):
 
 class SWITCH_rnd_stats_attack(object):
     def __init__(self, dataset, batch_size, targeted, target_type, epsilon, norm, lower_bound=0.0, upper_bound=1.0,
-                 max_queries=10000):
+                 max_queries=10000, surrogate_model_names=None):
         assert norm in ['linf', 'l2'], "{} is not supported".format(norm)
         self.epsilon = epsilon
         self.norm = norm
@@ -59,8 +59,10 @@ class SWITCH_rnd_stats_attack(object):
         self.improve_loss_record_all = OrderedDict()
         self.improve_loss_after_switch_record_all = OrderedDict()
         self.surrogate_model_record_all = OrderedDict()
-        self.loss_x_temp_record_all = OrderedDict()
+        self.loss_x_pos_temp_record_all = OrderedDict()
+        self.loss_x_neg_temp_record_all = OrderedDict()
         self.loss_after_switch_grad_record_all = OrderedDict()
+        self.surrogate_model_names = surrogate_model_names
 
     def delete_tensor_by_index_list(self, del_index_list,  *tensors):
         return_tensors = []
@@ -141,7 +143,7 @@ class SWITCH_rnd_stats_attack(object):
         assert cos_similarity.size(0) == grad_a.size(0)
         return cos_similarity
 
-    def attack_images(self, batch_index, images, true_labels, target_labels, target_model, surrogate_model, other_surrogate_models, args):
+    def attack_images(self, batch_index, images, true_labels, target_labels, target_model, surrogate_models, args):
         image_step = self.l2_image_step if args.norm == 'l2' else self.linf_image_step
         img_idx_to_batch_idx = ImageIdxToOrigBatchIdx(args.batch_size)
         proj_step = self.l2_proj_step if args.norm == 'l2' else self.linf_proj_step
@@ -161,46 +163,49 @@ class SWITCH_rnd_stats_attack(object):
         improve_loss_record = defaultdict(list)  # 记录到底有没有switch
         surrogate_model_record = defaultdict(list)
         improve_loss_after_switch_record = defaultdict(list)
-        loss_x_temp_record = defaultdict(list)
+        loss_x_pos_temp_record = defaultdict(list)
+        loss_x_neg_temp_record = defaultdict(list)
         loss_after_switch_grad_record = defaultdict(list)
-
-        for step_index in range(args.max_queries):
-            surrogate_gradients = self.get_grad(surrogate_model, criterion, adv_images, true_labels, target_labels)
-            attempt_images = image_step(adv_images, surrogate_gradients, args.image_lr)
+        step_index = 0
+        while query.min().item() < args.max_queries:
+            surrogate_gradients_1 = self.get_grad(surrogate_models[0], criterion, adv_images, true_labels, target_labels)
+            attempt_images = image_step(adv_images, surrogate_gradients_1, args.image_lr)
             with torch.no_grad():
                 attempt_logits = target_model(attempt_images)
-            attempt_loss = criterion(attempt_logits, true_labels, target_labels)
-            idx_improved = (attempt_loss >= l).float()
-            other_surrogate_gradients = -surrogate_gradients
-            select_p = random.random()
-            for image_idx_, batch_idx_ in sorted(img_idx_to_batch_idx.proj_dict.items(), key=lambda e:e[0]):
-                improve_loss_record[batch_idx_].append(int(idx_improved[image_idx_].item()))
-                loss_x_temp_record[batch_idx_].append(attempt_loss[image_idx_].item())
-            if (1-idx_improved).sum().item() > 0 and select_p >= args.p:
-                surrogate_dict = random.choice(other_surrogate_models)
-                other_surrogate_model = surrogate_dict["model"]
-                model_name = surrogate_dict["name"]
-                for batch_idx_ in sorted(img_idx_to_batch_idx.proj_dict.values()):
-                    if improve_loss_record[batch_idx_][-1] == 0:
-                        surrogate_model_record[batch_idx_].append(MODELS_TRAIN_STANDARD[args.dataset].index(model_name))
-                    else:
-                        surrogate_model_record[batch_idx_].append(-1)
+            attempt_positive_loss = criterion(attempt_logits, true_labels, target_labels)
 
-                other_surrogate_model = other_surrogate_model.cuda()
-                adv_images_ = adv_images
-                if adv_images.size(-1) != other_surrogate_model.input_size[-1]:
-                    adv_images_ = F.interpolate(adv_images, size=target_model.input_size[-1], mode='bilinear', align_corners=True)
-                other_surrogate_gradients = self.get_grad(other_surrogate_model, criterion, adv_images_, true_labels, target_labels)
-                if adv_images.size(-1) != other_surrogate_model.input_size[-1]:
-                    other_surrogate_gradients = F.interpolate(other_surrogate_gradients, size=adv_images.size(-1), mode='bilinear', align_corners=True)
-                other_surrogate_model.cpu()
-            idx_improved = idx_improved.view(-1,1,1,1)
-            grad = surrogate_gradients * idx_improved + (1 - idx_improved) * other_surrogate_gradients
+            surrogate_gradients_2 = self.get_grad(surrogate_models[1], criterion, adv_images, true_labels, target_labels)
+            attempt_images = image_step(adv_images, surrogate_gradients_2, args.image_lr)
+            with torch.no_grad():
+                attempt_logits = target_model(attempt_images)
+            attempt_negative_loss = criterion(attempt_logits, true_labels, target_labels)
+            idx_positive_improved = (attempt_positive_loss >= l).float().view(-1, 1, 1, 1)
+            idx_negative_improved = (attempt_negative_loss >= l).float().view(-1, 1, 1, 1)
+            query = query + not_done
+            query = query + (1 - idx_positive_improved).view(-1) * not_done
+            idx_positive_larger_negative = (attempt_positive_loss >= attempt_negative_loss).float().view(-1, 1, 1, 1)
+
+            grad = idx_positive_improved * surrogate_gradients_1 + \
+                   (1 - idx_positive_improved) * idx_negative_improved * surrogate_gradients_2 + \
+                   (1 - idx_positive_improved) * (1 - idx_negative_improved) * idx_positive_larger_negative * surrogate_gradients_1 + \
+                   (1 - idx_positive_improved) * (1 - idx_negative_improved) * (1 - idx_positive_larger_negative) * surrogate_gradients_2
+            select_first_model = torch.ones(adv_images.size(0)).float().cuda()
+            select_second_model = torch.ones(adv_images.size(0)).float().cuda() * 2
+            select_models = idx_positive_improved.view(-1) * select_first_model + \
+                   (1 - idx_positive_improved.view(-1)) * idx_negative_improved.view(-1) * select_second_model + \
+                   (1 - idx_positive_improved.view(-1)) * (1 - idx_negative_improved.view(-1)) * idx_positive_larger_negative.view(-1) * select_first_model + \
+                   (1 - idx_positive_improved.view(-1)) * (1 - idx_negative_improved.view(-1)) * (1 - idx_positive_larger_negative.view(-1)) * select_second_model
+            for image_idx_, batch_idx_ in sorted(img_idx_to_batch_idx.proj_dict.items(), key=lambda e:e[0]):
+                improve_loss_record[batch_idx_].append(int(idx_positive_improved[image_idx_].item()))
+                loss_x_pos_temp_record[batch_idx_].append(attempt_positive_loss[image_idx_].item())
+                loss_x_neg_temp_record[batch_idx_].append(attempt_negative_loss[image_idx_].item())
+                surrogate_model_record[batch_idx_].append(int(select_models[image_idx_].item()))
+
             adv_images = image_step(adv_images, grad, args.image_lr)
             with torch.no_grad():
                 attempt_logits_2 = target_model(adv_images)
             attempt_loss_2 = criterion(attempt_logits_2, true_labels, target_labels)
-            idx_improved_2 = (attempt_loss_2 >= l).float()
+            idx_improved_2 = (attempt_loss_2 >= l).long()
             for image_idx_, batch_idx_ in sorted(img_idx_to_batch_idx.proj_dict.items(), key=lambda e:e[0]):
                 improve_loss_after_switch_record[batch_idx_].append(int(idx_improved_2[image_idx_].item()))
                 loss_after_switch_grad_record[batch_idx_].append(attempt_loss_2[image_idx_].item())
@@ -220,10 +225,13 @@ class SWITCH_rnd_stats_attack(object):
             success = (1 - not_done) * correct
             success_query = success * query
             not_done_prob = adv_prob[torch.arange(adv_images.size(0)), true_labels] * not_done
+            self.not_done_all[(self.query_all > args.max_queries).byte()] = 1
+            self.success_all[(self.query_all > args.max_queries).byte()] = 0
             log.info('Attacking image {} - {} / {}, step {}, max query {}'.format(
                 batch_index * args.batch_size, (batch_index + 1) * args.batch_size,
                 self.total_images, step_index + 1, int(query.max().item())
             ))
+            step_index+=1
             log.info('        correct: {:.4f}'.format(correct.mean().item()))
             log.info('       not_done: {:.4f}'.format(float(not_done.detach().cpu().sum().item()) / float(args.batch_size)))
             if success.sum().item() > 0:
@@ -259,14 +267,15 @@ class SWITCH_rnd_stats_attack(object):
                 value = eval(key)[img_idx].item()
                 value_all[pos] = value  # 由于value_all是全部图片都放在一个数组里，当前batch选择出来
         img_idx_to_batch_idx.proj_dict.clear()
-        for key in ["improve_loss_record", "improve_loss_after_switch_record","loss_x_temp_record","loss_after_switch_grad_record","surrogate_model_record"]:
+        for key in ["improve_loss_record", "improve_loss_after_switch_record","loss_x_pos_temp_record", "loss_x_neg_temp_record",
+                    "loss_after_switch_grad_record","surrogate_model_record"]:
             values = eval(key)
             for batch_idx, value in sorted(values.items(), key=lambda e:e[0]):
                 pos = selected[batch_idx].item()
                 value_all = getattr(self, key + "_all")
                 value_all[pos] = value
 
-    def attack_all_images(self, args, arch_name, target_model, surrogate_model, other_surrogate_models, result_dump_path):
+    def attack_all_images(self, args, arch_name, target_model, surrogate_models, result_dump_path):
         for batch_idx, data_tuple in enumerate(self.dataset_loader):
             if args.dataset == "ImageNet":
                 if target_model.input_size[-1] >= 299:
@@ -297,8 +306,9 @@ class SWITCH_rnd_stats_attack(object):
                     raise NotImplementedError('Unknown target_type: {}'.format(args.target_type))
             else:
                 target_labels = None
-            self.attack_images(batch_idx, images, true_labels, target_labels, target_model, surrogate_model, other_surrogate_models, args)
-
+            self.attack_images(batch_idx, images, true_labels, target_labels, target_model, surrogate_models, args)
+        self.not_done_all[(self.query_all > args.max_queries).byte()] = 1
+        self.success_all[(self.query_all > args.max_queries).byte()] = 0
         log.info('{} is attacked finished ({} images)'.format(arch_name, self.total_images))
         log.info('        avg correct: {:.4f}'.format(self.correct_all.mean().item()))
         log.info('       avg not_done: {:.4f}'.format(self.not_done_all.mean().item()))  # 有多少图没做完
@@ -324,7 +334,9 @@ class SWITCH_rnd_stats_attack(object):
                           "improve_loss_record": self.improve_loss_record_all,
                           "improve_loss_after_switch_record": self.improve_loss_after_switch_record_all,
                           "surrogate_model_record": self.surrogate_model_record_all,
-                          "loss_x_temp_record": self.loss_x_temp_record_all,
+                          "surrogate_models_index_to_name": self.surrogate_model_names,
+                          "loss_x_pos_temp_record": self.loss_x_pos_temp_record_all,
+                          "loss_x_neg_temp_record": self.loss_x_neg_temp_record_all,
                           "loss_after_switch_grad_record": self.loss_after_switch_grad_record_all,
                           "args": vars(args)}
         with open(result_dump_path, "w") as result_file_obj:
@@ -332,12 +344,14 @@ class SWITCH_rnd_stats_attack(object):
         log.info("done, write stats info to {}".format(result_dump_path))
 
 
-def get_exp_dir_name(dataset, loss, norm, targeted, target_type, args):
+def get_exp_dir_name(dataset, loss, norm, targeted, target_type, surrogate_model_names, args):
     target_str = "untargeted" if not targeted else "targeted_{}".format(target_type)
     if args.attack_defense:
-        dirname = 'SWITCH_rnd_stats_attack_on_defensive_model-{}-{}_loss-{}-{}'.format(dataset, loss, norm, target_str)
+        dirname = 'SWITCH_rnd_stats_attack_using_{}_defensive_model-{}-{}_loss-{}-{}'.format(",".join(surrogate_model_names),
+                                                                                             dataset, loss, norm, target_str)
     else:
-        dirname = 'SWITCH_rnd_stats_attack-{}-{}_loss-{}-{}'.format(dataset, loss, norm, target_str)
+        dirname = 'SWITCH_rnd_stats_attack_using_{}-{}-{}_loss-{}-{}'.format(",".join(surrogate_model_names),
+                                                                             dataset, loss, norm, target_str)
     return dirname
 
 def print_args(args):
@@ -403,8 +417,15 @@ if __name__ == "__main__":
     if args.targeted:
         if args.dataset == "ImageNet":
             args.max_queries = 50000
+    train_model_names = {"CIFAR-10": ["resnet-110", "densenet-bc-100-12"],
+                         "CIFAR-100": ["resnet-110", "densenet-bc-100-12"],
+                         "TinyImageNet": ["resnet101", "densenet169"]}
+    if args.attack_defense:
+        train_model_names = {"CIFAR-10": ["densenet-bc-100-12", "vgg19_bn"],
+                             "CIFAR-100": ["densenet-bc-100-12", "vgg19_bn"],
+                             "TinyImageNet": ["densenet169", "vgg19_bn"]}
     args.exp_dir = osp.join(args.exp_dir, get_exp_dir_name(args.dataset, args.loss, args.norm, args.targeted, args.target_type,
-                                             args))  # 随机产生一个目录用于实验
+                                             train_model_names[args.dataset], args))  # 随机产生一个目录用于实验
     os.makedirs(args.exp_dir, exist_ok=True)
     if args.test_archs:
         if args.attack_defense:
@@ -452,20 +473,18 @@ if __name__ == "__main__":
     log.info("Log file is written in {}".format(log_file_path))
     log.info('Called with args:')
     print_args(args)
-    surrogate_model = StandardModel(args.dataset, args.surrogate_arch, False)
-    surrogate_model.cuda()
-    surrogate_model.eval()
-    other_surrogate_models = []
-    train_model_names = MODELS_TRAIN_STANDARD[args.dataset] if not args.attack_defense else MODELS_TRAIN_WITHOUT_RESNET[args.dataset]
-    for surr_arch in train_model_names:
-        if surr_arch == args.surrogate_arch or surr_arch in archs:
+    surrogate_models = []
+
+    for surr_arch in train_model_names[args.dataset]:
+        if surr_arch in archs:
             continue
-        other_surrogate_model = StandardModel(args.dataset, surr_arch, False)
-        other_surrogate_model.eval()
-        other_surrogate_models.append({"name": surr_arch, "model":other_surrogate_model})
+        surrogate_model = StandardModel(args.dataset, surr_arch, False)
+        surrogate_model.cuda()
+        surrogate_model.eval()
+        surrogate_models.append(surrogate_model)
 
     attacker = SWITCH_rnd_stats_attack(args.dataset, args.batch_size, args.targeted, args.target_type, args.epsilon,
-                                       args.norm, 0.0, 1.0, args.max_queries)
+                                       args.norm, 0.0, 1.0, args.max_queries, train_model_names[args.dataset])
 
 
     for arch in archs:
@@ -483,6 +502,6 @@ if __name__ == "__main__":
             model = StandardModel(args.dataset, arch, no_grad=True)
         model.cuda()
         model.eval()
-        attacker.attack_all_images(args, arch,model, surrogate_model, other_surrogate_models, save_result_path)
+        attacker.attack_all_images(args, arch,model, surrogate_models, save_result_path)
         model.cpu()
         log.info("Save result of attacking {} done".format(arch))

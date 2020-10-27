@@ -21,9 +21,9 @@ from torch.nn import functional as F
 class MGAAttack(object):
     def __init__(self, pop_size=5, generations=1000, cross_rate=0.7,
                  mutation_rate=0.001, max_queries=2000,
-                 epsilon=8. / 255, ensemble_models=None, iters=10, targeted=False):
-        self.loss_fn = nn.CrossEntropyLoss(reduction='none')
-        self.dataset_loader = DataLoaderMaker.get_test_attacked_data(args.dataset, args.batch_size)
+                 epsilon=8. / 255, iters=10, ensemble_models=None, targeted=False):
+        self.loss_fn = nn.CrossEntropyLoss()
+        self.dataset_loader = DataLoaderMaker.get_test_attacked_data(args.dataset, 1)
         self.total_images = len(self.dataset_loader.dataset)
         # parameters about evolution algorithm
         self.pop_size = pop_size
@@ -51,9 +51,9 @@ class MGAAttack(object):
 
     def is_success(self, logits, y):
         label = logits.argmax(dim=1).item()
-        if self.targeted and label == y:
+        if self.targeted and label == y[0].item():
             return True
-        elif not self.targeted and label != y:
+        elif not self.targeted and label != y[0].item():
             return True
         return False
 
@@ -76,10 +76,11 @@ class MGAAttack(object):
             self.adv = adv.detach().cpu()
         return loss.item()
 
-    def get_fitness(self, model, lw, x, y):  # lw的shape = (2,C,H,W)
+    def get_fitness(self, model, lw, x, y, query):  # lw的shape = (2,C,H,W)
         first, second = self.idx[0], self.idx[1]
         if self.is_change[first] == 1:  # losser changed, so fitness also change
             f1 = self.fitness_helper(model, lw[0], x, y)
+            query += 1
             self.pop_fitness[first] = f1
             self.is_change[first] = 0
         else:
@@ -87,6 +88,7 @@ class MGAAttack(object):
 
         if self.is_change[second] == 1:
             f2 = self.fitness_helper(model, lw[1], x, y)
+            query += 1
             self.pop_fitness[second] = f2
             self.is_change[second] = 0
         else:
@@ -120,7 +122,7 @@ class MGAAttack(object):
         positive = delta > 0
         delta[negative] = 0
         delta[positive] = 1
-        return delta.cpu().numpy()
+        return delta.detach().cpu().numpy()
 
     def make_adversarial_examples(self, model, images, labels):
         """
@@ -136,7 +138,7 @@ class MGAAttack(object):
         query = torch.zeros(images.size(0))
         self.pop_fitness = np.zeros(self.pop_size)
         self.is_change = np.zeros(self.pop_size)
-        if self.ensemble_models is None:
+        if not self.ensemble_models:
             # initial population
             pop = np.random.randint(0, 2, (self.pop_size, channels, height, width))
         else:
@@ -146,10 +148,10 @@ class MGAAttack(object):
         for n in range(self.pop_size):
             self.pop_fitness[n] = self.fitness_helper(model, pop[n], images, labels)  # 根据每个初始化的pop得到loss
             query+=1
-        for i in range(self.generations):
+        for i in range(self.generations):  # 1000次循环
             self.idx = np.random.choice(np.arange(self.pop_size), size=2, replace=False)  # 从[0-4]随机生成2个数字
             lw = pop[self.idx].copy()  # short for losser winner
-            fitness = self.get_fitness(model, lw, images, labels)
+            fitness = self.get_fitness(model, lw, images, labels, query)
             # if success, abort early
             if self.adv is not None:
                 return self.adv, query
@@ -168,7 +170,7 @@ class MGAAttack(object):
 
             # losser changed, so fitness should also change
             self.is_change[self.idx[fidx[0]]] = 1
-            if query >= self.max_queries:  # 失败了
+            if query[0].item() >= self.max_queries:  # 失败了
                 delta = lw[1] * self.epsilon
                 delta = torch.from_numpy(delta).to(dtype=images.dtype, device=images.device)
                 adv = images + delta.unsqueeze(0)
@@ -218,38 +220,37 @@ class MGAAttack(object):
                 adv_images, query = self.make_adversarial_examples(target_model, images, target_labels)
             else:
                 adv_images, query = self.make_adversarial_examples(target_model, images, true_labels)
+            adv_images = adv_images.cuda()
             with torch.no_grad():
                 adv_logit = target_model(adv_images)
             adv_pred = adv_logit.argmax(dim=1)
-            adv_prob = F.softmax(adv_logit, dim=1)
             if args.targeted:
                 not_done = not_done * (1 - adv_pred.eq(
                     target_labels).float()).float()  # not_done初始化为 correct, shape = (batch_size,)
             else:
                 not_done = not_done * adv_pred.eq(true_labels).float()  # 只要是跟原始label相等的，就还需要query，还没有成功
             success = (1 - not_done) * correct
+            success = success.detach().cpu()
             success_query = success * query
-            not_done_prob = adv_prob[torch.arange(args.batch_size), true_labels] * not_done
 
-            log.info('Attacking image {} - {} / {}, max query {}'.format(
-                batch_idx * args.batch_size, (batch_idx + 1) * args.batch_size,
-                self.total_images, int(query.max().item())
+
+            log.info('Attack {}-th image over, query:{}, succes: {}'.format(
+                batch_idx, int(query[0].item()), bool(success[0].item())
             ))
             log.info('        correct: {:.4f}'.format(correct.mean().item()))
             log.info('       not_done: {:.4f}'.format(not_done[correct.byte()].mean().item()))
             if success.sum().item() > 0:
                 log.info('     mean_query: {:.4f}'.format(success_query[success.byte()].mean().item()))
                 log.info('   median_query: {:.4f}'.format(success_query[success.byte()].median().item()))
-            if not_done.sum().item() > 0:
-                log.info('  not_done_prob: {:.4f}'.format(not_done_prob[not_done.byte()].mean().item()))
-            selected = torch.arange(batch_idx * args.batch_size,
-                                    min((batch_idx + 1) * args.batch_size, self.total_images))
+            selected = torch.arange(batch_idx * 1,
+                                    min((batch_idx + 1) * 1, self.total_images))
             for key in ['query', 'correct', 'not_done',
-                        'success', 'success_query', 'not_done_prob']:
+                        'success', 'success_query']:
                 value_all = getattr(self, key + "_all")
                 value = eval(key)
                 value_all[selected] = value.detach().float().cpu()  #
-
+        self.not_done_all[(self.query_all > args.max_queries).byte()] = 1
+        self.success_all[(self.query_all > args.max_queries).byte()] = 0
         log.info('{} is attacked finished ({} images)'.format(arch_name, self.total_images))
         log.info('        avg correct: {:.4f}'.format(self.correct_all.mean().item()))
         log.info('       avg not_done: {:.4f}'.format(self.not_done_all.mean().item()))  # 有多少图没做完
@@ -274,12 +275,18 @@ class MGAAttack(object):
         log.info("done, write stats info to {}".format(result_dump_path))
 
 
-def get_exp_dir_name(dataset, loss, norm, targeted, target_type, args):
+def get_exp_dir_name(dataset, norm, targeted, target_type, args):
     target_str = "untargeted" if not targeted else "targeted_{}".format(target_type)
-    if args.attack_defense:
-        dirname = 'MGA_attack_on_defensive_model-{}-{}_loss-{}-{}'.format(dataset, loss, norm, target_str)
+    if args.ensemble_models:
+        if args.attack_defense:
+            dirname = 'MGA_attack_ensemble_models_on_defensive_model-{}-{}-{}'.format(dataset, norm, target_str)
+        else:
+            dirname = 'MGA_attack_ensemble_models-{}-{}-{}'.format(dataset, norm, target_str)
     else:
-        dirname = 'MGA_attack-{}-{}_loss-{}-{}'.format(dataset, loss, norm, target_str)
+        if args.attack_defense:
+            dirname = 'MGA_attack_on_defensive_model-{}-{}-{}'.format(dataset, norm, target_str)
+        else:
+            dirname = 'MGA_attack-{}-{}-{}'.format(dataset, norm, target_str)
     return dirname
 
 def set_log_file(fname):
@@ -299,21 +306,24 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser()
 
     parser.add_argument('--ensemble_models', action='store_true')
-    parser.add_argument('--model', type=str, default='resnet50_cifar10')
-    parser.add_argument('--dataset', type=str, default='cifar10')
+    parser.add_argument('--arch', default=None, type=str, help='network architecture')
+    parser.add_argument('--test_archs', action="store_true")
+    parser.add_argument('--dataset', type=str, required=True)
     parser.add_argument('--epsilon', type=float, default=0.03137)
     parser.add_argument('--max_queries', type=int, default=10000)
     parser.add_argument('--pop_size', type=int, default=5)
-    parser.add_argument('--num_attack', type=int, default=2000)
-    parser.add_argument("--loss", type=str, required=True, choices=["xent", "cw"])
     parser.add_argument('--mr', type=float, default=0.001)
     parser.add_argument('--cr', type=float, default=0.7)
     parser.add_argument('--iters', type=int, default=10)
     parser.add_argument('--targeted', default=False, action='store_true')
-    parser.add_argument('--defense_method', default=None, type=str, choices=["RP", 'JPEG', 'BitDepthReduce'])
+    parser.add_argument('--target_type', type=str, default='increment', choices=['random', 'least_likely', "increment"])
+    parser.add_argument('--attack_defense', action="store_true")
+    parser.add_argument('--defense_model', type=str, default=None)
     parser.add_argument('--json-config', type=str,
-                        default='/home1/machen/meta_perturbations_black_box_attack/configures/MGA_attack_conf.json',
+                        # default='/home1/machen/meta_perturbations_black_box_attack/configures/MGA_attack_conf.json',
                         help='a configures file to be passed in instead of arguments')
+    parser.add_argument('--exp-dir', default='logs', type=str,
+                        help='directory to save results and logs')
     args = parser.parse_args()
     args_dict = None
     if not args.json_config:
@@ -332,11 +342,11 @@ if __name__ == "__main__":
             args.max_queries = 50000
 
     # defense method
-    if args.defense_method:
-        defense_method = args.defense_method+"()"
-        input_trans = eval(defense_method)
-    else:
-        input_trans = None
+    # if args.defense_method:
+    #     defense_method = args.defense_method+"()"
+    #     input_trans = eval(defense_method)
+    # else:
+    #     input_trans = None
     if args.test_archs:
         archs = []
         if args.dataset == "CIFAR-10" or args.dataset == "CIFAR-100":
@@ -369,8 +379,12 @@ if __name__ == "__main__":
     args.arch = ", ".join(archs)
     models = []
     if args.ensemble_models:
-        train_model_names = MODELS_TRAIN_STANDARD[args.dataset] if not args.attack_defense else MODELS_TRAIN_WITHOUT_RESNET[args.dataset]
-        for surr_arch in train_model_names:
+        train_model_names = {"CIFAR-10": ["densenet-bc-100-12", "vgg19_bn", "resnet-110"],
+                        "CIFAR-100": ["densenet-bc-100-12", "vgg19_bn", "resnet-110"],
+                        "TinyImageNet": ["vgg19_bn","resnet101","resnet152"], "ImageNet": ["densenet121","dpn68","resnext101_32x4d"]}
+
+
+        for surr_arch in train_model_names[args.dataset]:
             if surr_arch in archs:
                 continue
             surrogate_model = StandardModel(args.dataset, surr_arch, False)
@@ -378,7 +392,7 @@ if __name__ == "__main__":
             models.append(surrogate_model)
 
     args.exp_dir = os.path.join(args.exp_dir,
-                            get_exp_dir_name(args.dataset, args.loss, args.norm, args.targeted, args.target_type,
+                            get_exp_dir_name(args.dataset, "linf", args.targeted, args.target_type,
                                              args))  # 随机产生一个目录用于实验
     os.makedirs(args.exp_dir, exist_ok=True)
 

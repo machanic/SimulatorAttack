@@ -13,7 +13,6 @@ from adversarial_defense.feature_scatter.utils import one_hot_tensor, label_smoo
 import adversarial_defense.feature_scatter.ot as ot
 import pickle
 
-device = 'cuda' if torch.cuda.is_available() else 'cpu'
 
 
 class Attack_None(nn.Module):

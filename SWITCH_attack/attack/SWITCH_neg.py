@@ -35,7 +35,7 @@ class ImageIdxToOrigBatchIdx(object):
         return self.proj_dict[img_idx]
 
 
-class SurrogateGradientAttack(object):
+class SwitchNegAttack(object):
     def __init__(self, dataset, batch_size, targeted, target_type, epsilon, norm, lower_bound=0.0, upper_bound=1.0,
                  max_queries=10000):
         assert norm in ['linf', 'l2'], "{} is not supported".format(norm)
@@ -152,26 +152,32 @@ class SurrogateGradientAttack(object):
         not_done = correct.clone()
         selected = torch.arange(batch_index * args.batch_size,
                                 min((batch_index + 1) * args.batch_size, self.total_images))  # 选择这个batch的所有图片的index
-        for step_index in range(args.max_queries):
-            # true_gradients = self.get_grad(target_model, criterion, adv_images, true_labels,target_labels)
+        step_index = 0
+        while query.min().item() < args.max_queries:
             surrogate_gradients = self.get_grad(surrogate_model, criterion, adv_images, true_labels, target_labels)
-            # cos_similarity = torch.sum(true_gradients * surrogate_gradients) / \
-            #                  torch.clamp(torch.sqrt(torch.sum(true_gradients * true_gradients) *
-            #                                         torch.sum(surrogate_gradients * surrogate_gradients)), min=1e-12)
-            # log.info("Transfer cosine angle :{:.4f}".format(cos_similarity))
-            attempt_images = image_step(adv_images, surrogate_gradients, args.image_lr)
-            with torch.no_grad():
-                attempt_logits = target_model(attempt_images)
-            attempt_loss = criterion(attempt_logits, true_labels, target_labels)
-
-            idx_improved = (attempt_loss >= l).float().view(-1,1,1,1)
-            if args.no_negative:
+            if args.NO_SWITCH:
                 grad = surrogate_gradients
             else:
-                grad = surrogate_gradients * idx_improved + (1-idx_improved) * (-surrogate_gradients)
-            # similarity = self.compute_gradient_similarity(grad, true_gradients)  # B
-            # cos_similarity[:, step_index] = similarity.detach().cpu()
+                attempt_images = image_step(adv_images, surrogate_gradients, args.image_lr)
+                with torch.no_grad():
+                    attempt_logits = target_model(attempt_images)
+                attempt_positive_loss = criterion(attempt_logits, true_labels, target_labels)
 
+                attempt_images = image_step(adv_images, -surrogate_gradients, args.image_lr)
+                with torch.no_grad():
+                    attempt_logits = target_model(attempt_images)
+                attempt_negative_loss = criterion(attempt_logits, true_labels, target_labels)
+
+                idx_positive_improved = (attempt_positive_loss >= l).float().view(-1,1,1,1)
+                idx_negative_improved = (attempt_negative_loss >= l).float().view(-1,1,1,1)
+                query = query + not_done
+                query = query + (1-idx_positive_improved).view(-1) * not_done
+                idx_positive_larger_negative = (attempt_positive_loss>=attempt_negative_loss).float().view(-1,1,1,1)
+
+                grad = idx_positive_improved * surrogate_gradients  + \
+                       (1 - idx_positive_improved) * idx_negative_improved * (-surrogate_gradients) + \
+                       (1 - idx_positive_improved) * (1 - idx_negative_improved) * idx_positive_larger_negative * surrogate_gradients + \
+                       (1 - idx_positive_improved) * (1 - idx_negative_improved) * (1-idx_positive_larger_negative) * (-surrogate_gradients)
             adv_images = image_step(adv_images, grad, args.image_lr)
             adv_images = proj_step(images, args.epsilon, adv_images)
             adv_images = torch.clamp(adv_images, 0, 1).detach()
@@ -192,6 +198,7 @@ class SurrogateGradientAttack(object):
                 batch_index * args.batch_size, (batch_index + 1) * args.batch_size,
                 self.total_images, step_index + 1, int(query.max().item())
             ))
+            step_index += 1
             log.info('        correct: {:.4f}'.format(correct.mean().item()))
             log.info('       not_done: {:.4f}'.format(float(not_done.detach().cpu().sum().item()) / float(args.batch_size)))
             if success.sum().item() > 0:
@@ -262,7 +269,8 @@ class SurrogateGradientAttack(object):
                 target_labels = None
 
             self.attack_images(batch_idx, images, true_labels, target_labels, target_model, surrogate_model, args)
-
+        self.not_done_all[(self.query_all > args.max_queries).byte()] = 1
+        self.success_all[(self.query_all > args.max_queries).byte()] = 0
         log.info('{} is attacked finished ({} images)'.format(arch_name, self.total_images))
         log.info('        avg correct: {:.4f}'.format(self.correct_all.mean().item()))
         log.info('       avg not_done: {:.4f}'.format(self.not_done_all.mean().item()))  # 有多少图没做完
@@ -292,19 +300,18 @@ class SurrogateGradientAttack(object):
         log.info("done, write stats info to {}".format(result_dump_path))
 
 
-def get_exp_dir_name(dataset, loss, norm, targeted, target_type, args):
+def get_exp_dir_name(dataset, lr, loss, norm, targeted, target_type, args):
     target_str = "untargeted" if not targeted else "targeted_{}".format(target_type)
-    if args.no_negative:
+    if args.NO_SWITCH:
         if args.attack_defense:
-            dirname = 'NO_SWITCH_on_defensive_model-{}-{}_loss-{}-{}'.format(dataset, loss, norm,
-                                                                                             target_str)
+            dirname = 'NO_SWITCH_on_defensive_model-{}-{}_lr_{}-loss-{}-{}'.format(dataset, loss, lr, norm, target_str)
         else:
-            dirname = 'NO_SWITCH-{}-{}_loss-{}-{}'.format(dataset, loss, norm, target_str)
+            dirname = 'NO_SWITCH-{}-{}_lr_{}-loss-{}-{}'.format(dataset, loss, lr, norm, target_str)
     else:
         if args.attack_defense:
-            dirname = 'SWITCH_neg_on_defensive_model-{}-{}_loss-{}-{}'.format(dataset, loss, norm, target_str)
+            dirname = 'SWITCH_neg_on_defensive_model-{}-{}_lr_{}-loss-{}-{}'.format(dataset, loss, lr, norm, target_str)
         else:
-            dirname = 'SWITCH_neg-{}-{}_loss-{}-{}'.format(dataset, loss, norm, target_str)
+            dirname = 'SWITCH_neg-{}-{}_lr_{}-loss-{}-{}'.format(dataset, loss, lr, norm, target_str)
     return dirname
 
 def print_args(args):
@@ -345,7 +352,7 @@ if __name__ == "__main__":
                         help='directory to save results and logs')
     parser.add_argument('--attack_defense',action="store_true")
     parser.add_argument('--defense_model',type=str, default=None)
-    parser.add_argument('--no_negative',action="store_true")
+    parser.add_argument('--NO_SWITCH',action="store_true")
     args = parser.parse_args()
     os.environ["CUDA_DEVICE_ORDER"] = "PCI_BUS_ID"
     os.environ['CUDA_VISIBLE_DEVICES'] = str(args.gpu)
@@ -366,8 +373,8 @@ if __name__ == "__main__":
     if args.targeted:
         if args.dataset == "ImageNet":
             args.max_queries = 50000
-    args.exp_dir = osp.join(args.exp_dir, get_exp_dir_name(args.dataset, args.loss, args.norm, args.targeted, args.target_type,
-                                             args))  # 随机产生一个目录用于实验
+    args.exp_dir = osp.join(args.exp_dir, get_exp_dir_name(args.dataset, args.image_lr, args.loss, args.norm,
+                                                           args.targeted, args.target_type, args))  # 随机产生一个目录用于实验
     os.makedirs(args.exp_dir, exist_ok=True)
     if args.test_archs:
         if args.attack_defense:
@@ -419,8 +426,8 @@ if __name__ == "__main__":
     surrogate_model.cuda()
     surrogate_model.eval()
 
-    attacker = SurrogateGradientAttack(args.dataset, args.batch_size, args.targeted, args.target_type, args.epsilon,
-                                       args.norm, 0.0, 1.0, args.max_queries)
+    attacker = SwitchNegAttack(args.dataset, args.batch_size, args.targeted, args.target_type, args.epsilon,
+                               args.norm, 0.0, 1.0, args.max_queries)
     for arch in archs:
         if args.attack_defense:
             save_result_path = args.exp_dir + "/{}_{}_result.json".format(arch, args.defense_model)

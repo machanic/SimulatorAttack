@@ -14,7 +14,6 @@ from cifar_models_myself import Conv3, DenseNet121, DenseNet169, DenseNet201, Go
 from cifar_models_myself.miscellaneous import Identity
 from config import pretrained_cifar_model_conf, IN_CHANNELS, IMAGE_SIZE, CLASS_NUM, PY_ROOT
 from cifar_models_myself.efficient_densenet import EfficientDenseNet
-from cifar_models_myself.ghostnet import ghost_net
 from tiny_imagenet_models.densenet import densenet161, densenet121, densenet169, densenet201
 from tiny_imagenet_models.resnext import resnext101_32x4d, resnext101_64x4d
 import torchvision.models as vision_models
@@ -27,31 +26,27 @@ class StandardModel(nn.Module):
     A StandardModel object wraps a cnn model.
     This model always accept standard image: in [0, 1] range, RGB order, un-normalized, NCHW format
     """
-    def __init__(self, dataset, arch, no_grad=True,
-                 is_subspace_attack_ref_arch=False, ref_arch_train_data=None, ref_arch_epoch=None, load_pretrained=True):
+    def __init__(self, dataset, arch, no_grad=True, load_pretrained=True):
         super(StandardModel, self).__init__()
         # init cnn model
         self.in_channels = IN_CHANNELS[dataset]
         self.dataset = dataset
-        if is_subspace_attack_ref_arch:
-            trained_model_path = self.get_subspace_attack_reference_model_path(ref_arch_train_data, ref_arch_epoch, arch)
-        else:
-            if dataset.startswith("CIFAR"):
-                trained_model_path = "{root}/train_pytorch_model/real_image_model/{dataset}-pretrained/{arch}/checkpoint.pth.tar".format(root=PY_ROOT, dataset=dataset, arch=arch)
-                assert os.path.exists(trained_model_path), "{} does not exist!".format(trained_model_path)
-            elif dataset == "TinyImageNet":
-                trained_model_path = "{root}/train_pytorch_model/real_image_model/{dataset}@{arch}@*.pth.tar".format(root=PY_ROOT, dataset=dataset, arch=arch)
-                trained_model_path_list = list(glob.glob(trained_model_path))
-                assert len(trained_model_path_list)>0, "{} does not exist!".format(trained_model_path)
-                trained_model_path = trained_model_path_list[0]
-            else:
-                trained_model_path = "{root}/train_pytorch_model/real_image_model/{dataset}-pretrained/checkpoints/{arch}*.pth".format(
-                    root=PY_ROOT, dataset=dataset, arch=arch)
-                trained_model_path_ls = list(glob.glob(trained_model_path))
-                assert trained_model_path_ls,  "{} does not exist!".format(trained_model_path)
-                trained_model_path = trained_model_path_ls[0]
 
-        self.is_subspace_attack_ref_arch = is_subspace_attack_ref_arch
+        if dataset.startswith("CIFAR"):
+            trained_model_path = "{root}/train_pytorch_model/real_image_model/{dataset}-pretrained/{arch}/checkpoint.pth.tar".format(root=PY_ROOT, dataset=dataset, arch=arch)
+            assert os.path.exists(trained_model_path), "{} does not exist!".format(trained_model_path)
+        elif dataset == "TinyImageNet":
+            trained_model_path = "{root}/train_pytorch_model/real_image_model/{dataset}@{arch}@*.pth.tar".format(root=PY_ROOT, dataset=dataset, arch=arch)
+            trained_model_path_list = list(glob.glob(trained_model_path))
+            assert len(trained_model_path_list)>0, "{} does not exist!".format(trained_model_path)
+            trained_model_path = trained_model_path_list[0]
+        else:
+            trained_model_path = "{root}/train_pytorch_model/real_image_model/{dataset}-pretrained/checkpoints/{arch}*.pth".format(
+                root=PY_ROOT, dataset=dataset, arch=arch)
+            trained_model_path_ls = list(glob.glob(trained_model_path))
+            assert trained_model_path_ls,  "{} does not exist!".format(trained_model_path)
+            trained_model_path = trained_model_path_ls[0]
+
         self.cnn = self.make_model(dataset, arch, self.in_channels, CLASS_NUM[dataset],
                                    trained_model_path=trained_model_path, load_pretrained=load_pretrained)
         # init cnn model meta-information
@@ -114,83 +109,125 @@ class StandardModel(nn.Module):
             state_dict[new_key] = val
         model.load_state_dict(state_dict)
 
-    def get_subspace_attack_reference_model_path(self, ref_arch_train_data, ref_arch_epoch, ref_arch):
-        if ref_arch_train_data == "CIFAR-10.1":
-            prefix = 'subspace_attack_ref_model/cifar10.1-models'
-            if ref_arch_epoch == "final":
-                suffix = "final.pth"
-            elif ref_arch_epoch == "best":
-                suffix = "model_best.pth"
-            else:
-                raise NotImplementedError('Unknown epoch {} for train data {}'.format(ref_arch_epoch, ref_arch_train_data))
-        elif ref_arch_train_data == "CIFAR-100.1":
-            prefix = 'subspace_attack_ref_model/cifar100.1-models'
-            if ref_arch_epoch == "final":
-                suffix = "final.pth"
-            elif ref_arch_epoch == "best":
-                suffix = "model_best.pth"
-            else:
-                raise NotImplementedError('Unknown epoch {} for train data {}'.format(ref_arch_epoch, ref_arch_train_data))
-        elif ref_arch_train_data == "ImageNetv2-val":
-            prefix = "subspace_attack_ref_model/imagenetv2-v1val45000-models"
-            if ref_arch_epoch == 'final':
-                suffix = 'checkpoint.pth.tar'
-            elif ref_arch_epoch == 'best':
-                suffix = 'model_best.pth.tar'
-            else:
-                raise NotImplementedError('Unknown epoch {} for train data {}'.format(
-                    ref_arch_epoch, ref_arch_train_data))
-        elif ref_arch_train_data in ["CIFAR-10","CIFAR-100"]:
-            return  "{root}/train_pytorch_model/real_image_model/{dataset}-pretrained/{arch}/checkpoint.pth.tar".format(root=PY_ROOT,
-                                                                                        dataset=self.dataset, arch=ref_arch)
-        elif ref_arch_train_data == "ImageNet":
-            trained_model_path = "{root}/train_pytorch_model/real_image_model/{dataset}-pretrained/checkpoints/{arch}*.pth".format(
-                root=PY_ROOT, dataset=self.dataset, arch=ref_arch)
-            trained_model_path_ls = list(glob.glob(trained_model_path))
-            assert trained_model_path_ls, "{} does not exist!".format(trained_model_path)
-            return trained_model_path_ls[0]
-        else:
-            raise NotImplementedError('Unknown train data {}'.format(ref_arch_train_data))
-        model_path = osp.join(PY_ROOT, "train_pytorch_model", prefix, ref_arch, suffix)
-        return model_path
+    # def get_subspace_attack_reference_model_path(self, ref_arch_train_data, ref_arch_epoch, ref_arch):
+    #     if ref_arch_train_data == "CIFAR-10.1":
+    #         prefix = 'subspace_attack_ref_model/cifar10.1-models'
+    #         if ref_arch_epoch == "final":
+    #             suffix = "final.pth"
+    #         elif ref_arch_epoch == "best":
+    #             suffix = "model_best.pth"
+    #         else:
+    #             raise NotImplementedError('Unknown epoch {} for train data {}'.format(ref_arch_epoch, ref_arch_train_data))
+    #     elif ref_arch_train_data == "CIFAR-100.1":
+    #         prefix = 'subspace_attack_ref_model/cifar100.1-models'
+    #         if ref_arch_epoch == "final":
+    #             suffix = "final.pth"
+    #         elif ref_arch_epoch == "best":
+    #             suffix = "model_best.pth"
+    #         else:
+    #             raise NotImplementedError('Unknown epoch {} for train data {}'.format(ref_arch_epoch, ref_arch_train_data))
+    #     elif ref_arch_train_data == "ImageNetv2-val":
+    #         prefix = "subspace_attack_ref_model/imagenetv2-v1val45000-models"
+    #         if ref_arch_epoch == 'final':
+    #             suffix = 'checkpoint.pth.tar'
+    #         elif ref_arch_epoch == 'best':
+    #             suffix = 'model_best.pth.tar'
+    #         else:
+    #             raise NotImplementedError('Unknown epoch {} for train data {}'.format(
+    #                 ref_arch_epoch, ref_arch_train_data))
+    #     elif ref_arch_train_data in ["CIFAR-10","CIFAR-100"]:
+    #         return  "{root}/train_pytorch_model/real_image_model/{dataset}-pretrained/{arch}/checkpoint.pth.tar".format(root=PY_ROOT,
+    #                                                                                     dataset=self.dataset, arch=ref_arch)
+    #     elif ref_arch_train_data == "ImageNet":
+    #         trained_model_path = "{root}/train_pytorch_model/real_image_model/{dataset}-pretrained/checkpoints/{arch}*.pth".format(
+    #             root=PY_ROOT, dataset=self.dataset, arch=ref_arch)
+    #         trained_model_path_ls = list(glob.glob(trained_model_path))
+    #         assert trained_model_path_ls, "{} does not exist!".format(trained_model_path)
+    #         return trained_model_path_ls[0]
+    #     else:
+    #         raise NotImplementedError('Unknown train data {}'.format(ref_arch_train_data))
+    #     model_path = osp.join(PY_ROOT, "train_pytorch_model", prefix, ref_arch, suffix)
+    #     return model_path
 
-    def construct_cifar_model(self, arch, dataset, num_classes):
-        conf = pretrained_cifar_model_conf[dataset][arch]
-        arch = arch.split("-")[0].lower()
-        if arch.startswith('resnext'):
-            model = models.__dict__[arch](
+    def construct_cifar_model(self, arch, dataset, in_channels, num_classes):
+        arch_ = arch.split("-")[0].lower()
+        if arch_ == 'gdas':
+            model = models.gdas(in_channels, num_classes)
+            model.mean = [125.3 / 255, 123.0 / 255, 113.9 / 255]
+            model.std = [63.0 / 255, 62.1 / 255, 66.7 / 255]
+            model.input_space = 'RGB'
+            model.input_range = [0, 1]
+            model.input_size = [in_channels, IMAGE_SIZE[dataset][0], IMAGE_SIZE[dataset][1]]
+        elif arch_ == 'pyramidnet272':
+            model = models.pyramidnet272(in_channels, num_classes)
+            model.mean = [0.49139968, 0.48215841, 0.44653091]
+            model.std = [0.24703223, 0.24348513, 0.26158784]
+            model.input_space = 'RGB'
+            model.input_range = [0, 1]
+            model.input_size = [in_channels, IMAGE_SIZE[dataset][0], IMAGE_SIZE[dataset][1]]
+        elif arch_.startswith('resnext'):
+            conf = pretrained_cifar_model_conf[dataset][arch]
+            model = models.__dict__[arch_](
                 cardinality=conf["cardinality"],
                 num_classes=num_classes,
                 depth=conf["depth"],
                 widen_factor=conf["widen_factor"],
                 dropRate=conf["drop"],
             )
-        elif arch.startswith('densenet'):
-            model = models.__dict__[arch](
+            model.mean = [0.4914, 0.4822, 0.4465]
+            model.std = [0.2023, 0.1994, 0.2010]
+            model.input_space = 'RGB'
+            model.input_range = [0, 1]
+            model.input_size = [in_channels, IMAGE_SIZE[dataset][0], IMAGE_SIZE[dataset][1]]
+        elif arch_.startswith('densenet'):
+            conf = pretrained_cifar_model_conf[dataset][arch]
+            model = models.__dict__[arch_](
                 num_classes=num_classes,
                 depth=conf["depth"],
                 growthRate=conf["growthRate"],
                 compressionRate=conf["compressionRate"],
                 dropRate=conf["drop"],
             )
-        elif arch.startswith('wrn'):
-            model = models.__dict__[arch](
+            model.mean = [0.4914, 0.4822, 0.4465]
+            model.std = [0.2023, 0.1994, 0.2010]
+            model.input_space = 'RGB'
+            model.input_range = [0, 1]
+            model.input_size = [in_channels, IMAGE_SIZE[dataset][0], IMAGE_SIZE[dataset][1]]
+        elif arch_.startswith('wrn'):
+            conf = pretrained_cifar_model_conf[dataset][arch]
+            model = models.__dict__[arch_](
                 num_classes=num_classes,
                 depth=conf["depth"],
                 widen_factor=conf["widen_factor"],
                 dropRate=conf["drop"],
             )
-        elif arch.endswith('resnet'):
-            model = models.__dict__[arch](
+            model.mean = [0.4914, 0.4822, 0.4465]
+            model.std = [0.2023, 0.1994, 0.2010]
+            model.input_space = 'RGB'
+            model.input_range = [0, 1]
+            model.input_size = [in_channels, IMAGE_SIZE[dataset][0], IMAGE_SIZE[dataset][1]]
+        elif arch_.endswith('resnet'):
+            conf = pretrained_cifar_model_conf[dataset][arch]
+            model = models.__dict__[arch_](
                 num_classes=num_classes,
                 depth=conf["depth"],
                 block_name=conf["block_name"],
             )
+            model.mean = [0.4914, 0.4822, 0.4465]
+            model.std = [0.2023, 0.1994, 0.2010]
+            model.input_space = 'RGB'
+            model.input_range = [0, 1]
+            model.input_size = [in_channels, IMAGE_SIZE[dataset][0], IMAGE_SIZE[dataset][1]]
         else:
-            model = models.__dict__[arch](num_classes=num_classes)
+            model = models.__dict__[arch_](num_classes=num_classes)
+            model.mean = [0.4914, 0.4822, 0.4465]
+            model.std = [0.2023, 0.1994, 0.2010]
+            model.input_space = 'RGB'
+            model.input_range = [0, 1]
+            model.input_size = [in_channels, IMAGE_SIZE[dataset][0], IMAGE_SIZE[dataset][1]]
         return model
 
-    def make_model(self, dataset, arch, in_channel, num_classes, trained_model_path=None, load_pretrained=True):
+    def make_model(self, dataset, arch, in_channels, num_classes, trained_model_path=None, load_pretrained=True):
         """
         Make model, and load pre-trained weights.
         :param dataset: cifar10 or imagenet
@@ -200,36 +237,11 @@ class StandardModel(nn.Module):
         if dataset in ['CIFAR-10',"CIFAR-100", "MNIST","FashionMNIST"]:
             if load_pretrained:
                 assert trained_model_path is not None and os.path.exists(trained_model_path), "Pretrained weight model file {} does not exist!".format(trained_model_path)
-            if arch == 'gdas':
-                model = models.gdas(in_channel, num_classes)
-                model.mean = [125.3 / 255, 123.0 / 255, 113.9 / 255]
-                model.std = [63.0 / 255, 62.1 / 255, 66.7 / 255]
-                model.input_space = 'RGB'
-                model.input_range = [0, 1]
-                model.input_size = [in_channel, IMAGE_SIZE[dataset][0], IMAGE_SIZE[dataset][1]]
-            elif arch == 'pyramidnet272':
-                model = models.pyramidnet272(in_channel, num_classes)
-                model.mean = [0.49139968, 0.48215841, 0.44653091]
-                model.std = [0.24703223, 0.24348513, 0.26158784]
-                model.input_space = 'RGB'
-                model.input_range = [0, 1]
-                model.input_size = [in_channel, IMAGE_SIZE[dataset][0], IMAGE_SIZE[dataset][1]]
-            else:
-                model = self.construct_cifar_model(arch, dataset, num_classes)
-                model.mean = [0.4914, 0.4822, 0.4465]
-                model.std = [0.2023, 0.1994, 0.2010]
-                model.input_space = 'RGB'
-                model.input_range = [0, 1]
-                model.input_size = [in_channel, IMAGE_SIZE[dataset][0], IMAGE_SIZE[dataset][1]]
+            model = self.construct_cifar_model(arch, dataset, in_channels, num_classes)
             if load_pretrained:
                 self.load_weight_from_pth_checkpoint(model, trained_model_path)
         elif dataset == "TinyImageNet":
             model = MetaLearnerModelBuilder.construct_tiny_imagenet_model(arch, dataset)
-            model.input_space = 'RGB'
-            model.input_range = [0, 1]
-            model.mean = [0,0,0]
-            model.std = [1,1,1]
-            model.input_size = [in_channel,IMAGE_SIZE[dataset][0], IMAGE_SIZE[dataset][1]]
             if load_pretrained:
                 model.load_state_dict(torch.load(trained_model_path, map_location=lambda storage, location: storage)["state_dict"])
         elif dataset == 'ImageNet':
@@ -241,7 +253,7 @@ class StandardModel(nn.Module):
             model = pretrainedmodels.__dict__[arch](num_classes=1000, pretrained=pretrained)
         return model
 
-
+# used by meta-learner
 class MetaLearnerModelBuilder(object):
     @staticmethod
     def construct_cifar_model(arch, dataset):
@@ -259,8 +271,7 @@ class MetaLearnerModelBuilder(object):
             network = MobileNet(IN_CHANNELS[dataset], CLASS_NUM[dataset])
         elif arch == "mobilenet_v2":
             network = MobileNetV2(IN_CHANNELS[dataset], CLASS_NUM[dataset])
-        elif arch == "ghost_net":
-            network = ghost_net(IN_CHANNELS[dataset], CLASS_NUM[dataset])
+
         elif arch == "resnet18":
             network = ResNet18(IN_CHANNELS[dataset], CLASS_NUM[dataset])
         elif arch == "resnet34":
@@ -341,9 +352,7 @@ class MetaLearnerModelBuilder(object):
             depth = 40
             block_config = [(depth - 4) // 6 for _ in range(3)]
             return EfficientDenseNet(IN_CHANNELS[dataset],block_config=block_config, num_classes=CLASS_NUM[dataset], small_inputs=False, efficient=False)
-        elif arch ==  "ghost_net":
-            network = ghost_net(IN_CHANNELS[dataset], CLASS_NUM[dataset])
-            return network
+
         model = vision_models.__dict__[arch](pretrained=False)
         return model
 
@@ -368,8 +377,6 @@ class MetaLearnerModelBuilder(object):
             network = resnext101_32x4d(pretrained=None)
         elif arch == "resnext64_4":
             network = resnext101_64x4d(pretrained=None)
-        elif arch == "ghost_net":
-            network = ghost_net(IN_CHANNELS[dataset], CLASS_NUM[dataset])
         elif arch.startswith("inception"):
             network = inception_v3(pretrained=False)
         elif arch == "WRN-28-10-drop":
@@ -381,6 +388,12 @@ class MetaLearnerModelBuilder(object):
             network.avgpool = Identity()
             network.classifier[0] = nn.Linear(512 * 2 * 2, 4096)  # 64 /2**5 = 2
             network.classifier[-1] = nn.Linear(4096, num_classes)
+
+        network.input_space = 'RGB'
+        network.input_range = [0, 1]
+        network.mean = [0, 0, 0]
+        network.std = [1, 1, 1]
+        network.input_size = [IN_CHANNELS[dataset], IMAGE_SIZE[dataset][0], IMAGE_SIZE[dataset][1]]
         return network
 
 
