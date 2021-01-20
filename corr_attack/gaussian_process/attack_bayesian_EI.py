@@ -168,7 +168,7 @@ class Attack:
         self.fX = torch.zeros((0), device=self.device)
 
         for i in X_init:
-            i = torch.from_numpy(i).to(self.device)
+            i = torch.from_numpy(i).to(self.device).type(self.X_pool.dtype)
             tmp = torch.norm(self.X_pool - i, dim=1)
             index = torch.argmin(tmp)
             self.X = torch.cat((self.X, self.X_pool[index, :].unsqueeze(0).clone()), dim=0)

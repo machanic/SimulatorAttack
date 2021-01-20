@@ -2,18 +2,17 @@ import copy
 import glob
 import os
 import sys
-sys.path.append("/home1/machen/meta_perturbations_black_box_attack")
+sys.path.append(os.getcwd())
 import time
 from torch.nn import functional as F
 import glog as log
 import json
 import numpy as np
 import torch
-from utils.statistics_toolkit import success_rate_and_query_coorelation, success_rate_avg_query
 from config import MODELS_TEST_STANDARD, PY_ROOT, CLASS_NUM
 from dataset.dataset_loader_maker import DataLoaderMaker
 from dataset.standard_model import StandardModel
-from meta_attack.attacks.black_box_attack import MetaGradAttack
+from meta_attack.attacks.black_box_attack import MetaAttack
 from meta_attack.attacks.options import get_parse_args
 from meta_attack.meta_training.load_attacked_and_meta_model import load_meta_model
 from dataset.defensive_model import DefensiveModel
@@ -23,9 +22,9 @@ def get_expr_dir_name(dataset, norm, targeted, target_type, use_tanh, args):
     target_str = "untargeted" if not targeted else "targeted_{}".format(target_type)
     use_tanh_str = "tanh" if use_tanh else "no_tanh"
     if args.attack_defense:
-        dirname = 'MetaGradAttack_on_defensive_model_{}_{}_{}_{}'.format(dataset, norm, target_str, use_tanh_str)
+        dirname = 'meta_attack_on_defensive_model_{}_{}_{}_{}'.format(dataset, norm, target_str, use_tanh_str)
     else:
-        dirname = 'MetaGradAttack_{}_{}_{}_{}'.format(dataset, norm, target_str, use_tanh_str)
+        dirname = 'meta_attack_{}_{}_{}_{}'.format(dataset, norm, target_str, use_tanh_str)
     return dirname
 
 def set_log_file(fname):
@@ -75,9 +74,9 @@ def main(args, result_dir_path):
     meta_model = load_meta_model(meta_model_path)
 
     log.info("Load meta model from {}".format(meta_model_path))
-    attack = MetaGradAttack(args, norm=args.norm, epsilon=args.epsilon,
-                            targeted=args.targeted, search_steps=args.binary_steps,
-                            max_steps=args.maxiter, use_log=not args.use_zvalue, cuda=not args.no_cuda)
+    attack = MetaAttack(args, norm=args.norm, epsilon=args.epsilon,
+                        targeted=args.targeted, search_steps=args.binary_steps,
+                        max_steps=args.maxiter, use_log=not args.use_zvalue, cuda=not args.no_cuda)
 
     for arch in archs:
         if args.attack_defense:
@@ -149,13 +148,13 @@ def main(args, result_dir_path):
             else:
                 target_labels = None
             target = true_labels if not args.targeted else target_labels
-            adv, const, first_step, success_queries = attack.run(model, meta_model_copy, img, target)
+            adv, l2_distortion, const, first_step, success_queries = attack.run(model, meta_model_copy, img, target)
             timeend = time.time()
             if len(adv.shape) == 3:
                 adv = adv.reshape((1,) + adv.shape)
             adv = torch.from_numpy(adv).permute(0, 3, 1, 2).cuda()  # BHWC -> BCHW
+            assert adv.size() == img.size()
             diff = (adv - img).detach().cpu().numpy()
-            l2_distortion = np.sqrt(np.sum(np.square(diff))).item()
             with torch.no_grad():
                 adv_pred_logit = model(adv)
                 adv_pred_label = adv_pred_logit.argmax(dim=1)
@@ -167,6 +166,8 @@ def main(args, result_dir_path):
                 if adv_pred_label[0].item() == target[0].item():
                     success = True
             if success_queries > args.max_queries:
+                success = False
+            if args.norm == "l2" and l2_distortion > args.epsilon:
                 success = False
             if success:
                 # (first_step-1)//args.finetune_intervalargs.update_pixels2+first_step
@@ -200,33 +201,12 @@ def main(args, result_dir_path):
         success = (1 - not_done_all) * correct_all
         success_query = success * query_all
 
-        # query_all_bounded = query_all.copy()
-        # not_done_all_bounded = not_done_all.copy()
-        # out_of_bound_indexes = np.where(query_all_bounded > args.max_queries)[0]
-        # if len(out_of_bound_indexes) > 0:
-        #     not_done_all_bounded[out_of_bound_indexes] = 1
-        # success_bounded = (1-not_done_all_bounded) * correct_all
-        # success_query_bounded = success_bounded * query_all_bounded
-        #
-        # query_threshold_success_rate_bounded, query_success_rate_bounded = success_rate_and_query_coorelation(query_all_bounded, not_done_all_bounded)
-        # success_rate_to_avg_query_bounded = success_rate_avg_query(query_all_bounded, not_done_all_bounded)
-
         meta_info_dict = {"query_all": query_all.tolist(), "not_done_all": not_done_all.tolist(),
                           "correct_all": correct_all.tolist(),
                           "mean_query": np.mean(success_query[np.nonzero(success)[0]]).item(),
                           "max_query": np.max(success_query[np.nonzero(success)[0]]).item(),
                           "median_query": np.median(success_query[np.nonzero(success)[0]]).item(),
                           "avg_not_done": np.mean(not_done_all.astype(np.float32)[np.nonzero(correct_all)[0]]).item(),
-
-                          # "mean_query_bounded_max_queries": np.mean(success_query_bounded[np.nonzero(success_bounded)[0]]).item(),
-                          # "max_query_bounded_max_queries": np.max(success_query_bounded[np.nonzero(success_bounded)[0]]).item(),
-                          # "median_query_bounded_max_queries": np.median(success_query_bounded[np.nonzero(success_bounded)[0]]).item(),
-                          # "avg_not_done_bounded_max_queries": np.mean(not_done_all_bounded.astype(np.float32)).item(),
-
-                          # "query_threshold_success_rate_dict_bounded": query_threshold_success_rate_bounded,
-                          # "query_success_rate_dict_bounded": query_success_rate_bounded,
-                          # "success_rate_to_avg_query_bounded": success_rate_to_avg_query_bounded,
-
                           "args": vars(args)}
         with open(result_dump_path, "w") as result_file_obj:
             json.dump(meta_info_dict, result_file_obj, sort_keys=True)

@@ -2,7 +2,9 @@
 # All rights reserved.
 # This source code is licensed under the license found in the
 # LICENSE file in the root directory of this source tree.
-# 
+#
+import sys
+
 import torch
 import json
 import numpy as np
@@ -11,19 +13,13 @@ from sklearn.cluster import KMeans
 from scipy.stats import norm
 import copy as cp
 from sklearn.svm import SVC
-
-from torch.quasirandom import SobolEngine
-from mpl_toolkits.mplot3d import axes3d, Axes3D
+import glog as log
 from sklearn.gaussian_process import GaussianProcessRegressor
 from sklearn.gaussian_process.kernels import ConstantKernel, Matern
 
 import matplotlib.pyplot as plt
 from matplotlib import cm
 
-from turbo_1.turbo_1 import Turbo1
-
-
-# the input will be samples!
 class Classifier():
     def __init__(self, samples, dims, kernel_type, gamma_type = "auto"):
         self.training_counter = 0
@@ -190,13 +186,13 @@ class Classifier():
     def propose_rand_samples_probe(self, nums_samples, path, lb, ub):
 
         seed   = np.random.randint(int(1e6))
-        sobol  = SobolEngine(dimension = self.dims, scramble=True, seed=seed)
+        # sobol  = SobolEngine(dimension = self.dims, scramble=True, seed=seed)
 
         center = np.mean(self.X, axis = 0)
         #check if the center located in the region
         ratio, tmp = self.get_sample_ratio_in_region( np.reshape(center, (1, len(center) ) ), path )
         if ratio == 0:
-            print("==>center not in the region, using random samples")
+            log.info("==>center not in the region, using random samples")
             return self.propose_rand_samples(nums_samples, lb, ub)
         # it is possible that the selected region has no points,
         # so we need check here
@@ -215,7 +211,7 @@ class Classifier():
                     break
                 lb_     = np.clip( center - L/2, lb, ub )
                 ub_     = np.clip( center + L/2, lb, ub )
-                cands_  = sobol.draw(10000).to(dtype=torch.float64).cpu().detach().numpy()
+                cands_  = torch.rand(size=(10000, self.dims)).to(dtype=torch.float64).cpu().detach().numpy()
                 cands_  = (ub_ - lb_)*cands_ + lb_
                 ratio, tmp = self.get_sample_ratio_in_region(cands_, path )
             final_L.append( L[axis] )
@@ -223,15 +219,15 @@ class Classifier():
         final_L   = np.array( final_L )
         lb_       = np.clip( center - final_L/2, lb, ub )
         ub_       = np.clip( center + final_L/2, lb, ub )
-        print("center:", center)
-        print("final lb:", lb_)
-        print("final ub:", ub_)
+        log.info("center: {}".format(center))
+        log.info("final lb: {}".format(lb_))
+        log.info("final ub: {}".format(ub_))
     
         count         = 0
         cands         = np.array([])
         while len(cands) < 10000:
             count    += 10000
-            cands     = sobol.draw(count).to(dtype=torch.float64).cpu().detach().numpy()
+            cands     = torch.rand(size=(count, self.dims)).to(dtype=torch.float64).cpu().detach().numpy()
         
             cands     = (ub_ - lb_)*cands + lb_
             ratio, cands = self.get_sample_ratio_in_region(cands, path)
@@ -244,9 +240,9 @@ class Classifier():
     def propose_rand_samples_sobol(self, nums_samples, path, lb, ub):
         
         #rejected sampling
-        selected_cands = np.zeros((1, self.dims))
+        # selected_cands = np.zeros((1, self.dims))
         seed   = np.random.randint(int(1e6))
-        sobol  = SobolEngine(dimension = self.dims, scramble=True, seed=seed)
+        # sobol  = SobolEngine(dimension = self.dims, scramble=True, seed=seed)
         
         # scale the samples to the entire search space
         # ----------------------------------- #
@@ -278,7 +274,7 @@ class Classifier():
         final_cands = []
         for center in centers:
             center = self.X[ np.random.randint( len(self.X) ) ]
-            cands  = sobol.draw(2000).to(dtype=torch.float64).cpu().detach().numpy()
+            cands  = torch.rand(size=(2000, self.dims)).to(dtype=torch.float64).cpu().detach().numpy()
             ratio  = 1
             L      = 0.0001
             Blimit = np.max(ub - lb)
@@ -325,8 +321,6 @@ class Classifier():
             return self.propose_rand_samples(nums_samples, lb, ub)
         
         X_ei = self.expected_improvement(X, xi=0.001, use_ei = True)
-        row, col = X.shape
-    
         X_ei = X_ei.reshape(len(X))
         n = nums_samples
         if X_ei.shape[0] < n:
@@ -344,7 +338,7 @@ class Classifier():
         #throw a uniform sampling in the selected partition
         X_init = self.propose_rand_samples_sobol(30, path, func.lb, func.ub)
         #get samples around the selected partition
-        print("sampled ", len(X_init), " for the initialization")
+        log.info("sampled {} for the initialization".format(len(X_init)))
         turbo1 = Turbo1(
             f  = func,              # Handle to objective function
             lb = func.lb,           # Numpy array specifying lower bounds
@@ -398,8 +392,8 @@ class Classifier():
             elif plabel[idx] == 1:
                 one_label_fX.append( self.fX[idx] )
             else:
-                print("kmean should only predict two clusters, Classifiers.py:line73")
-                os._exit(1)
+                log.info("kmean should only predict two clusters, Classifiers.py:line73")
+                sys.exit(1)
                 
         good_label_mean = np.mean( np.array(zero_label_fX) )
         bad_label_mean  = np.mean( np.array(one_label_fX) )

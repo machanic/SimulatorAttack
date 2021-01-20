@@ -135,13 +135,13 @@ def draw_meta_or_not_curve_figure(dump_file_path):
             y  = np.array(data_info["MSE_error"][:xtick_max])
             is_finetune_list = data_info["is_finetune"][:xtick_max]
             if mode == "meta":
-                simulator_name = "MetaSimulator"
+                simulator_name = "Simulator Attack"
             elif mode == "vanilla":
-                simulator_name = "Simulator$_{vanilla}$"
+                simulator_name = "Vanilla Simulator"
             elif mode == "deep_benign_images":
                 simulator_name = "Simulator$_{benign}$"
             else:
-                simulator_name = "Simulator$_{rnd}$"
+                simulator_name = "Rnd_init Simulator"
             line, = plt.plot(x, y, label=r"$\ell_2$ norm untargeted attack result of {}".format(simulator_name),
                              color=colors[mode], linestyle="-")
         first_finetune = True
@@ -177,13 +177,13 @@ def parse_args():
 
 if __name__ == "__main__":
     args = parse_args()
-    # x_label = "meta-predict interval"
-    # y_label = "Attack Success Rate (%)"
-    # dump_folder = "/home1/machen/meta_perturbations_black_box_attack/figures/ablation_study/"
-    # os.makedirs(dump_folder, exist_ok=True)
-    # file_path = dump_folder + "meta_predict_interval.pdf"
-    # draw_meta_predict_interval_curve_figure("meta_predict_steps", "success_rate", file_path, x_label, y_label)
-    # print("written to {}".format(file_path))
+    x_label = "simulator-predict interval"
+    y_label = "Attack Success Rate (%)"
+    dump_folder = "/home1/machen/meta_perturbations_black_box_attack/figures/ablation_study/"
+    os.makedirs(dump_folder, exist_ok=True)
+    file_path = dump_folder + "simulator_predict_interval.pdf"
+    draw_meta_predict_interval_curve_figure("meta_predict_steps", "success_rate", file_path, x_label, y_label)
+    print("written to {}".format(file_path))
     #
     #
     # dump_folder = "/home1/machen/meta_perturbations_black_box_attack/figures/ablation_study/"

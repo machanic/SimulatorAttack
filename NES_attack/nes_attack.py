@@ -1,14 +1,10 @@
 import sys
+import os
 
-
-sys.path.append("/home1/machen/meta_perturbations_black_box_attack")
+sys.path.append(os.getcwd())
 import argparse
 import glob
 import json
-import os
-import random
-
-from collections import defaultdict
 from types import SimpleNamespace
 from dataset.defensive_model import DefensiveModel
 
@@ -17,25 +13,17 @@ import numpy as np
 import torch
 from torch.nn import functional as F
 
-from config import CLASS_NUM, PY_ROOT, MODELS_TEST_STANDARD
+from config import CLASS_NUM, PY_ROOT, MODELS_TEST_STANDARD, IMAGE_DATA_ROOT
 from dataset.standard_model import StandardModel
 from dataset.dataset_loader_maker import DataLoaderMaker
-from utils.statistics_toolkit import success_rate_and_query_coorelation, success_rate_avg_query
-
+from dataset.target_class_dataset import ImageNetDataset,CIFAR10Dataset,CIFAR100Dataset
 
 class NES(object):
     def __init__(self, dataset_name, targeted):
         self.dataset_name = dataset_name
         self.num_classes = CLASS_NUM[self.dataset_name]
         self.dataset_loader = DataLoaderMaker.get_test_attacked_data(dataset_name, 1)
-
         log.info("label index dict data build begin")
-        if "ImageNet" in self.dataset_name: # ImageNet and TinyImageNet datasets
-            self.candidate_loader = DataLoaderMaker.get_candidate_attacked_data(dataset_name, 1)
-            self.dataset = self.candidate_loader.dataset
-        else:
-            self.dataset = self.dataset_loader.dataset
-        self.label_data_index_dict = self.get_label_dataset(self.dataset)
         log.info("label index dict data build over!")
         self.total_images = len(self.dataset_loader.dataset)
         self.targeted = targeted
@@ -45,60 +33,39 @@ class NES(object):
         self.success_all = torch.zeros_like(self.query_all)
         self.success_query_all = torch.zeros_like(self.query_all)
 
-    def get_label_dataset(self, dataset):
-        label_index = defaultdict(list)
-        for index, (*_, label) in enumerate(dataset):  # 保证这个data_loader没有shuffle过
-            label_index[label].append(index)
-        return label_index
+    def get_image_of_target_class(self,dataset_name, target_labels, target_model):
 
-    # special method for ImageNet, can be deleted in the release code
-    def get_image_of_class_ImageNet(self, target_labels, dataset, target_model):
         images = []
         for label in target_labels:  # length of target_labels is 1
+            if dataset_name == "ImageNet":
+                dataset = ImageNetDataset(IMAGE_DATA_ROOT[dataset_name],label.item(), "validation")
+            elif dataset_name == "CIFAR-10":
+                dataset = CIFAR10Dataset(IMAGE_DATA_ROOT[dataset_name], label.item(), "validation")
+            elif dataset_name=="CIFAR-100":
+                dataset = CIFAR100Dataset(IMAGE_DATA_ROOT[dataset_name], label.item(), "validation")
 
-            index = random.choice(self.label_data_index_dict[label.item()])
-            image_small, image_big, label_ = dataset[index]
-            if target_model.input_size[-1] >= 299:
-                image, true_labels = image_big, label
-            else:
-                image, true_labels = image_small, label
-            if image.size(-1) != target_model.input_size[-1]:
-                image = F.interpolate(image.unsqueeze(0), size=target_model.input_size[-1], mode='bilinear',align_corners=True)
+            index = np.random.randint(0, len(dataset))
+            image, true_label = dataset[index]
+            image = image.unsqueeze(0)
+            if dataset_name == "ImageNet" and target_model.input_size[-1] != 299:
+                image = F.interpolate(image,
+                                       size=(target_model.input_size[-2], target_model.input_size[-1]), mode='bilinear',
+                                       align_corners=False)
             with torch.no_grad():
                 logits = target_model(image.cuda())
             while logits.max(1)[1].item() != label.item():
-                index = random.choice(self.label_data_index_dict[label.item()])
-                image_small, image_big, label = dataset[index]
-                if target_model.input_size[-1] >= 299:
-                    image, true_labels = image_big, label
-                else:
-                    image, true_labels = image_small, label
-                if image.size(-1) != target_model.input_size[-1]:
-                    image = F.interpolate(image.unsqueeze(0), size=target_model.input_size[-1], mode='bilinear', align_corners=True)
+                index = np.random.randint(0, len(dataset))
+                image, true_label = dataset[index]
+                image = image.unsqueeze(0)
+                if dataset_name == "ImageNet" and target_model.input_size[-1] != 299:
+                    image = F.interpolate(image,
+                                       size=(target_model.input_size[-2], target_model.input_size[-1]), mode='bilinear',
+                                       align_corners=False)
                 with torch.no_grad():
                     logits = target_model(image.cuda())
-
-            assert label_ == label.item()
+            assert true_label == label.item()
             images.append(torch.squeeze(image))
-        return torch.stack(images).cuda()  # B,C,H,W
-
-    def get_image_of_class(self, target_labels, dataset, target_model):
-        images = []
-        for label in target_labels:  # length of target_labels is 1
-
-            index = random.choice(self.label_data_index_dict[label.item()])
-            image, label_ = dataset[index]
-            with torch.no_grad():
-                logits = target_model(image.unsqueeze(0).cuda())
-            while logits.max(1)[1].item() != label.item():
-                index = random.choice(self.label_data_index_dict[label.item()])
-                image, label_ = dataset[index]
-                with torch.no_grad():
-                    logits = target_model(image.unsqueeze(0).cuda())
-
-            assert label_ == label.item()
-            images.append(image)
-        return torch.stack(images).cuda()  # B,C,H,W
+        return torch.stack(images) # B,C,H,W
 
     def xent_loss(self, logits, noise, true_labels, target_labels, top_k):
         if self.targeted:
@@ -285,10 +252,7 @@ class NES(object):
         adv_thresh = args.adv_thresh
         if k > 0 or self.targeted:
             assert self.targeted, "Partial-information attack is a targeted attack."
-            if self.dataset_name == "ImageNet":
-                adv_images = self.get_image_of_class_ImageNet(target_labels, self.dataset, target_model)
-            else:
-                adv_images = self.get_image_of_class(target_labels, self.dataset, target_model)
+            adv_images = self.get_image_of_target_class(self.dataset_name, target_labels, target_model)
             epsilon = args.starting_eps
         else:   # if we don't want to top-k paritial attack set k = -1 as the default setting
             k = self.num_classes
@@ -457,7 +421,7 @@ if __name__ == "__main__":
     parser.add_argument('--targeted', action="store_true")
     parser.add_argument('--target_type', type=str, default='increment', choices=["random", "least_likely","increment"])
     parser.add_argument('--json_config', type=str,
-                        default='/home1/machen/meta_perturbations_black_box_attack/configures/NES_attack_conf.json',
+                        default='./configures/NES_attack_conf.json',
                         help='a configures file to be passed in instead of arguments')
     # parser.add_argument("--total-images", type=int, default=1000)
     parser.add_argument('--seed', default=0, type=int, help='random seed')

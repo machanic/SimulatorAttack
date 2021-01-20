@@ -1,7 +1,7 @@
 
 {"CIFAR-10": {
       "l2":{
-          "epsilon": 4.6
+          "epsilon": 1.0
         },
       "linf": {
           "epsilon": 0.031372
@@ -9,7 +9,7 @@
   },
     "CIFAR-100": {
       "l2":{
-          "epsilon": 4.6
+          "epsilon": 1.0
         },
       "linf": {
           "epsilon": 0.031372
@@ -17,7 +17,7 @@
   },
   "TinyImageNet": {
       "l2":{
-          "epsilon": 4.6
+          "epsilon": 2.0
         },
       "linf": {
           "epsilon": 0.031372
@@ -25,7 +25,7 @@
   },
   "FashionMNIST": {
       "l2":{
-          "epsilon": 4.6
+          "epsilon": 1.0
         },
       "linf": {
           "epsilon": 0.031372
@@ -33,7 +33,7 @@
   },
   "MNIST": {
       "l2":{
-          "epsilon": 4.6
+          "epsilon": 1.0
         },
       "linf": {
           "epsilon": 0.031372

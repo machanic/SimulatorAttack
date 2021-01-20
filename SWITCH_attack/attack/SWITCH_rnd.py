@@ -1,6 +1,6 @@
 import sys
-sys.path.append("/home1/machen/meta_perturbations_black_box_attack")
 import os
+sys.path.append(os.getcwd())
 import glog as log
 import torch
 from torch.nn import functional as F
@@ -34,7 +34,7 @@ class ImageIdxToOrigBatchIdx(object):
         return self.proj_dict[img_idx]
 
 
-class SWITCH_rnd_attack(object):
+class SWITCH_rnd(object):
     def __init__(self, dataset, batch_size, targeted, target_type, epsilon, norm, lower_bound=0.0, upper_bound=1.0,
                  max_queries=10000):
         assert norm in ['linf', 'l2'], "{} is not supported".format(norm)
@@ -335,7 +335,7 @@ if __name__ == "__main__":
                         choices=['CIFAR-10', 'CIFAR-100', 'ImageNet', "FashionMNIST", "MNIST", "TinyImageNet"],
                         help='which dataset to use')
     parser.add_argument('--json-config', type=str,
-                        default='/home1/machen/meta_perturbations_black_box_attack/configures/SWITCH_attack_conf.json',
+                        default='./configures/SWITCH_attack_conf.json',
                         help='a configuration file to be passed in instead of arguments')
     parser.add_argument('--arch', default=None, type=str, help='network architecture')
     parser.add_argument('--test_archs', action="store_true")
@@ -419,13 +419,13 @@ if __name__ == "__main__":
     print_args(args)
 
     surrogate_models = []
-    train_model_names = {"CIFAR-10": ["resnet-110", "vgg19_bn"],
-                        "CIFAR-100": ["resnet-110",  "vgg19_bn"],
-                        "TinyImageNet": ["resnet101","vgg19_bn"]}
+    train_model_names = {"CIFAR-10": ["resnet-110", "densenet-bc-100-12"],
+                         "CIFAR-100": ["resnet-110", "densenet-bc-100-12"],
+                         "TinyImageNet": ["resnet101", "resnet152"]}
     if args.attack_defense:
         train_model_names = {"CIFAR-10": ["densenet-bc-100-12", "vgg19_bn"],
                              "CIFAR-100": ["densenet-bc-100-12", "vgg19_bn"],
-                             "TinyImageNet": ["densenet169", "vgg19_bn"]}
+                             "TinyImageNet": ["densenet161", "vgg19_bn"]}
     for surr_arch in train_model_names[args.dataset]:
         if surr_arch in archs:
             continue
@@ -433,8 +433,8 @@ if __name__ == "__main__":
         surrogate_model.eval()
         surrogate_models.append(surrogate_model)
 
-    attacker = SWITCH_rnd_attack(args.dataset, args.batch_size, args.targeted, args.target_type, args.epsilon,
-                                 args.norm, 0.0, 1.0, args.max_queries)
+    attacker = SWITCH_rnd(args.dataset, args.batch_size, args.targeted, args.target_type, args.epsilon,
+                          args.norm, 0.0, 1.0, args.max_queries)
     for arch in archs:
         if args.attack_defense:
             save_result_path = args.exp_dir + "/{}_{}_result.json".format(arch, args.defense_model)

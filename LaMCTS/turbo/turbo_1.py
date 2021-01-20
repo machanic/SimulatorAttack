@@ -238,7 +238,7 @@ class Turbo1:
         while self.n_evals < self.max_evals:
             if len(self._fX) > 0 and self.verbose:
                 n_evals, fbest = self.n_evals, self._fX.min()
-                print(f"{n_evals}) Restarting with fbest = {fbest:.4}")
+                # print(f"{n_evals}) Restarting with fbest = {fbest:.4}")
                 sys.stdout.flush()
 
             # Initialize parameters
@@ -260,7 +260,7 @@ class Turbo1:
 
             if self.verbose:
                 fbest = self._fX.min()
-                print(f"Starting from fbest = {fbest:.4}")
+                # print(f"Starting from fbest = {fbest:.4}")
                 sys.stdout.flush()
 
             # Thompson sample to get next suggestions
@@ -293,7 +293,7 @@ class Turbo1:
 
                 if self.verbose and fX_next.min() < self.fX.min():
                     n_evals, fbest = self.n_evals, fX_next.min()
-                    print(f"{n_evals}) New best: {fbest:.4}")
+                    # print(f"{n_evals}) New best: {fbest:.4}")
                     sys.stdout.flush()
 
                 # Append data to the global history

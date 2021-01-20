@@ -37,7 +37,7 @@ class ImageIdxToOrigBatchIdx(object):
         return self.proj_dict[img_idx]
 
 
-class NoSWITCH_rnd_attack(object):
+class NoSwitch_rnd(object):
     def __init__(self, dataset, batch_size, targeted, target_type, epsilon, norm, lower_bound=0.0, upper_bound=1.0,
                  max_queries=10000):
         assert norm in ['linf', 'l2'], "{} is not supported".format(norm)
@@ -285,9 +285,10 @@ class NoSWITCH_rnd_attack(object):
 def get_exp_dir_name(dataset, lr, loss, norm, targeted, target_type, surrogate_models, args):
     target_str = "untargeted" if not targeted else "targeted_{}".format(target_type)
     if args.attack_defense:
-        dirname = 'NO_SWITCH_rnd_using_{}_on_defensive_model-{}-{}_lr_{}-loss-{}-{}'.format(",".join(surrogate_models), dataset, lr,  loss, norm, target_str)
+        # NO_SWITCH_rnd_on_defensive_model_using_resnet-110,densenet-bc-100-12-CIFAR-10-lr_0.01_cw-loss-linf-untargeted
+        dirname = 'NO_SWITCH_rnd_on_defensive_model_using_{}-{}-lr_{}_{}-loss-{}-{}'.format(",".join(surrogate_models), dataset, lr,  loss, norm, target_str)
     else:
-        dirname = 'NO_SWITCH_rnd_using_{}-{}-{}_lr_{}-loss-{}-{}'.format(",".join(surrogate_models), dataset, lr, loss, norm, target_str)
+        dirname = 'NO_SWITCH_rnd_using_{}-{}-lr_{}_{}-loss-{}-{}'.format(",".join(surrogate_models), dataset, lr, loss, norm, target_str)
     return dirname
 
 def print_args(args):
@@ -316,7 +317,7 @@ if __name__ == "__main__":
                         choices=['CIFAR-10', 'CIFAR-100', 'ImageNet', "FashionMNIST", "MNIST", "TinyImageNet"],
                         help='which dataset to use')
     parser.add_argument('--json-config', type=str,
-                        default='/home1/machen/meta_perturbations_black_box_attack/configures/SWITCH_attack_conf.json',
+                        default='./configures/SWITCH_attack_conf.json',
                         help='a configuration file to be passed in instead of arguments')
     parser.add_argument('--arch', default=None, type=str, help='network architecture')
     parser.add_argument('--test_archs', action="store_true")
@@ -350,13 +351,10 @@ if __name__ == "__main__":
         if args.dataset == "ImageNet":
             args.max_queries = 50000
 
-    train_model_names = {"CIFAR-10": ["resnet-110", "vgg19_bn"],
-                         "CIFAR-100": ["resnet-110", "vgg19_bn"],
-                         "TinyImageNet": ["resnet101", "vgg19_bn"]}
-    if args.attack_defense:
-        train_model_names = {"CIFAR-10": ["densenet-bc-100-12", "vgg19_bn"],
-                             "CIFAR-100": ["densenet-bc-100-12", "vgg19_bn"],
-                             "TinyImageNet": ["densenet169", "vgg19_bn"]}
+    train_model_names = {"CIFAR-10": ["resnet-110", "densenet-bc-100-12"],
+                         "CIFAR-100": ["resnet-110", "densenet-bc-100-12"],
+                         "TinyImageNet": ["resnet101", "resnet152"]}
+
     args.exp_dir = osp.join(args.exp_dir, get_exp_dir_name(args.dataset, args.image_lr, args.loss, args.norm,
                                                            args.targeted, args.target_type,train_model_names[args.dataset], args))  # 随机产生一个目录用于实验
     os.makedirs(args.exp_dir, exist_ok=True)
@@ -416,8 +414,8 @@ if __name__ == "__main__":
         surrogate_model.eval()
         surrogate_models.append(surrogate_model)
 
-    attacker = NoSWITCH_rnd_attack(args.dataset, args.batch_size, args.targeted, args.target_type, args.epsilon,
-                                   args.norm, 0.0, 1.0, args.max_queries)
+    attacker = NoSwitch_rnd(args.dataset, args.batch_size, args.targeted, args.target_type, args.epsilon,
+                            args.norm, 0.0, 1.0, args.max_queries)
     for arch in archs:
         if args.attack_defense:
             save_result_path = args.exp_dir + "/{}_{}_result.json".format(arch, args.defense_model)

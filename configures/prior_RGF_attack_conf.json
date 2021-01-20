@@ -1,26 +1,32 @@
 
 { "CIFAR-10": {
     "dataprior": false,
-    "linf_epsilon": 0.031372
+    "linf_epsilon": 0.031372,
+    "l2_epsilon": 1.0
   },
   "CIFAR-100": {
     "dataprior": false,
-     "linf_epsilon": 0.031372
+     "linf_epsilon": 0.031372,
+    "l2_epsilon": 1.0
   },
   "MNIST": {
        "dataprior": false,
-     "linf_epsilon": 0.031372
+     "linf_epsilon": 0.031372,
+    "l2_epsilon": 1.0
   },
   "FashionMNIST": {
       "dataprior": false,
-     "linf_epsilon": 0.031372
+     "linf_epsilon": 0.031372,
+    "l2_epsilon": 1.0
   },
   "ImageNet": {
     "dataprior": true,
-     "linf_epsilon": 0.05
+     "linf_epsilon": 0.05,
+    "l2_epsilon": 4.6
   },
   "TinyImageNet": {
     "dataprior": false,
-    "linf_epsilon": 0.031372
+    "linf_epsilon": 0.031372,
+    "l2_epsilon": 2.0
   }
 }

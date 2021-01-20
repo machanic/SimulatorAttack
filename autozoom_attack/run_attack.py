@@ -224,7 +224,7 @@ if __name__ == "__main__":
                         help="the offset of the image index when getting attack data")
     parser.add_argument("--img_resize", default=None, type=int,
                         help="this option only works for ATTACK METHOD zoo and autozoom_bilin")
-    parser.add_argument("--epsilone", type=float, default=4.6, help="the maximum threshold of L2 constraint")
+    parser.add_argument("--epsilone", type=float, help="the maximum threshold of L2 constraint")
     parser.add_argument("--resize", default=None,type=int, help="this option only works for the preprocess resize of images")
     parser.add_argument("--switch_iterations", type=int, default=None,
                         help="the iteration number for dynamic switching")
@@ -236,7 +236,7 @@ if __name__ == "__main__":
                         help='directory to save results and logs')
     parser.add_argument('--seed', default=0, type=int, help='random seed')
     parser.add_argument('--json-config', type=str,
-                        default='/home1/machen/meta_perturbations_black_box_attack/autozoom_attack_conf.json',
+                        default='./configures/AutoZOOM.json',
                         help='a configures file to be passed in instead of arguments')
     args = parser.parse_args()
     os.environ["CUDA_DEVICE_ORDER"] = "PCI_BUS_ID"

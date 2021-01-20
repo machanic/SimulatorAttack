@@ -1,0 +1,84 @@
+{"CIFAR-10": {
+  "l2": {
+      "finetune_interval": 5,
+      "simba_update_pixels": 125,
+      "update_pixels": 125,
+      "epsilon": 1.0
+    },
+  "linf": {
+      "finetune_interval": 5,
+      "simba_update_pixels": 125,
+      "update_pixels": 125,
+      "epsilon": 0.031372
+  }
+},
+"CIFAR-100": {
+   "l2": {
+      "finetune_interval": 5,
+      "simba_update_pixels": 125,
+      "update_pixels": 125,
+      "epsilon": 1.0
+    },
+  "linf": {
+     "finetune_interval": 5,
+      "simba_update_pixels": 125,
+      "update_pixels": 125,
+      "epsilon": 0.031372
+  }},
+  "MNIST": {
+   "l2": {
+      "finetune_interval": 5,
+      "simba_update_pixels": 125,
+      "update_pixels": 125,
+      "epsilon": 1.0
+    },
+    "linf": {
+       "finetune_interval": 5,
+      "simba_update_pixels": 125,
+      "update_pixels": 125,
+      "epsilon": 0.031372
+    }
+  },
+  "FashionMNIST": {
+  "l2": {
+    "finetune_interval": 5,
+    "simba_update_pixels": 125,
+      "update_pixels": 125,
+    "epsilon": 1.0
+    },
+  "linf": {
+       "finetune_interval": 5,
+     "simba_update_pixels": 125,
+      "update_pixels": 125,
+      "epsilon": 0.031372
+    }
+  },
+  "TinyImageNet": {
+    "l2": {
+      "finetune_interval": 3,
+      "simba_update_pixels": 125,
+      "update_pixels": 125,
+      "epsilon": 2.0
+    },
+    "linf": {
+      "finetune_interval": 3,
+      "simba_update_pixels": 125,
+      "update_pixels": 125,
+      "epsilon": 0.031372
+    }},
+
+    "ImageNet": {
+      "l2": {
+        "finetune_interval": 3,
+        "simba_update_pixels": 125,
+        "update_pixels": 125,
+        "epsilon": 4.6
+      },
+      "linf": {
+        "finetune_interval": 3,
+        "simba_update_pixels": 125,
+        "update_pixels": 125,
+        "epsilon": 0.05
+      }
+    }
+  }

@@ -1,8 +1,8 @@
 import argparse
 import random
 import sys
-
-sys.path.append("/home1/machen/meta_perturbations_black_box_attack")
+import os
+sys.path.append(os.getcwd())
 import json
 import os
 from types import SimpleNamespace
@@ -472,7 +472,7 @@ def set_log_file(fname):
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--gpu",type=int, required=True)
-    parser.add_argument('--json-config-file', default="/home1/machen/meta_perturbations_black_box_attack/configures/bandits_attack_conf.json",
+    parser.add_argument('--json-config-file', default="./configures/bandits_attack_conf.json",
                         type=str, help='a configures file to be passed in instead of arguments')
     parser.add_argument("--dataset", type=str, choices=["CIFAR-10","CIFAR-100","MNIST","FashionMNIST","TinyImageNet","ImageNet"])
     parser.add_argument("--batch-size", type=int,default=100)
@@ -480,7 +480,7 @@ if __name__ == "__main__":
     parser.add_argument('--targeted', action="store_true", help="the targeted attack data")
     parser.add_argument("--target_type",type=str, default="random", choices=["least_likely","random"])
     parser.add_argument("--loss",type=str, default="cw", choices=["xent", "cw"])
-    parser.add_argument("--max-queries", type=int,default=10000)
+    parser.add_argument("--max-queries", type=int,default=1000)
     parser.add_argument("--norm",type=str, choices=['linf','l2',"all"], required=True)
     parser.add_argument('--tiling', action='store_true')
     parser.add_argument('--seed', default=0, type=int, help='random seed')
@@ -494,7 +494,7 @@ if __name__ == "__main__":
 
     os.environ["CUDA_DEVICE_ORDER"] = "PCI_BUS_ID"
     os.environ['CUDA_VISIBLE_DEVICES'] = str(args.gpu)
-    save_dir_path = "{}/data_bandit_attack/{}/{}".format(PY_ROOT, args.dataset,
+    save_dir_path = "./data_bandit_attack/{}/{}".format(args.dataset,
                                                          "targeted_attack" if args.targeted else "untargeted_attack")
     os.makedirs(save_dir_path, exist_ok=True)
     log_path = osp.join(save_dir_path, get_log_path(args.dataset, args.loss, args.norm, args.targeted, args.target_type))  # 随机产生一个目录用于实验
@@ -516,18 +516,7 @@ if __name__ == "__main__":
         params = SimpleNamespace(**attack_conf)
         attack_type_params.append((attack_norm, params))
     trn_data_loader = DataLoaderMaker.get_img_label_data_loader(args.dataset, args.batch_size, is_train=True)  # 生成的是训练集而非测试集
-    # if args.dataset == "CIFAR-10" or args.dataset == "CIFAR-100":
-    #     for arch in CIFAR_ALL_MODELS:
-    #         test_model_path = "{}/train_pytorch_model/real_image_model/{}-pretrained/{}/checkpoint.pth.tar".format(
-    #             PY_ROOT, args.dataset, arch)
-    #         if os.path.exists(test_model_path):
-    #             archs.append(arch)
-    #         else:
-    #             log.info(test_model_path + " does not exists!")
-    # else:
-    #     for file_name in os.listdir("{}/train_pytorch_model/real_image_model/{}-pretrained/checkpoints/".format(PY_ROOT, args.dataset)):
-    #         if file_name.split("-")[0] in pretrainedmodels.__dict__:
-    #             archs.append(file_name.split("-")[0])
+
     models = []
     for arch in MODELS_TRAIN_STANDARD[args.dataset]:
         if StandardModel.check_arch(arch, args.dataset):

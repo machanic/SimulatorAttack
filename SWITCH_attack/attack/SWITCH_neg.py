@@ -1,8 +1,8 @@
 import sys
 from collections import OrderedDict
-
-sys.path.append("/home1/machen/meta_perturbations_black_box_attack")
 import os
+sys.path.append(os.getcwd())
+
 import glog as log
 import torch
 from torch.nn import functional as F
@@ -35,7 +35,7 @@ class ImageIdxToOrigBatchIdx(object):
         return self.proj_dict[img_idx]
 
 
-class SwitchNegAttack(object):
+class SwitchNeg(object):
     def __init__(self, dataset, batch_size, targeted, target_type, epsilon, norm, lower_bound=0.0, upper_bound=1.0,
                  max_queries=10000):
         assert norm in ['linf', 'l2'], "{} is not supported".format(norm)
@@ -300,18 +300,18 @@ class SwitchNegAttack(object):
         log.info("done, write stats info to {}".format(result_dump_path))
 
 
-def get_exp_dir_name(dataset, lr, loss, norm, targeted, target_type, args):
+def get_exp_dir_name(dataset, lr, loss, norm, targeted, target_type, surrogate_arch, args):
     target_str = "untargeted" if not targeted else "targeted_{}".format(target_type)
     if args.NO_SWITCH:
         if args.attack_defense:
-            dirname = 'NO_SWITCH_on_defensive_model-{}-{}_lr_{}-loss-{}-{}'.format(dataset, loss, lr, norm, target_str)
+            dirname = 'NO_SWITCH_on_defensive_model-{}-{}-loss-{}-{}-using_{}'.format(dataset, loss, norm, target_str, surrogate_arch)
         else:
-            dirname = 'NO_SWITCH-{}-{}_lr_{}-loss-{}-{}'.format(dataset, loss, lr, norm, target_str)
+            dirname = 'NO_SWITCH-{}-{}-loss-{}-{}-using_{}'.format(dataset, loss, norm, target_str, surrogate_arch)
     else:
         if args.attack_defense:
-            dirname = 'SWITCH_neg_on_defensive_model-{}-{}_lr_{}-loss-{}-{}'.format(dataset, loss, lr, norm, target_str)
+            dirname = 'SWITCH_neg_on_defensive_model-{}-{}_lr_{}-loss-{}-{}-using_{}'.format(dataset, loss, lr, norm, target_str, surrogate_arch)
         else:
-            dirname = 'SWITCH_neg-{}-{}_lr_{}-loss-{}-{}'.format(dataset, loss, lr, norm, target_str)
+            dirname = 'SWITCH_neg-{}-{}_lr_{}-loss-{}-{}-using_{}'.format(dataset, loss, lr, norm, target_str, surrogate_arch)
     return dirname
 
 def print_args(args):
@@ -342,7 +342,7 @@ if __name__ == "__main__":
     parser.add_argument("--surrogate_arch", type=str, default="resnet-110", help="The architecture of surrogate model,"
                                                                                  " in original paper it is resnet152")
     parser.add_argument('--json-config', type=str,
-                        default='/home1/machen/meta_perturbations_black_box_attack/configures/SWITCH_attack_conf.json',
+                        default='./configures/SWITCH_attack_conf.json',
                         help='a configuration file to be passed in instead of arguments')
     parser.add_argument('--arch', default=None, type=str, help='network architecture')
     parser.add_argument('--test_archs', action="store_true")
@@ -374,7 +374,7 @@ if __name__ == "__main__":
         if args.dataset == "ImageNet":
             args.max_queries = 50000
     args.exp_dir = osp.join(args.exp_dir, get_exp_dir_name(args.dataset, args.image_lr, args.loss, args.norm,
-                                                           args.targeted, args.target_type, args))  # 随机产生一个目录用于实验
+                                                           args.targeted, args.target_type, args.surrogate_arch, args))  # 随机产生一个目录用于实验
     os.makedirs(args.exp_dir, exist_ok=True)
     if args.test_archs:
         if args.attack_defense:
@@ -426,8 +426,8 @@ if __name__ == "__main__":
     surrogate_model.cuda()
     surrogate_model.eval()
 
-    attacker = SwitchNegAttack(args.dataset, args.batch_size, args.targeted, args.target_type, args.epsilon,
-                               args.norm, 0.0, 1.0, args.max_queries)
+    attacker = SwitchNeg(args.dataset, args.batch_size, args.targeted, args.target_type, args.epsilon,
+                         args.norm, 0.0, 1.0, args.max_queries)
     for arch in archs:
         if args.attack_defense:
             save_result_path = args.exp_dir + "/{}_{}_result.json".format(arch, args.defense_model)

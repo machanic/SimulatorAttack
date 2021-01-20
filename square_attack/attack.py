@@ -1,7 +1,7 @@
 import os
 import sys
 import time
-sys.path.append("/home1/machen/meta_perturbations_black_box_attack")
+sys.path.append(os.getcwd())
 import argparse
 from types import SimpleNamespace
 
@@ -468,7 +468,7 @@ def main():
     parser.add_argument('--json-config', type=str,
                         default='/home1/machen/meta_perturbations_black_box_attack/configures/square_attack_conf.json',
                         help='a configures file to be passed in instead of arguments')
-    parser.add_argument('--batch_size',type=int,default=100)
+    parser.add_argument('--batch-size',type=int,default=100)
     parser.add_argument('--targeted', action="store_true")
     parser.add_argument('--target_type', type=str, default='increment', choices=['random', 'least_likely', "increment"])
     parser.add_argument('--attack_defense', action="store_true")

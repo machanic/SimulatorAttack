@@ -1,7 +1,7 @@
 import sys
 from collections import OrderedDict, defaultdict
-
-sys.path.append("/home1/machen/meta_perturbations_black_box_attack")
+import os
+sys.path.append(os.getcwd())
 import os
 import glog as log
 import torch
@@ -55,10 +55,11 @@ class SwitchNeg(object):
         self.success_query_all = torch.zeros_like(self.query_all)
         self.not_done_prob_all = torch.zeros_like(self.query_all)
 
-        self.improve_loss_record_all = OrderedDict()
+        self.increase_loss_from_last_iter_with_pos_grad_record_all = OrderedDict()
+        self.increase_loss_from_last_iter_with_neg_grad_record_all = OrderedDict()
         self.loss_x_pos_temp_record_all = OrderedDict()
         self.loss_x_neg_temp_record_all = OrderedDict()
-        self.improve_loss_after_switch_record_all = OrderedDict()
+        self.increase_loss_from_last_iter_after_switch_record_all = OrderedDict()
         self.loss_after_switch_grad_record_all = OrderedDict()
 
 
@@ -150,8 +151,9 @@ class SwitchNeg(object):
         correct = pred.eq(true_labels).float()  # shape = (batch_size,)
         not_done = correct.clone()
 
-        improve_loss_record = defaultdict(list)  # 记录到底有没有switch切换方向
-        improve_loss_after_switch_record = defaultdict(list)
+        increase_loss_from_last_iter_with_pos_grad_record = defaultdict(list)  # 记录到底有没有switch切换方向
+        increase_loss_from_last_iter_with_neg_grad_record = defaultdict(list)
+        increase_loss_from_last_iter_after_switch_record = defaultdict(list)
         loss_x_pos_temp_record = defaultdict(list)
         loss_x_neg_temp_record = defaultdict(list)
         loss_after_switch_grad_record = defaultdict(list)
@@ -183,7 +185,8 @@ class SwitchNeg(object):
                        -surrogate_gradients)
 
             for image_idx_, batch_idx_ in sorted(img_idx_to_batch_idx.proj_dict.items(), key=lambda e:e[0]):
-                improve_loss_record[batch_idx_].append(int(idx_positive_improved[image_idx_].item()))
+                increase_loss_from_last_iter_with_pos_grad_record[batch_idx_].append(int(idx_positive_improved[image_idx_].item()))
+                increase_loss_from_last_iter_with_neg_grad_record[batch_idx_].append(int(idx_negative_improved[image_idx_].item()))
                 loss_x_pos_temp_record[batch_idx_].append(attempt_positive_loss[image_idx_].item())
                 loss_x_neg_temp_record[batch_idx_].append(attempt_negative_loss[image_idx_].item())
 
@@ -192,9 +195,9 @@ class SwitchNeg(object):
             with torch.no_grad():
                 attempt_logits_2 = target_model(adv_images)
             attempt_loss_2 = criterion(attempt_logits_2, true_labels, target_labels)
-            idx_improved_2 = (attempt_loss_2 >= l).long()
+            idx_improved_2 = (attempt_loss_2 >= l).long()  # increaed after switch operation
             for image_idx_, batch_idx_ in sorted(img_idx_to_batch_idx.proj_dict.items(), key=lambda e:e[0]):
-                improve_loss_after_switch_record[batch_idx_].append(int(idx_improved_2[image_idx_].item()))
+                increase_loss_from_last_iter_after_switch_record[batch_idx_].append(int(idx_improved_2[image_idx_].item()))
                 loss_after_switch_grad_record[batch_idx_].append(attempt_loss_2[image_idx_].item())
 
             adv_images = proj_step(images, args.epsilon, adv_images)
@@ -251,8 +254,10 @@ class SwitchNeg(object):
                 value = eval(key)[img_idx].item()
                 value_all[pos] = value  # 由于value_all是全部图片都放在一个数组里，当前batch选择出来
         img_idx_to_batch_idx.proj_dict.clear()
-        for key in ["improve_loss_record", "improve_loss_after_switch_record","loss_x_pos_temp_record",
-                    "loss_x_neg_temp_record", "loss_after_switch_grad_record"]:
+        for key in ["increase_loss_from_last_iter_with_pos_grad_record", "increase_loss_from_last_iter_with_neg_grad_record",
+                    "loss_x_pos_temp_record", "loss_x_neg_temp_record",
+                    "increase_loss_from_last_iter_after_switch_record",
+                    "loss_after_switch_grad_record"]:
             values = eval(key)
             for batch_idx, value in sorted(values.items(), key=lambda e:e[0]):
                 pos = selected[batch_idx].item()
@@ -316,8 +321,9 @@ class SwitchNeg(object):
                           "not_done_all": self.not_done_all.detach().cpu().numpy().astype(np.int32).tolist(),
                           "query_all": self.query_all.detach().cpu().numpy().astype(np.int32).tolist(),
                           "not_done_prob": self.not_done_prob_all[self.not_done_all.byte()].mean().item(),
-                          "improve_loss_record": self.improve_loss_record_all,
-                          "improve_loss_after_switch_record": self.improve_loss_after_switch_record_all,
+                          "increase_loss_from_last_iter_with_pos_grad_record": self.increase_loss_from_last_iter_with_pos_grad_record_all,
+                          "increase_loss_from_last_iter_with_neg_grad_record": self.increase_loss_from_last_iter_with_neg_grad_record_all,
+                          "increase_loss_from_last_iter_after_switch_record": self.increase_loss_from_last_iter_after_switch_record_all,
                           "loss_x_pos_temp_record": self.loss_x_pos_temp_record_all,
                           "loss_x_neg_temp_record": self.loss_x_neg_temp_record_all,
                           "loss_after_switch_grad_record": self.loss_after_switch_grad_record_all,
@@ -370,7 +376,7 @@ if __name__ == "__main__":
     parser.add_argument("--surrogate_arch", type=str, default="resnet-110", help="The architecture of surrogate model,"
                                                                                  " in original paper it is resnet152")
     parser.add_argument('--json-config', type=str,
-                        default='/home1/machen/meta_perturbations_black_box_attack/configures/SWITCH_attack_conf.json',
+                        default='./configures/SWITCH_attack_conf.json',
                         help='a configuration file to be passed in instead of arguments')
     parser.add_argument('--arch', default=None, type=str, help='network architecture')
     parser.add_argument('--test_archs', action="store_true")

@@ -68,6 +68,6 @@ def rescale(x, x_min=-1., x_max=1.):
     return x * (x_max - x_min) + x_min
 
 
-def tanh_rescale(x, x_min=-1., x_max=1.):
+def tanh_rescale(x):
 #    return (torch.tanh(x) + 1) * 0.5 * (x_max - x_min) + x_min
     return torch.tanh(x)

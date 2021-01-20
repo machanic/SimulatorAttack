@@ -1,0 +1,32 @@
+batch_size: 64
+train_path: ./dataset/
+data_path: ./dataset/
+epsilon: 0.05
+margin: 5.0
+model_name: Adv_Denoise_Resnext101
+defense: true
+
+print_log: false
+query_limit: 10000
+init_iter: 3
+init_batch: 100
+memory_size: 3
+lr: 0.03
+
+max_iters: 1
+block_size:
+  224x224: 32
+  299x299: 23
+
+
+local_forget_threshold:
+  23: 0
+  32: 0
+  16: 0
+  13: 0
+  8: 1
+  4: 1
+  2: 2
+  1: 2
+save_path: output
+save_prefix: CorrAttack_Diff_Defense

@@ -12,18 +12,18 @@ from types import SimpleNamespace
 import numpy as np
 import os
 
-import random
 import torch
 from torch.nn import functional as F
 from VBAD.group_generator import EquallySplitGrouping
 from VBAD.models import ResNetFeatureExtractor, DensenetFeatureExtractor
 from VBAD.tentative_perturbation_generator import TentativePerturbationGenerator
-from config import CLASS_NUM, MODELS_TEST_STANDARD, PY_ROOT
+from config import CLASS_NUM, MODELS_TEST_STANDARD, PY_ROOT, IMAGE_DATA_ROOT
 from dataset.dataset_loader_maker import DataLoaderMaker
 import glog as log
 from dataset.standard_model import StandardModel
 from dataset.defensive_model import DefensiveModel
 from torchvision import models
+from dataset.target_class_dataset import ImageNetDataset,CIFAR10Dataset,CIFAR100Dataset
 
 class VBADAttack(object):
 
@@ -54,64 +54,42 @@ class VBADAttack(object):
         self.success_query_all = torch.zeros_like(self.query_all)
         self.not_done_prob_all = torch.zeros_like(self.query_all)
         self.dataset_name = args.dataset
-        if self.dataset_name == "TinyImageNet":
-            self.candidate_loader = DataLoaderMaker.get_candidate_attacked_data(self.dataset_name, 1)
-            self.dataset = self.candidate_loader.dataset
-        else:
-            self.dataset = self.dataset_loader.dataset
-        self.label_data_index_dict = self.get_label_dataset(self.dataset)
 
-    def get_label_dataset(self, dataset):
-        label_index = collections.defaultdict(list)
-        for index, (*_, label) in enumerate(dataset):  # 保证这个data_loader没有shuffle过
-            label_index[label].append(index)
-        return label_index
 
-    def get_image_of_class(self, target_labels, dataset, target_model):
+    def get_image_of_target_class(self, dataset_name, target_labels, target_model):
+
         images = []
         for label in target_labels:  # length of target_labels is 1
-            index = random.choice(self.label_data_index_dict[label.item()])
-            image, label_ = dataset[index]
-            with torch.no_grad():
-                logits = target_model(image.unsqueeze(0).cuda())
-            while logits.max(1)[1].item() != label.item():
-                index = random.choice(self.label_data_index_dict[label.item()])
-                image, label_ = dataset[index]
-                with torch.no_grad():
-                    logits = target_model(image.unsqueeze(0).cuda())
+            if dataset_name == "ImageNet":
+                dataset = ImageNetDataset(IMAGE_DATA_ROOT[dataset_name], label.item(), "validation")
+            elif dataset_name == "CIFAR-10":
+                dataset = CIFAR10Dataset(IMAGE_DATA_ROOT[dataset_name], label.item(), "validation")
+            elif dataset_name == "CIFAR-100":
+                dataset = CIFAR100Dataset(IMAGE_DATA_ROOT[dataset_name], label.item(), "validation")
 
-            assert label_ == label.item()
-            images.append(image)
-        return torch.stack(images).cuda()  # B,C,H,W
-
-    def get_image_of_class_ImageNet(self, target_labels, dataset, target_model):
-        images = []
-        for label in target_labels:  # length of target_labels is 1
-            index = random.choice(self.label_data_index_dict[label.item()])
-            image_small, image_big, label_ = dataset[index]
-            if target_model.input_size[-1] >= 299:
-                image, true_labels = image_big, label
-            else:
-                image, true_labels = image_small, label
-            if image.size(-1) != target_model.input_size[-1]:
-                image = F.interpolate(image.unsqueeze(0), size=target_model.input_size[-1], mode='bilinear',align_corners=True)
+            index = np.random.randint(0, len(dataset))
+            image, true_label = dataset[index]
+            image = image.unsqueeze(0)
+            if dataset_name == "ImageNet" and target_model.input_size[-1] != 299:
+                image = F.interpolate(image,
+                                      size=(target_model.input_size[-2], target_model.input_size[-1]), mode='bilinear',
+                                      align_corners=False)
             with torch.no_grad():
                 logits = target_model(image.cuda())
             while logits.max(1)[1].item() != label.item():
-                index = random.choice(self.label_data_index_dict[label.item()])
-                image_small, image_big, label = dataset[index]
-                if target_model.input_size[-1] >= 299:
-                    image, true_labels = image_big, label
-                else:
-                    image, true_labels = image_small, label
-                if image.size(-1) != target_model.input_size[-1]:
-                    image = F.interpolate(image.unsqueeze(0), size=target_model.input_size[-1], mode='bilinear', align_corners=True)
+                index = np.random.randint(0, len(dataset))
+                image, true_label = dataset[index]
+                image = image.unsqueeze(0)
+                if dataset_name == "ImageNet" and target_model.input_size[-1] != 299:
+                    image = F.interpolate(image,
+                                          size=(target_model.input_size[-2], target_model.input_size[-1]),
+                                          mode='bilinear',
+                                          align_corners=False)
                 with torch.no_grad():
                     logits = target_model(image.cuda())
-
-            assert label_ == label.item()
+            assert true_label == label.item()
             images.append(torch.squeeze(image))
-        return torch.stack(images).cuda()  # B,C,H,W
+        return torch.stack(images)  # B,C,H,W
 
     def sim_rectification_vector(self, model, adv_images, tentative_directions, n, sigma, target_class, rank_transform,
                                  sub_num, group_gen, untargeted):
@@ -441,10 +419,7 @@ class VBADAttack(object):
             correct = pred.eq(true_labels).float()  # shape = (batch_size,)
             not_done = correct.clone()
             if args.targeted:
-                if self.dataset_name == "ImageNet":
-                    target_class_images = self.get_image_of_class_ImageNet(target_labels, self.dataset, target_model)
-                else:
-                    target_class_images = self.get_image_of_class(target_labels, self.dataset, target_model)
+                target_class_images = self.get_image_of_target_class(self.dataset_name, target_labels, target_model)
                 target_class_images = target_class_images.cuda()
                 self.directions_generator.set_targeted_params(target_class_images, self.random_mask)
                 is_success, query, adv_images = self.targeted_attack(target_model, images, target_class_images, target_labels)

@@ -2,7 +2,7 @@ import argparse
 import os
 import random
 import sys
-sys.path.append("/home1/machen/meta_perturbations_black_box_attack")
+sys.path.append(os.getcwd())
 from types import SimpleNamespace
 
 import glob
@@ -60,7 +60,7 @@ class PPBA(object):
         self.success_all = torch.zeros_like(self.query_all)
         self.success_query_all = torch.zeros_like(self.query_all)
         self.not_done_prob_all = torch.zeros_like(self.query_all)
-        if dataset.startswith("CIFAR"):  # FIXME 实验不同的参数效果
+        if dataset.startswith("CIFAR"):  # TODO 实验不同的参数效果
             self.freq_dim = 11 # 28
             self.stride = 7
         elif dataset=="TinyImageNet":
@@ -255,7 +255,7 @@ class PPBA(object):
                     json_content = json.load(file_obj)
                     resume_batch_idx = int(json_content["batch_idx"])  # resume
                     for key in ['query_all', 'correct_all', 'not_done_all',
-                                'success_all', 'success_query_all']:
+                                'success_all', 'success_query_all','not_done_prob_all']:
                         if key in json_content:
                             setattr(self, key, torch.from_numpy(np.asarray(json_content[key])).float())
                     if batch_idx < resume_batch_idx:  # resume
@@ -284,7 +284,7 @@ class PPBA(object):
             self.attack_batch_images(model, batch_idx, images.cuda(), true_labels.cuda())
             tmp_info_dict = {"batch_idx": batch_idx + 1}
             for key in ['query_all', 'correct_all', 'not_done_all',
-                        'success_all', 'success_query_all']:
+                        'success_all', 'success_query_all','not_done_prob_all']:
                 value_all = getattr(self, key).detach().cpu().numpy().tolist()
                 tmp_info_dict[key] = value_all
             with open(tmp_dump_path, "w") as result_file_obj:
@@ -316,11 +316,11 @@ def get_parse_args():
     parser.add_argument("--r", type=int, default=2352)
     parser.add_argument("--max_queries", type=int, default=10000)
     parser.add_argument("--n_samples", type=int, default=1)
-    parser.add_argument("--rho", type=float, default=0.01)
+    parser.add_argument("--rho", type=float, default=0.001, help="modify from original 0.01 to 0.001 due to epsilon = 1.0 in CIFAR-10")
     parser.add_argument('--attack_defense', action="store_true")
     parser.add_argument('--defense_model', type=str, default=None)
     parser.add_argument('--json-config', type=str,
-                        default='/home1/machen/meta_perturbations_black_box_attack/configures/PPBA_attack_conf.json',
+                        default='./configures/PPBA_attack_conf.json',
                         help='a configures file to be passed in instead of arguments')
     parser.add_argument('--epsilon', type=float, help='the lp perturbation bound')
     parser.add_argument('--arch', default=None, type=str, help='network architecture')
@@ -363,7 +363,7 @@ if __name__ == "__main__":
     args_dict = None
     if args.json_config:
         # If a json file is given, use the JSON file as the base, and then update it with args
-        defaults = json.load(open(args.json_config))[args.norm]
+        defaults = json.load(open(args.json_config))[args.dataset][args.norm]
         arg_vars = vars(args)
         arg_vars = {k: arg_vars[k] for k in arg_vars if arg_vars[k] is not None}
         defaults.update(arg_vars)

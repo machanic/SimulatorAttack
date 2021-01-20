@@ -2,9 +2,9 @@
 Implements SignHunter
 """
 import json
-import os
 import sys
-sys.path.append("/home1/machen/meta_perturbations_black_box_attack")
+import os
+sys.path.append(os.getcwd())
 
 import argparse
 from types import SimpleNamespace

@@ -198,7 +198,7 @@ if __name__ == "__main__":
                         help="iteration number for start, useful when loading a checkpoint")
     parser.add_argument("--use_tanh", action="store_true")
     parser.add_argument("--use_log", action='store_true')
-    parser.add_argument("--epsilone", type=float, default=4.6)
+    parser.add_argument("--epsilone", type=float)
     parser.add_argument('--seed', default=1216, type=int, help='random seed')
     parser.add_argument('--json_config', type=str,
                         default='/home1/machen/meta_perturbations_black_box_attack/configures/zoo_attack_conf.json',

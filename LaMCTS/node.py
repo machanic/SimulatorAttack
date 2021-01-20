@@ -3,12 +3,12 @@
 # This source code is licensed under the license found in the
 # LICENSE file in the root directory of this source tree.
 # 
-from Classifier import Classifier
+from LaMCTS.Classifier import Classifier
 import json
 import numpy as np
 import math
 import operator
-
+import glog as log
 class Node:
     obj_counter   = 0
     # If a leave holds >= SPLIT_THRESH, we split into two new nodes.
@@ -65,11 +65,11 @@ class Node:
         
     def print_bag(self):
         sorted_bag = sorted(self.bag.items(), key=operator.itemgetter(1))
-        print("BAG"+"#"*10)
+        log.info("BAG"+"#"*10)
         for item in sorted_bag:
-            print(item[0],"==>", item[1])            
-        print("BAG"+"#"*10)
-        print('\n')
+            log.info(item[0] + "==>" + item[1])
+        log.info("BAG"+"#"*10)
+        log.info('\n')
         
     def update_bag(self, samples):
         assert len(samples) > 0

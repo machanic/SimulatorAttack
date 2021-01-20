@@ -98,7 +98,7 @@ MODELS_TRAIN_STANDARD = {"CIFAR-10": ["alexnet", "densenet-bc-100-12", "densenet
 
 MODELS_TEST_STANDARD = {"CIFAR-10": ["pyramidnet272", "gdas","WRN-28-10-drop","WRN-40-10-drop"],
                         "CIFAR-100":["pyramidnet272", "gdas","WRN-28-10-drop","WRN-40-10-drop"],
-                        "ImageNet": ["inceptionv3","inceptionv4","senet154","pnasnet5large","resnet101"],
+                        "ImageNet": ["inceptionv3","inceptionv4","senet154","resnet101","pnasnet5large"],
                         "TinyImageNet":["resnext64_4","densenet121","resnext32_4"]}
 
 

@@ -1,7 +1,7 @@
 import argparse
 import sys
-sys.path.append("/home1/machen/meta_perturbations_black_box_attack")
 import os
+sys.path.append(os.getcwd())
 import random
 import glog as log
 import numpy as np
@@ -29,8 +29,8 @@ def get_parse_args():
     # argparser.add_argument('--imgsz', type=int, help='imgsz', default=64)
     argparser.add_argument('--batchsize', type=int, help='batchsize', default=64)
     argparser.add_argument('--task_num', type=int, help='meta batch size, namely task num', default=3)
-    argparser.add_argument('--meta_lr', type=float, help='meta-level outer learning rate', default=1e-2)
-    argparser.add_argument('--update_lr', type=float, help='task-level inner update learning rate', default=1e-2)
+    argparser.add_argument('--meta_lr', type=float, help='meta-level outer learning rate', default=1e-3)
+    argparser.add_argument('--update_lr', type=float, help='task-level inner update learning rate', default=1e-3)
     argparser.add_argument('--update_step', type=int, help='task-level inner update steps', default=5)
     argparser.add_argument('--update_step_test', type=int, help='update steps for finetunning', default=20)
     argparser.add_argument("--gpu", type=int, required=True)
@@ -119,9 +119,14 @@ def main(args):
         mini_test_iter = iter(mini_test)
         for step in range(step_number):
             batch_data = []
-            for task_idx in range(args.task_num):
-                each_iter = random.choice(minis_iter)
-                batch_data.append(each_iter.next())
+            task_idx = 0
+            while task_idx < args.task_num:
+                try:
+                    each_iter = random.choice(minis_iter)
+                    batch_data.append(each_iter.next())
+                    task_idx += 1
+                except StopIteration:
+                    pass
             accs = maml(batch_data)
             if (step + 1) % step_number == 0:
                 log.info('step: {}  training acc: {:.6f}'.format(step, accs[0].item()))

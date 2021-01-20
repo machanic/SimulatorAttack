@@ -43,7 +43,7 @@ class Meta(nn.Module):
 
         def compute_diff(weights):
             '''
-            this method is to computer the diifference between received weights
+            this method is to computer the difference between received weights
             and the self.net.parameters(), it will return the difference
             '''
             dis = []
@@ -63,7 +63,7 @@ class Meta(nn.Module):
             for i,each in enumerate(weights[0]):
                 diff = torch.zeros_like(each)
                 for j in range(task_num):
-                    diff += weights[j][i]
+                    diff += weights[j][i]  # j is task index
                 diff /= task_num
                 dic[keys[i]] -=  diff
             self.net.load_state_dict(dic)

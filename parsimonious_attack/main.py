@@ -1,6 +1,7 @@
 import sys
-
-sys.path.append("/home1/machen/meta_perturbations_black_box_attack")
+import os
+import os
+sys.path.append(os.getcwd())
 import argparse
 import glob
 import os

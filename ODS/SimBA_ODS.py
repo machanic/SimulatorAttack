@@ -8,7 +8,7 @@ import sys
 import random
 
 import numpy as np
-sys.path.append("/home1/machen/meta_perturbations_black_box_attack")
+sys.path.append(os.getcwd())
 import argparse
 from types import SimpleNamespace
 import glob
@@ -179,7 +179,7 @@ class SimBAODS(object):
             if success[0].item() == 1:
                 break
         dist = (x_best - images).norm().item()  # L2 norm distance
-        if dist > self.l2_bound:
+        if self.norm == "l2" and dist > self.l2_bound:
             x_best = proj_step(x_best)
             logits = model(x_best)
             adv_pred = logits.argmax(dim=1)
@@ -307,7 +307,7 @@ def get_parse_args():
     parser.add_argument('--order', type=str, default='strided', help='(random) order of coordinate selection')
     parser.add_argument('--stride', type=int, help='stride for block order')
     parser.add_argument('--json-config', type=str,
-                        default='/home1/machen/meta_perturbations_black_box_attack/configures/SimBA_attack_conf.json',
+                        default=os.getcwd()+'/configures/SimBA_attack_conf.json',
                         help='a configures file to be passed in instead of arguments')
     parser.add_argument('--dataset', type=str, required=True,
                         choices=['CIFAR-10', 'CIFAR-100', 'ImageNet', "FashionMNIST", "MNIST", "TinyImageNet"],

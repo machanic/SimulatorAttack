@@ -1,4 +1,6 @@
 import sys
+
+
 sys.path.append("/home1/machen/meta_perturbations_black_box_attack")
 from config import PY_ROOT
 import argparse
@@ -12,9 +14,10 @@ import torch.backends.cudnn as cudnn
 import torch.optim
 import torch.utils.data
 from config import IN_CHANNELS
-from optimizer.radam import RAdam
 from dataset.dataset_loader_maker import DataLoaderMaker
 from dataset.standard_model import MetaLearnerModelBuilder
+
+from torch.optim import SGD
 
 class Identity(nn.Module):
     def __init__(self):
@@ -76,7 +79,7 @@ def main_train_worker(args):
     print("after train, model will be saved to {}".format(model_path))
     network.cuda()
     image_classifier_loss = nn.CrossEntropyLoss().cuda()
-    optimizer = RAdam(network.parameters(), args.lr, weight_decay=args.weight_decay)
+    optimizer = SGD(network.parameters(), args.lr, weight_decay=args.weight_decay)
     cudnn.benchmark = True
     train_loader = DataLoaderMaker.get_img_label_data_loader(args.dataset, args.batch_size, True)
     val_loader = DataLoaderMaker.get_img_label_data_loader(args.dataset, args.batch_size, False)

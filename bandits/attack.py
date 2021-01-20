@@ -1,6 +1,7 @@
 import glob
 import sys
-sys.path.append("/home1/machen/meta_perturbations_black_box_attack")
+import os
+sys.path.append(os.getcwd())
 import argparse
 import json
 import os
@@ -303,7 +304,7 @@ if __name__ == "__main__":
     parser.add_argument('--exploration', type=float, help='\delta, parameterizes the exploration to be done around the prior')
     parser.add_argument('--tile-size', type=int, help='the side length of each tile (for the tiling prior)')
     parser.add_argument('--tiling', action='store_true')
-    parser.add_argument('--json-config', type=str, default='/home1/machen/meta_perturbations_black_box_attack/configures/bandits_attack_conf.json',
+    parser.add_argument('--json-config', type=str, default='./configures/Bandits.json',
                         help='a configures file to be passed in instead of arguments')
     parser.add_argument('--epsilon', type=float, help='the lp perturbation bound')
     parser.add_argument('--batch-size', type=int, help='batch size for bandits attack.')
@@ -311,7 +312,7 @@ if __name__ == "__main__":
                         choices=['CIFAR-10', 'CIFAR-100', 'ImageNet', "FashionMNIST", "MNIST", "TinyImageNet"],
                         help='which dataset to use')
     parser.add_argument('--arch', default=None, type=str, help='network architecture')
-    parser.add_argument('--test_archs', action="store_true")
+    parser.add_argument('--all_archs', action="store_true")
     parser.add_argument('--targeted', action="store_true")
     parser.add_argument('--target_type',type=str, default='increment', choices=['random', 'least_likely',"increment"])
     parser.add_argument('--exp-dir', default='logs', type=str,
@@ -338,9 +339,8 @@ if __name__ == "__main__":
         defaults.update(arg_vars)
         args = SimpleNamespace(**defaults)
         args_dict = defaults
-    if args.targeted:
-        if args.dataset == "ImageNet":
-            args.max_queries = 50000
+    if args.targeted and args.dataset == "ImageNet":
+        args.max_queries = 50000
     args.exp_dir = osp.join(args.exp_dir, get_exp_dir_name(args.dataset, args.loss, args.norm, args.targeted, args.target_type, args))  # 随机产生一个目录用于实验
     os.makedirs(args.exp_dir, exist_ok=True)
 

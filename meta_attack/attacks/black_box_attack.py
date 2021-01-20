@@ -37,7 +37,7 @@ def coordinate_ADAM(losses, indice, grad, hess, batch_size, mt_arr, vt_arr, real
     adam_epoch[indice] = epoch + 1.
 
 
-class MetaGradAttack(object):
+class MetaAttack(object):
     def __init__(self, args, norm, epsilon, targeted=False, search_steps=None, max_steps=None, use_log=True, cuda=True, debug=False):
         self.debug = debug
         self.norm = norm
@@ -63,13 +63,13 @@ class MetaGradAttack(object):
         self.GRAD_STORE =0
         self.guided = False
         self.simba_pixel =args.simba_update_pixels
-        self.every_iter = int(float(self.update_pixels) / float(self.simba_pixel) ) * args.finetune_interval
+        # self.every_iter = int(float(self.update_pixels) / float(self.simba_pixel) ) * args.finetune_interval
+        self.every_iter =  args.finetune_interval
         self.finetune_interval = args.finetune_interval
         self.max_queries = args.max_queries
         self.max_steps = max_steps or 1000
         self.max_iter = self.max_steps * self.every_iter
 
-        self.mp_count = np.zeros(3072)
         self.use_importance = True
         self.LEARNING_RATE = args.learning_rate
         # self.LEARNING_RATE = 1e-2
@@ -88,10 +88,8 @@ class MetaGradAttack(object):
 
         self.mt = torch.zeros(var_size, dtype=torch.float32)
         self.vt = torch.zeros(var_size, dtype=torch.float32)
-
         self.modifier_up = torch.zeros(var_size, dtype=torch.float32)
         self.modifier_down = torch.zeros(var_size, dtype=torch.float32)
-
         self.grad = torch.zeros(self.batch_size, dtype=torch.float32)
         self.hess = torch.zeros(self.batch_size, dtype=torch.float32)
         self.adam_epoch = torch.ones(var_size, dtype=torch.float32)
@@ -113,7 +111,7 @@ class MetaGradAttack(object):
                 output[target] -= self.confidence
             else:
                 output[target] += self.confidence
-            output = int(np.argmax(output))
+            output = np.argmax(output).item()
         if self.targeted:
             return output == target
         else:
@@ -154,14 +152,14 @@ class MetaGradAttack(object):
 
     def l2_dist_within_epsilon(self, image, adv_image, epsilon):
         delta = adv_image - image
-        out_of_bounds_mask = (self.normalize(delta) > epsilon).byte()  # norm返回shape(N,1,1,1) > epsilone
-        return not out_of_bounds_mask.any()  # 如果全是0.返回True,表示没有一个像素超出范围外
+        inside_l2_bound = (self.normalize(delta) <= epsilon).view(-1).byte()  # norm返回shape(N,1,1,1) > epsilon
+        return inside_l2_bound.all().item()  # 如果全是1.返回True,表示没有一个像素超出范围外
 
     def _optimize(self, model, meta_model, step, input_var, modifier_var, target_var, scale_const_var, target,
                   indice, input_orig=None):
         query = 0
         if self.use_tanh:
-            input_adv = (tanh_rescale(modifier_var + input_var) + 1)/ 2
+            input_adv = (tanh_rescale(modifier_var + input_var) + 1)/ 2  # 0~1
         else:
             input_adv = modifier_var + input_var
         output = F.softmax(model(input_adv), dim=1) # query model for 1 time
@@ -205,6 +203,7 @@ class MetaGradAttack(object):
             grad = zoo_gradients.reshape(-1)[indice2]
         else:
             grad = meta_output.reshape(-1)[indice2]
+        # 修改的是modifier_var来达到修改对抗样本的目的
         self.solver(loss, indice2, grad, self.hess, self.batch_size, self.mt, self.vt, modifier_var,
                     self.modifier_up, self.modifier_down, self.LEARNING_RATE, self.adam_epoch, self.beta1, self.beta2,
                     not self.use_tanh)  # use_tanh模式，就不使用modifier_up和modifier_down
@@ -213,7 +212,7 @@ class MetaGradAttack(object):
         loss2 = loss2[0].item()
         dist_np = dist[0].data.cpu().numpy()
         output_np = output[0].unsqueeze(0).data.cpu().numpy()
-        input_adv_np = input_adv[0].unsqueeze(0).data.permute(0, 2, 3, 1).cpu().numpy()  # back to BHWC for numpy consumption
+        input_adv_np = input_adv[0].unsqueeze(0).permute(0, 2, 3, 1).detach().cpu().numpy()  # back to BHWC for numpy consumption
         return loss_np, loss1, loss2, dist_np, output_np, input_adv_np, indice, query
 
     def run(self, model, meta_model, input, target):
@@ -227,15 +226,15 @@ class MetaGradAttack(object):
 
         if not self.use_tanh:  # 此时modifier_up和modifier_down起作用，可以设置为linf的攻击的eps半径
             if self.norm == "linf":
-                self.modifier_up = torch.clamp(input.view(-1)+self.epsilon, min=0, max=1) - input.view(-1)
-                self.modifier_down = torch.clamp(input.view(-1)-self.epsilon, min=0, max=1) - input.view(-1)
+                self.modifier_up = torch.clamp(input.view(-1) + self.epsilon, min=0, max=1) - input.view(-1)
+                self.modifier_down = torch.clamp(input.view(-1) - self.epsilon, min=0, max=1) - input.view(-1)
             else:
                 self.modifier_up = 1 - input.reshape(-1)  # 像素范围是0到1之间，这是修改量的范围
                 self.modifier_down = 0 - input.reshape(-1)
         # python/numpy placeholders for the overall best l2, label score, and adversarial image
         o_best_l2 = [1e10] * batch_size
         o_best_score = [-1] * batch_size
-        o_best_attack = input.permute(0, 2, 3, 1).cpu().numpy()  # put channel as the last dimension
+        o_best_attack = input.permute(0, 2, 3, 1).cpu().numpy()  # put channel as the last dimension: BHWC
         # setup input (image) variable, clamp/scale as necessary
         if self.use_tanh:  # l2模式使用, linf norm使用no_tanh
             input_var = torch_arctanh(input * 2 - 1).detach()  # arctanh接受的是-1到1
@@ -332,7 +331,7 @@ class MetaGradAttack(object):
                         o_best_score[i] = output_label
 
                         adv_img_tensor = torch.from_numpy(adv_img[i]).unsqueeze(0).permute(0,3, 1,2) # BHWC->BCHW
-                        input_orig_tensor = input_orig[i].unsqueeze(0).cpu()
+                        input_orig_tensor = input_orig[i].unsqueeze(0).cpu()   # BCHW
                         assert adv_img_tensor.size() == input_orig_tensor.size()
                         if self.norm == "l2" and self.l2_dist_within_epsilon(input_orig_tensor,
                                                                              adv_img_tensor, self.epsilon):
@@ -375,4 +374,5 @@ class MetaGradAttack(object):
 
         if first_step > self.max_iter:
             first_step = self.max_iter
-        return o_best_attack, scale_const, first_step, success_queries
+        o_best_l2 = np.sqrt(np.array(o_best_l2))[0].item()
+        return o_best_attack, o_best_l2, scale_const, first_step, success_queries

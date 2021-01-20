@@ -3,19 +3,19 @@
     "freq_dims": 11,
     "stride": 7,
     "linf_bound": 0.031372,
-    "l2_bound": 4.6
+    "l2_bound": 1.0
   },
   "CIFAR-100": {
     "freq_dims": 11,
       "stride": 7,
       "linf_bound": 0.031372,
-      "l2_bound": 4.6
+      "l2_bound": 1.0
   },
   "TinyImageNet": {
     "freq_dims": 15,
     "stride": 7,
     "linf_bound": 0.031372,
-    "l2_bound": 4.6
+    "l2_bound": 2.0
   },
   "ImageNet": {
     "freq_dims": 28,

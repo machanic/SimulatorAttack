@@ -1,6 +1,7 @@
 import glob
 import sys
-sys.path.append("/home1/machen/meta_perturbations_black_box_attack")
+import os
+sys.path.append(os.getcwd())
 import argparse
 import json
 import os
@@ -62,13 +63,6 @@ class ImageIdxToOrigBatchIdx(object):
         self.proj_dict = OrderedDict()
         for img_idx in range(batch_size):
             self.proj_dict[img_idx] = img_idx
-
-    # def __delitem__(self, del_img_idx):  # 这有一处bug，不能连续删除多个index，因为第一个删除有后会影响下一次的img_idx
-    #     del self.proj_dict[del_img_idx]
-    #     all_key_value = sorted(list(self.proj_dict.items()), key=lambda e:e[0])
-    #     for seq_idx, (img_idx, batch_idx) in enumerate(all_key_value):
-    #         del self.proj_dict[img_idx]
-    #         self.proj_dict[seq_idx] = batch_idx
 
     def del_by_index_list(self, del_img_idx_list):
         for del_img_idx in del_img_idx_list:
@@ -207,18 +201,6 @@ class MetaSimulatorBanditsAttack(object):
             selected = torch.arange(data_idx * args.batch_size,
                                     min((data_idx + 1) * args.batch_size, self.total_images))  # 选择这个batch的所有图片的index
             img_idx_to_batch_idx = ImageIdxToOrigBatchIdx(args.batch_size)
-            # if len(skip_batch_index_list) > 0:  # FIXME 一种用bandits失败的结果就不判断的加速手段，可以删去
-            #     for skip_index in skip_batch_index_list:
-            #         pos = selected[skip_index]
-            #         self.query_all[pos] = args.max_queries
-            #         self.correct_all[pos] = 0
-            #         self.not_done_all[pos] = 1
-            #         self.success_all[pos] = 0 # 让其定义为分类失败
-            #         self.success_query_all[pos] = 0
-            #         self.not_done_loss_all[pos] = 1.0
-            #         self.not_done_prob_all[pos] = 1.0
-            #     images, true_labels = self.delete_tensor_by_index_list(skip_batch_index_list, images, true_labels)
-            #     img_idx_to_batch_idx.del_by_index_list(skip_batch_index_list)
 
             images, true_labels = images.cuda(), true_labels.cuda()
             first_finetune = True
@@ -271,9 +253,7 @@ class MetaSimulatorBanditsAttack(object):
                 q1_images = adv_images + args.fd_eta * q1 / self.norm(q1)
                 q2_images = adv_images + args.fd_eta * q2 / self.norm(q2)
                 predict_by_target_model = False
-                if (step_index <= args.warm_up_steps or (
-                        step_index - args.warm_up_steps) % args.meta_predict_steps == 0) \
-                        or (len(np.where(not_done.detach().cpu().numpy().astype(np.int32) == 1)[0]) / float(args.batch_size) <= args.notdone_threshold):
+                if step_index <= args.warm_up_steps or (step_index - args.warm_up_steps) % args.meta_predict_steps == 0:
                     log.info("predict from target model")
                     predict_by_target_model = True
                     with torch.no_grad():
@@ -284,10 +264,10 @@ class MetaSimulatorBanditsAttack(object):
                         q2_logits = q2_logits/torch.norm(q2_logits,p=2,dim=-1,keepdim=True)
 
                     finetune_queue.append(q1_images.detach(), q2_images.detach(), q1_logits.detach(), q2_logits.detach())
-
-                    if (step_index >= args.warm_up_steps and len(np.where(not_done.detach().cpu().numpy().astype(np.int32) == 1)[0]) / float(args.batch_size) > args.notdone_threshold):
+                    if step_index >= args.warm_up_steps:
                         q1_images_seq, q2_images_seq, q1_logits_seq, q2_logits_seq = finetune_queue.stack_history_track()
-                        finetune_times = args.finetune_times if first_finetune else random.randint(3,5) # FIXME
+                        finetune_times = args.finetune_times if first_finetune else random.randint(3,5)
+                        log.info("begin finetune for {} times".format(finetune_times))
                         self.meta_finetuner.finetune(q1_images_seq, q2_images_seq, q1_logits_seq, q2_logits_seq,
                                                      finetune_times, first_finetune, img_idx_to_batch_idx)
                         first_finetune = False
@@ -382,22 +362,7 @@ class MetaSimulatorBanditsAttack(object):
             with open(tmp_dump_path, "w") as result_file_obj:
                 json.dump(tmp_info_dict, result_file_obj, sort_keys=True)
 
-        query_all_ = self.query_all.detach().cpu().numpy().astype(np.int32)
-        not_done_all_ = self.not_done_all.detach().cpu().numpy().astype(np.int32)
-        # log.info('{} is attacked finished ({} images)'.format(arch, self.total_images))
-        # log.info('        avg correct: {:.4f}'.format(self.correct_all.mean().item()))
-        # log.info('       avg not_done: {:.4f}'.format(self.not_done_all.mean().item()))  # 有多少图没做完
-        # if self.success_all.sum().item() > 0:
-        #     log.info(
-        #         '     avg mean_query: {:.4f}'.format(self.success_query_all[self.success_all.byte()].mean().item()))
-        #     log.info(
-        #         '   avg median_query: {:.4f}'.format(self.success_query_all[self.success_all.byte()].median().item()))
-        #     log.info('     max query: {}'.format(self.success_query_all[self.success_all.byte()].max().item()))
-        # if self.not_done_all.sum().item() > 0:
-        #     log.info(
-        #         '  avg not_done_loss: {:.4f}'.format(self.not_done_loss_all[self.not_done_all.byte()].mean().item()))
-        #     log.info(
-        #         '  avg not_done_prob: {:.4f}'.format(self.not_done_prob_all[self.not_done_all.byte()].mean().item()))
+
         log.info('Saving results to {}'.format(result_dump_path))
         meta_info_dict = {"avg_correct": self.correct_all.mean().item(),
                           "avg_not_done": self.not_done_all[self.correct_all.byte()].mean().item(),
@@ -424,21 +389,23 @@ class MetaSimulatorBanditsAttack(object):
 
 def get_exp_dir_name(dataset, loss, norm, targeted, target_type, distillation_loss, args):
     target_str = "untargeted" if not targeted else "targeted_{}".format(target_type)
-    # if targeted:
-    #     dirname = 'simulate_bandits_shrink_attack-{}-{}_loss-{}-{}-{}-meta_interval-{}'.format(dataset, loss, norm, target_str,
-    #                                                                           distillation_loss, meta_interval)
-    # else:
-    if args.attack_defense:
-        dirname = 'simulate_bandits_shrink_attack_on_defensive_model-{}-{}_loss-{}-{}-{}'.format(dataset,
-                                                                                              loss, norm, target_str, distillation_loss)
+    if args.simulator == "vanilla_ensemble":
+        if args.attack_defense:
+            dirname = 'vanilla_simulator_attack_on_defensive_model-{}-{}_loss-{}-{}-{}'.format(dataset,
+                                                                                                     loss, norm,
+                                                                                                     target_str,
+                                                                                                     distillation_loss)
+        else:
+            dirname = 'vanilla_simulator_attack-{}-{}_loss-{}-{}-{}'.format(dataset, loss, norm, target_str,
+                                                                                  distillation_loss)
     else:
-        dirname = 'simulate_bandits_shrink_attack-{}-{}_loss-{}-{}-{}'.format(dataset, loss, norm, target_str, distillation_loss)
+        if args.attack_defense:
+            dirname = 'simulator_attack_on_defensive_model-{}-{}_loss-{}-{}-{}'.format(dataset,
+                                                                                                  loss, norm, target_str, distillation_loss)
+        else:
+            dirname = 'simulator_attack-{}-{}_loss-{}-{}-{}'.format(dataset, loss, norm, target_str, distillation_loss)
     return dirname
 
-def get_bandits_exp_dir_name(dataset, loss, norm, targeted, target_type):
-    target_str = "untargeted" if not targeted else "targeted_{}".format(target_type)
-    dirname = 'bandits_attack-{}-{}_loss-{}-{}'.format(dataset, loss, norm, target_str)
-    return dirname
 
 
 def print_args(args):
@@ -469,7 +436,7 @@ if __name__ == "__main__":
                         help='\delta, parameterizes the exploration to be done around the prior')
     parser.add_argument('--tile-size', type=int, help='the side length of each tile (for the tiling prior)')
     parser.add_argument('--tiling', action='store_true')
-    parser.add_argument('--json-config', type=str, default='/home1/machen/meta_perturbations_black_box_attack/configures/meta_simulator_attack_conf.json',
+    parser.add_argument('--json-config', type=str, default='./configures/meta_simulator_attack_conf.json',
                         help='a configures file to be passed in instead of arguments')
     parser.add_argument("--notdone_threshold", type=float,default=None)
     parser.add_argument('--epsilon', type=float, help='the lp perturbation bound')
@@ -483,24 +450,23 @@ if __name__ == "__main__":
     parser.add_argument('--target_type',type=str, default='increment', choices=['random', 'least_likely',"increment"])
     parser.add_argument('--exp-dir', default='logs', type=str,
                         help='directory to save results and logs')
-    # meta-learning arguments
     parser.add_argument("--meta_train_type", type=str, default="2q_distillation",
                         choices=["logits_distillation", "2q_distillation"])
     parser.add_argument("--data_loss", type=str, required=True, choices=["xent", "cw"])
     parser.add_argument("--distillation_loss", type=str, required=True, choices=["mse", "pair_mse"])
     parser.add_argument("--finetune_times", type=int, default=10)
     parser.add_argument('--seed', default=1398, type=int, help='random seed')
-    parser.add_argument("--meta_predict_steps", type=int, default=5)  # FIXME 本来设置40，对于TinyImageNet太大了
+    parser.add_argument("--meta_predict_steps", type=int, default=5)
     parser.add_argument("--warm_up_steps", type=int, default=None)
     parser.add_argument("--meta_seq_len", type=int, default=10)
     parser.add_argument("--meta_arch",type=str, required=True)
     parser.add_argument('--attack_defense', action="store_true")
     parser.add_argument('--defense_model', type=str, default=None)
+    parser.add_argument('--simulator', type=str, default="meta_simulator", choices=["meta_simulator", "vanilla_ensemble"])
 
     args = parser.parse_args()
     os.environ["CUDA_DEVICE_ORDER"] = "PCI_BUS_ID"
     os.environ['CUDA_VISIBLE_DEVICES'] = str(args.gpu)
-    os.environ["TORCH_HOME"] = "/home1/machen/meta_perturbations_black_box_attack/train_pytorch_model/real_image_model/ImageNet-pretrained"
 
     gpu_num = len(args.gpu.split(","))
     args_dict = None
@@ -574,7 +540,7 @@ if __name__ == "__main__":
         if args.attack_defense:
             log_file_path = osp.join(args.exp_dir, 'run_defense_{}_{}.log'.format(args.arch, args.defense_model))
         else:
-            log_file_path = osp.join(args.exp_dir, 'run_{}.log'.format(args.arch))
+            log_file_path = osp.join(args.exp_dir, 'run_{}_meta_interval_{}.log'.format(args.arch, args.meta_predict_steps))
     set_log_file(log_file_path)
     log.info('Command line is: {}'.format(' '.join(sys.argv)))
     log.info("Log file is written in {}".format(log_file_path))
@@ -583,7 +549,7 @@ if __name__ == "__main__":
     meta_finetuner = MemoryEfficientMetaModelFinetune(args.dataset, args.batch_size, args.meta_arch,
                                                       args.meta_train_type,
                                                       args.distillation_loss,
-                                                      args.data_loss, args.norm, args.targeted,
+                                                      args.data_loss, args.norm, args.targeted, args.simulator,
                                                       args.data_loss == "xent", without_resnet=args.attack_defense)
     attacker = MetaSimulatorBanditsAttack(args, meta_finetuner)
     for arch in archs:
@@ -593,13 +559,20 @@ if __name__ == "__main__":
         #         json_data = json.load(file_obj)
         #         tot_skip_indexes = np.array(json_data["not_done_all"]).astype(np.int32)  # 出现1了表示以前就fail，跳过去
         if args.attack_defense:
-            save_result_path = args.exp_dir + "/{}_{}_result.json".format(arch, args.defense_model)
-            tmp_result_path = args.exp_dir + "/tmp_{}_{}_result.json".format(arch, args.defense_model)
+            save_result_path = args.exp_dir + "/{}_{}_meta_interval_{}_result.json".format(arch, args.defense_model, args.meta_predict_steps)
+            tmp_result_path = args.exp_dir + "/tmp_{}_{}_meta_interval_{}_result.json".format(arch, args.defense_model, args.meta_predict_steps)
         else:
-            save_result_path = args.exp_dir + "/{}_result.json".format(arch)
-            tmp_result_path = args.exp_dir + "/tmp_{}_result.json".format(arch)
-        # if os.path.exists(save_result_path):
-        #     continue
+            save_result_path = args.exp_dir + "/{}_meta_interval_{}_result.json".format(arch, args.meta_predict_steps)
+            tmp_result_path = args.exp_dir + "/tmp_{}_meta_interval_{}_result.json".format(arch, args.meta_predict_steps)
+        # else:
+        #     if args.attack_defense:
+        #         save_result_path = args.exp_dir + "/{}_{}_result.json".format(arch, args.defense_model)
+        #         tmp_result_path = args.exp_dir + "/tmp_{}_{}_result.json".format(arch, args.defense_model)
+        #     else:
+        #         save_result_path = args.exp_dir + "/{}_result.json".format(arch)
+        #         tmp_result_path = args.exp_dir + "/tmp_{}_result.json".format(arch)
+        if os.path.exists(save_result_path):
+            continue
         log.info("Begin attack {} on {}, result will be saved to {}".format(arch, args.dataset, save_result_path))
         attacker.attack_all_images(args, arch,tmp_result_path, save_result_path)
         os.remove(tmp_result_path)

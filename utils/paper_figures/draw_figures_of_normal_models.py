@@ -1,6 +1,6 @@
 import os
 import sys
-sys.path.append("/home1/machen/meta_perturbations_black_box_attack")
+sys.path.append(os.getcwd())
 import argparse
 from collections import OrderedDict
 
@@ -25,12 +25,12 @@ def read_json_data(json_path, data_key):
         query_all = np.array(data_json["query_all"])
         not_done_all = np.array(data_json["not_done_all"])
         correct_all = np.array(data_json["correct_all"])
+        success_rate = (1- data_json["avg_not_done"]) * 100
         if data_key == "success_rate_to_avg_query":
-
-            data = success_rate_avg_query(query_all, not_done_all, correct_all)
+            data = success_rate_avg_query(query_all, not_done_all, correct_all, success_rate)
         else:
             data, _ = success_rate_and_query_coorelation(query_all, not_done_all, correct_all)
-        for key, value in sorted(data.items(), key=lambda e:int(e[0])):
+        for key, value in sorted(data.items(), key=lambda e:float(e[0])):
             x.append(int(key))
             y.append(value)
     if data_key.endswith("success_rate_dict"):
@@ -66,16 +66,33 @@ def get_success_queries(dataset_path_dict, arch):
     return data_info
 
 
-method_name_to_paper = {"bandits_attack":"Bandits", "NES-attack":"NES", "P-RGF_biased_attack":"P-RGF","P-RGF_uniform_attack":"RGF",
-                        "MetaGradAttack":"Meta Attack",
+method_name_to_paper = {"bandits_attack":"Bandits", "P-RGF_biased_attack":"P-RGF","P-RGF_uniform_attack":"RGF",
+                        # "MetaGradAttack":"Meta Attack",
                         # "simulate_bandits_shrink_attack":"MetaSimulator",
-                        "SWITCH_rnd":r'$\mathrm{SWITCH}_{rnd}$',
-                        "SWITCH_neg":r'$\mathrm{SWITCH}_{neg}$',
-                        # "NO_SWITCH" : "NO SWITCH",
-                        "PPBA_attack":"PPBA", "parsimonious_attack":"Parsimonious","sign_hunter_attack":"SignHunter",
-                        "square_attack":"Square Attack", "SimBA_DCT_attack":"SimBA"}
+                        "NO_SWITCH" : "NO SWITCH",
+                        # "SWITCH_other":r'$\mathrm{SWITCH}_{other}$',
+                        "SWITCH_neg":'SWITCH',
+                        # "NO_SWITCH_rnd":  r'NO $\mathrm{SWITCH}_{rnd}$',
+                        "PPBA_attack":"PPBA",
+                        "parsimonious_attack":"Parsimonious",
+                        "sign_hunter_attack":"SignHunter",
+                        "square_attack":"Square Attack"}    #, "SimBA_DCT_attack":"SimBA"}
 
 def from_method_to_dir_path(dataset, method, norm, targeted):
+    if "SWITCH" in method:
+        if "CIFAR" in dataset:
+            if norm == "l2":
+                lr = 0.1
+            else:
+                if targeted:
+                    lr = 0.003
+                else:
+                    lr = 0.01
+        elif dataset == "TinyImageNet":
+            if norm == "l2":
+                lr = 0.2
+            else:  # linf
+                lr = 0.003
     # methods = ["bandits_attack", "MetaGradAttack", "NES-attack","P-RGF_biased","P-RGF_uniform","ZOO","simulate_bandits_shrink_attack"]
     if method == "bandits_attack":
         path = "{method}-{dataset}-cw_loss-{norm}-{target_str}".format(method=method, dataset=dataset,
@@ -115,16 +132,26 @@ def from_method_to_dir_path(dataset, method, norm, targeted):
         path = "sign_hunter_attack-{dataset}-{norm}-{target_str}".format(dataset=dataset, norm=norm, target_str="untargeted" if not targeted else "targeted_increment")
     elif method == "square_attack":
         path = "square_attack-{dataset}-{norm}-{target_str}".format(dataset=dataset, norm=norm, target_str="untargeted" if not targeted else "targeted_increment")
+
     elif method == "SWITCH_neg":
-        path = "SWITCH_neg-{dataset}-cw_loss-{norm}-{target_str}".format(dataset=dataset, norm=norm, target_str="untargeted" if not targeted else "targeted_increment")
-    elif method == "SWITCH_rnd":
-        path = "SWITCH_rnd-{dataset}-cw_loss-{norm}-{target_str}".format(dataset=dataset, norm=norm, target_str="untargeted" if not targeted else "targeted_increment")
+        path = "SWITCH_neg_save-{dataset}-{loss}_lr_{lr}-loss-{norm}-{target_str}".format(dataset=dataset, lr=lr, loss="cw" if not targeted else "xent", norm=norm, target_str="untargeted" if not targeted else "targeted_increment")
+    elif method == "SWITCH_other":
+        path = "SWITCH_rnd_save-{dataset}-{loss}_lr_{lr}-loss-{norm}-{target_str}".format(dataset=dataset, lr=lr, loss="cw" if not targeted else "xent", norm=norm, target_str="untargeted" if not targeted else "targeted_increment")
     elif method == "NO_SWITCH":
-        path = "NO_SWITCH-{dataset}-cw_loss-{norm}-{target_str}".format(dataset=dataset, norm=norm, target_str="untargeted" if not targeted else "targeted_increment")
+        path = "NO_SWITCH-{dataset}-{loss}_loss-{norm}-{target_str}".format(dataset=dataset, loss="cw" if not targeted else "xent", norm=norm, target_str="untargeted" if not targeted else "targeted_increment")
+    elif method == "NO_SWITCH_rnd":
+        # NO_SWITCH_rnd_using_resnet-110,densenet-bc-100-12_on_defensive_model-CIFAR-100-lr_0.01_cw-loss-linf-untargeted
+        path = "NO_SWITCH_rnd_using_{archs}-{dataset}-lr_{lr}_{loss}-loss-{norm}-{target_str}".format(
+                                                                            archs="resnet-110,densenet-bc-100-12" if "CIFAR" in dataset else "resnet101,resnet152", dataset=dataset,
+                                                                            lr=lr,
+                                                                            loss="cw" if not targeted else "xent",
+                                                                            norm=norm,
+                                                                            target_str="untargeted" if not targeted else "targeted_increment")
+
     return path
 
 def get_all_exists_folder(dataset, methods, norm, targeted):
-    root_dir = "/home1/machen/meta_perturbations_black_box_attack/logs/"
+    root_dir = "/home1/machen/query_based_black_box_attack/logs/"
     dataset_path_dict = {}  # dataset_path_dict {("CIFAR-10","l2","untargeted", "NES"): "/.../"， }
     for method in methods:
         file_name = from_method_to_dir_path(dataset, method, norm, targeted)
@@ -139,8 +166,8 @@ def draw_query_success_rate_figure(dataset, norm, targeted, arch, fig_type, dump
 
     # fig_type can be [query_success_rate_dict, query_threshold_success_rate_dict, success_rate_to_avg_query]
     methods = list(method_name_to_paper.keys())
-    if targeted:
-        methods = list(filter(lambda method_name:"RGF" not in method_name, methods))
+    # if targeted:
+    #     methods = list(filter(lambda method_name:"RGF" not in method_name, methods))
     dataset_path_dict= get_all_exists_folder(dataset, methods, norm, targeted)
     data_info = read_all_data(dataset_path_dict, arch, fig_type)  # dataset_path_dict {("CIFAR-10","l2","untargeted", "NES"): ([x],[y])， }
     plt.style.use('seaborn-whitegrid')
@@ -149,10 +176,8 @@ def draw_query_success_rate_figure(dataset, norm, targeted, arch, fig_type, dump
     # markers = [".",",","o","^","s","p","x"]
     # max_x = 0
     # min_x = 0
-    our_method = r'$\mathrm{SWITCH}_{neg}$'
-    for idx, ((dataset, norm, targeted, method), (x, y)) in enumerate(data_info.items()):
-        if method == r'$\mathrm{SWITCH}_{rnd}$':
-            our_method = method
+    our_method = 'SWITCH'
+
     xtick = np.array([0, 1000, 2000, 3000, 4000, 5000, 6000, 7000, 8000, 9000, 10000])
     for idx, ((dataset, norm, targeted, method), (x,y)) in enumerate(data_info.items()):
         color = colors[idx%len(colors)]
@@ -206,10 +231,6 @@ def draw_success_rate_avg_query_fig(dataset, norm, targeted, arch, fig_type, dum
     xlabel = "Attack Success Rate (%)"
     ylabel = "Avg. Query"
     methods = list(method_name_to_paper.keys())
-    if targeted:
-        methods = list(filter(lambda method_name:"RGF" not in method_name, methods))
-    elif norm =='l2':
-        methods = list(filter(lambda method_name: "MetaGradAttack" not in method_name, methods))
 
     dataset_path_dict = get_all_exists_folder(dataset, methods, norm, targeted)
     data_info = read_all_data(dataset_path_dict, arch, fig_type)
@@ -217,49 +238,36 @@ def draw_success_rate_avg_query_fig(dataset, norm, targeted, arch, fig_type, dum
     plt.figure(figsize=(10, 8))
     colors = ['b', 'g',  'c', 'm', 'y', 'orange', "pink","brown","slategrey","cornflowerblue","greenyellow"]
     # markers = [".", ",", "o", "^", "s", "p", "x"]
-    max_x = 0
-    min_x = 0
-    our_method = r'$\mathrm{SWITCH}_{neg}$'
-    for idx, ((dataset, norm, targeted, method), (x, y)) in enumerate(data_info.items()):
-        if method == r'$\mathrm{SWITCH}_{rnd}$':
-            our_method = method
+    # max_x = 0
+    # min_x = 0
+    max_y = 0
+    our_method = 'SWITCH'
+
     for idx, ((dataset, norm, targeted, method), (x, y)) in enumerate(data_info.items()):
         color = colors[idx % len(colors)]
         if method == our_method:
             color = "r"
         line, = plt.plot(x, y, label=method, color=color, linestyle="-", marker='.')
-        if np.max(x).item() > max_x:
-            max_x = np.max(x).item()
-        if np.min(x).item() < min_x:
-            min_x = np.min(x).item()
+        if np.max(y).item() > max_y:
+            max_y = np.max(y).item()
+        # if np.min(x).item() < min_x:
+        #     min_x = np.min(x).item()
     plt.xlim(0, 100)
     # if norm == "l2" or (dataset == "CIFAR-100" and norm == 'linf'):
     #     plt.ylim(0, 1000)
     # else:
     #     plt.ylim(0, 3000)
     # if dataset == "TinyImageNet":
-    if targeted:
-        plt.ylim(0, 6000)
-        if norm == "l2" and targeted and dataset == "CIFAR-10":
-            plt.ylim(0, 3000)
-        if norm == "l2" and targeted and dataset == "CIFAR-100":
-            plt.ylim(0, 5000)
-    else:
-        if dataset == "CIFAR-100" and (not targeted) and norm == "linf":
-            plt.ylim(0, 1501)
-        elif dataset == "CIFAR-10" and (not targeted) and norm == "linf":
-            plt.ylim(0, 4001)
-        else:
-            plt.ylim(0,4000)
-        if dataset == "TinyImageNet" and not targeted and norm == "linf":
-            plt.ylim(0,5000)
-        if dataset  == "TinyImageNet" and not targeted and norm == "l2":
-            plt.ylim(0, 800)
-        if norm == "l2" and not targeted:
-            plt.ylim(0, 300)
+    plt.ylim(max_y)
+    # if dataset == "TinyImageNet":
+    #     plt.ylim(0, 2750)
+    #     if targeted:
+    #         plt.ylim(0, 5010)
+    # else:
+    #     plt.ylim(0, 1750)
+    #     if targeted:
+    #         plt.ylim(0, 3000)
 
-        if norm == "l2" and not targeted and dataset == "CIFAR-100":
-            plt.ylim(0, 200)
     plt.gcf().subplots_adjust(bottom=0.15)
     xtick = np.arange(0,101,5)
     # if norm == "l2" or (dataset == "CIFAR-100" and norm == 'linf'):
@@ -268,27 +276,38 @@ def draw_success_rate_avg_query_fig(dataset, norm, targeted, arch, fig_type, dum
     #     ytick = [0,500,1000,1500,2000,2500,3000]
     # if dataset == "TinyImageNet":
     #     ytick = np.arange(0,4001,200).tolist()
-    if targeted:
-        ytick = [0, 500, 1000, 1500, 2000, 2500, 3000, 3500, 4000,4500,5000,5500,6000] #,6500,7000,7500,8000,8500,9000,9500,10000]
+    space_len = int(max_y / 20.0)
+    ytick = np.arange(0, max_y, space_len).tolist()
 
-    if dataset == "CIFAR-100" and (not targeted) and norm == "linf":
-        ytick = np.arange(0, 1501, 100).tolist()
-    elif dataset == "CIFAR-10" and (not targeted) and norm == "linf":
-        ytick = np.arange(0, 4001, 200).tolist()
-    elif dataset == "CIFAR-10" and targeted and norm == "l2":
-        ytick = np.arange(0, 3001, 200).tolist()
-    elif norm == "l2" and targeted and dataset == "CIFAR-100":
-        ytick = np.arange(0, 5001, 200).tolist()
-    elif dataset == "TinyImageNet" and norm == "linf":
-        ytick = np.arange(0, 5001, 200).tolist()
-    elif dataset  == "TinyImageNet" and not targeted and norm == "l2":
-        ytick = np.arange(0, 801, 50).tolist()
-    elif norm == "l2" and not targeted:
-        ytick = np.arange(0, 301, 25).tolist()
-    elif norm == "l2" and not targeted and dataset == "CIFAR-100":
-        ytick = np.arange(0, 201, 25).tolist()
-    else:
-        ytick = np.arange(0, 4001, 200).tolist()
+    # if dataset == "TinyImageNet":
+    #     ytick = np.arange(0, 2751, 250).tolist() #,6500,7000,7500,8000,8500,9000,9500,10000]
+    #     if targeted:
+    #         ytick = np.arange(0, 5011, 500).tolist()
+    # else:
+    #     if targeted:
+    #         ytick = np.arange(0, 3001, 250).tolist() #,6500,7000,7500,8000,8500,9000,9500,10000]
+    #     else:
+    #         ytick = np.arange(0, 1751, 200).tolist()
+
+
+    # if dataset == "CIFAR-100" and (not targeted) and norm == "linf":
+    #     ytick = np.arange(0, 1501, 100).tolist()
+    # elif dataset == "CIFAR-10" and (not targeted) and norm == "linf":
+    #     ytick = np.arange(0, 4001, 200).tolist()
+    # elif dataset == "CIFAR-10" and targeted and norm == "l2":
+    #     ytick = np.arange(0, 3001, 200).tolist()
+    # elif norm == "l2" and targeted and dataset == "CIFAR-100":
+    #     ytick = np.arange(0, 5001, 200).tolist()
+    # elif dataset == "TinyImageNet" and norm == "linf":
+    #     ytick = np.arange(0, 5001, 200).tolist()
+    # elif dataset  == "TinyImageNet" and not targeted and norm == "l2":
+    #     ytick = np.arange(0, 801, 50).tolist()
+    # elif norm == "l2" and not targeted:
+    #     ytick = np.arange(0, 301, 25).tolist()
+    # elif norm == "l2" and not targeted and dataset == "CIFAR-100":
+    #     ytick = np.arange(0, 201, 25).tolist()
+    # else:
+    #     ytick = np.arange(0, 4001, 200).tolist()
     # xtick = [0, 5000, 10000]
     plt.xticks(xtick, fontsize=15)
     plt.yticks(ytick, fontsize=15)
@@ -301,21 +320,21 @@ def draw_success_rate_avg_query_fig(dataset, norm, targeted, arch, fig_type, dum
 
 
 def draw_histogram_fig(dataset, norm, targeted, arch, dump_folder):
+    os.makedirs(dump_folder, exist_ok=True)
     x_label = "Query"
     y_label = "Number of Successfully Attacked Images"
     methods = list(method_name_to_paper.keys())
     # predefined_colors = ['b', 'g', 'c', 'm', 'y', 'k', 'w']
+
+
     predefined_colors = ['b', 'g',  'c', 'm', 'y', 'k', 'orange', "pink","brown","slategrey","cornflowerblue","greenyellow"]
-    if targeted:
-        methods = list(filter(lambda method_name: "RGF" not in method_name, methods))
+    # if targeted:
+    #     methods = list(filter(lambda method_name: "RGF" not in method_name, methods))
     dataset_path_dict = get_all_exists_folder(dataset, methods, norm, targeted)
     data_info = get_success_queries(dataset_path_dict, arch)
     data_dict = OrderedDict()
     colors = []
-    our_method = r'$\mathrm{SWITCH}_{neg}$'
-    for idx, ((dataset, norm, targeted, method), query_all) in enumerate(data_info.items()):
-        if method == r'$\mathrm{SWITCH}_{rnd}$':
-            our_method = method
+    our_method = "SWITCH"
     for idx, ((dataset, norm, targeted, method), query_all) in enumerate(data_info.items()):
         color = predefined_colors[idx % len(predefined_colors)]
         if method == our_method:
@@ -342,12 +361,12 @@ def draw_histogram_fig(dataset, norm, targeted, arch, dump_folder):
     plt.xlim(0,max_value)
     plt.legend(loc='upper right', prop={'size': 10})
     plt.grid(True, linewidth=0.5) #,axis="y")
-    plt.savefig(dump_folder + "/{dataset}_{norm}_{targeted}_attack_on_{arch}.pdf".format(dataset=dataset, norm=norm,
-                                                                                    targeted="untargeted" if not targeted else "targeted",
-                                                                                    arch=arch))
-    print("save to {}".format(dump_folder + "/{dataset}_{norm}_{targeted}_attack_on_{arch}.pdf".format(dataset=dataset, norm=norm,
-                                                                                    targeted="untargeted" if not targeted else "targeted",
-                                                                                    arch=arch)))
+    dump_file_path = dump_folder + "/{dataset}_{norm}_{targeted}_attack_on_{arch}.pdf".format(dataset=dataset,
+                                                                                              norm=norm,
+                                                                                              targeted="untargeted" if not targeted else "targeted",
+                                                                                              arch=arch)
+    plt.savefig(dump_file_path)
+    print("save to {}".format(dump_file_path))
     plt.close('all')
 
 def parse_args():
@@ -355,7 +374,6 @@ def parse_args():
     parser.add_argument("--fig_type", type=str, choices=["query_threshold_success_rate_dict",
                                                          "success_rate_to_avg_query", "query_hist"])
     parser.add_argument("--dataset", type=str, required=True, help="the dataset to train")
-    parser.add_argument("--model",type=str, required=True)
     parser.add_argument("--norm", type=str, choices=["l2", "linf"], required=True)
     parser.add_argument("--targeted", action="store_true", help="Does it train on the data of targeted attack?")
     parser.add_argument("--filter_attacks", nargs='+',help="whether to filter out some attacks, pass in the list of names")
@@ -365,39 +383,47 @@ def parse_args():
 
 if __name__ == "__main__":
     args = parse_args()
-    dump_folder = "/home1/machen/meta_perturbations_black_box_attack/SWITCH_figures/{}/".format(args.fig_type)
+    dump_folder = "/home1/machen/query_based_black_box_attack/SWITCH_figures/{}/".format(args.fig_type)
     os.makedirs(dump_folder, exist_ok=True)
 
-
-    file_path  = dump_folder + "{dataset}_{model}_{norm}_{target_str}_attack_{fig_type}.pdf".format(dataset=args.dataset,
-                  model=args.model, norm=args.norm, target_str="untargeted" if not args.targeted else "targeted",
-                                                                            fig_type=args.fig_type)
-    if args.fig_type == "query_threshold_success_rate_dict":
-        x_label = "Maximum Query Number Threshold"
-        y_label = "Attack Success Rate (%)"
-    elif args.fig_type == "query_success_rate_dict":
-        x_label = "Query Number"
-        y_label = "Attack Success Rate (%)"
+    if "CIFAR" in args.dataset:
+        archs = ['pyramidnet272',"gdas","WRN-28-10-drop", "WRN-40-10-drop"]
     else:
-        x_label = "Attack Success Rate (%)"
-        y_label = "Query Numbers"
-    if args.fig_type == "query_threshold_success_rate_dict":
-        # for dataset in ["CIFAR-10","CIFAR-100", "TinyImageNet"]:
-            # norms = ["l2", "linf"] if not args.targeted else ["l2"]
-            # for norm in norms:
-            #     for model in MODELS_TEST_STANDARD[dataset]:
-            #         file_path = dump_folder + "{dataset}_{model}_{norm}_{target_str}_attack_{fig_type}.pdf".format(
-            #             dataset=dataset,
-            #             model=model, norm=norm, target_str="untargeted" if not args.targeted else "targeted",
-            #             fig_type=args.fig_type)
-        draw_query_success_rate_figure(args.dataset, args.norm, args.targeted, args.model, args.fig_type, file_path, x_label, y_label)
-    elif args.fig_type == "success_rate_to_avg_query":
-        draw_success_rate_avg_query_fig(args.dataset, args.norm, args.targeted, args.model, args.fig_type, file_path)
-    elif args.fig_type == "query_hist":
-        dump_folder += "/untargeted" if not args.targeted else "targeted"
-        os.makedirs(dump_folder, exist_ok=True)
-        for dataset in ["CIFAR-10","CIFAR-100", "TinyImageNet"]:
-            for norm in ["l2","linf"]:
-                for model in MODELS_TEST_STANDARD[dataset]:
-                    draw_histogram_fig(dataset, norm, args.targeted, model, dump_folder)
-    # print("written to {}".format(file_path))
+        archs = ["densenet121", "resnext32_4", "resnext64_4"]
+
+    for model in archs:
+        file_path  = dump_folder + "{dataset}_{model}_{norm}_{target_str}_attack_{fig_type}.pdf".format(dataset=args.dataset,
+                      model=model, norm=args.norm, target_str="untargeted" if not args.targeted else "targeted",
+                                                                                fig_type=args.fig_type)
+        if args.fig_type == "query_threshold_success_rate_dict":
+            x_label = "Maximum Query Number Threshold"
+            y_label = "Attack Success Rate (%)"
+        elif args.fig_type == "query_success_rate_dict":
+            x_label = "Query Number"
+            y_label = "Attack Success Rate (%)"
+        else:
+            x_label = "Attack Success Rate (%)"
+            y_label = "Query Numbers"
+        if args.fig_type == "query_threshold_success_rate_dict":
+            # for dataset in ["CIFAR-10","CIFAR-100", "TinyImageNet"]:
+                # norms = ["l2", "linf"] if not args.targeted else ["l2"]
+                # for norm in norms:
+                #     for model in MODELS_TEST_STANDARD[dataset]:
+                #         file_path = dump_folder + "{dataset}_{model}_{norm}_{target_str}_attack_{fig_type}.pdf".format(
+                #             dataset=dataset,
+                #             model=model, norm=norm, target_str="untargeted" if not args.targeted else "targeted",
+                #             fig_type=args.fig_type)
+            draw_query_success_rate_figure(args.dataset, args.norm, args.targeted, model, args.fig_type, file_path, x_label, y_label)
+        elif args.fig_type == "success_rate_to_avg_query":
+            draw_success_rate_avg_query_fig(args.dataset, args.norm, args.targeted, model, args.fig_type, file_path)
+        elif args.fig_type == "query_hist":
+            target_str = "/untargeted" if not args.targeted else "targeted"
+            os.makedirs(dump_folder, exist_ok=True)
+            for dataset in ["CIFAR-10","CIFAR-100", "TinyImageNet"]:
+                if "CIFAR" in dataset:
+                    archs = ['pyramidnet272', "gdas", "WRN-28-10-drop", "WRN-40-10-drop"]
+                else:
+                    archs = ["densenet121", "resnext32_4", "resnext64_4"]
+                for norm in ["l2","linf"]:
+                    for model in archs:
+                        draw_histogram_fig(dataset, norm, args.targeted, model, dump_folder + target_str)

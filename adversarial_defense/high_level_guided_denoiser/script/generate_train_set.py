@@ -76,7 +76,7 @@ def generate(datasetname, batch_size):
         model = model.cuda().eval()
         linf_PGD_attack =LinfPGDAttack(model, loss_fn=nn.CrossEntropyLoss(reduction="sum"), eps=0.031372, nb_iter=30,
                       eps_iter=0.01, rand_init=True, clip_min=0.0, clip_max=1.0, targeted=False)
-        l2_PGD_attack = L2PGDAttack(model, loss_fn=nn.CrossEntropyLoss(reduction="sum"),eps=4.6,
+        l2_PGD_attack = L2PGDAttack(model, loss_fn=nn.CrossEntropyLoss(reduction="sum"),eps=1.0,
                                     nb_iter=30,clip_min=0.0, clip_max=1.0, targeted=False)
         FGSM_attack = FGSM(model, loss_fn=nn.CrossEntropyLoss(reduction="sum"))
         momentum_attack = MomentumIterativeAttack(model, loss_fn=nn.CrossEntropyLoss(reduction="sum"), eps=0.031372, nb_iter=30,

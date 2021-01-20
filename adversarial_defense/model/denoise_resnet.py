@@ -18,7 +18,7 @@ Explanation:
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-import kornia
+#import kornia
 import numpy as np
 
 class BasicBlock(nn.Module): #

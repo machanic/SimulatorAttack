@@ -1,7 +1,8 @@
 import sys
 
 
-sys.path.append("/home1/machen/meta_perturbations_black_box_attack")
+import os
+sys.path.append(os.getcwd())
 import argparse
 import glob
 import json
@@ -98,10 +99,9 @@ class PriorRGFAttack(object):
             if args.norm == 'l2':
                 # epsilon = 1e-3
                 # eps = np.sqrt(epsilon * model.input_size[-1] * model.input_size[-1] * self.in_channels)  # 1.752
-                learning_rate = 2.0 / np.sqrt(self.image_height * self.image_width * self.in_channels)
+                learning_rate = args.image_lr / np.sqrt(self.image_height * self.image_width * self.in_channels)
             else:
-                learning_rate = 0.005
-
+                learning_rate = args.image_lr
             images = images.cuda()
             true_labels = true_labels.cuda()
 
@@ -409,12 +409,13 @@ if __name__ == "__main__":
                         help='a configures file to be passed in instead of arguments')
     parser.add_argument("--show_loss", action="store_true", help="Whether to print loss in some given step sizes.")
     parser.add_argument("--samples_per_draw",type=int, default=50, help="Number of samples to estimate the gradient.")
-    parser.add_argument("--epsilon", type=float, default=4.6, help='Default of epsilon is L2 epsilon')
+    parser.add_argument("--epsilon", type=float, help='Default of epsilon is L2 epsilon')
     parser.add_argument("--sigma", type=float,default=1e-4, help="Sampling variance.")
     # parser.add_argument("--number_images", type=int, default=100000,  help='Number of images for evaluation.')
     parser.add_argument("--max_queries", type=int, default=10000, help="Maximum number of queries.")
     parser.add_argument('--attack_defense', action="store_true")
     parser.add_argument('--defense_model', type=str, default=None)
+    parser.add_argument('--image-lr', type=float)
 
     args = parser.parse_args()
     os.environ["CUDA_DEVICE_ORDER"] = "PCI_BUS_ID"
@@ -440,8 +441,8 @@ if __name__ == "__main__":
     arg_vars = {k: arg_vars[k] for k in arg_vars if arg_vars[k] is not None}
     defaults.update(arg_vars)
     args = SimpleNamespace(**defaults)
-    if args.norm == "linf":
-        args.epsilon = defaults["linf_epsilon"]
+
+    args.epsilon = defaults["linf_epsilon"] if args.norm == "linf" else defaults["l2_epsilon"]
 
     if args.targeted:
         if args.dataset == "ImageNet":

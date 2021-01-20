@@ -14,7 +14,9 @@ from dataset.standard_model import MetaLearnerModelBuilder
 
 
 class MetaModelFinetune(object):
-    def __init__(self, dataset, batch_size, meta_train_type, distill_loss, data_loss, norm, targeted, use_softmax, without_resnet):
+    def __init__(self, dataset,
+                 simulator_type,
+                 batch_size, meta_train_type, distill_loss, data_loss, norm, targeted, use_softmax, without_resnet):
         target_str = "targeted_attack_random" if targeted else "untargeted_attack"
         # 2Q_DISTILLATION@CIFAR-100@TRAIN_I_TEST_II@model_resnet34@loss_pair_mse@dataloss_cw_l2_untargeted_attack@epoch_4@meta_batch_size_30@num_support_50@num_updates_12@lr_0.001@inner_lr_0.01.pth.tar
         self.meta_model_path = "{root}/train_pytorch_model/meta_simulator/{meta_train_type}@{dataset}@{split}@model_{meta_arch}@loss_{loss}@dataloss_{data_loss}_{norm}_{target_str}*".format(
@@ -42,13 +44,26 @@ class MetaModelFinetune(object):
         self.mse_loss = nn.MSELoss()
         self.pair_wise_distance = nn.PairwiseDistance(p=2)
         self.use_softmax = use_softmax
-        self.pretrained_weights = torch.load(self.meta_model_path, map_location=lambda storage, location: storage)[
-            "state_dict"]
-        meta_backbone = self.construct_model(arch, dataset)
-        self.meta_network = MetaNetwork(meta_backbone)
-        self.meta_network.load_state_dict(self.pretrained_weights)
-        self.meta_network.eval()
-        self.meta_network.cuda()
+        if simulator_type=="meta_simulator":
+            self.pretrained_weights = torch.load(self.meta_model_path, map_location=lambda storage, location: storage)[
+                "state_dict"]
+            meta_backbone = self.construct_model(arch, dataset)
+            self.meta_network = MetaNetwork(meta_backbone)
+            self.meta_network.load_state_dict(self.pretrained_weights)
+            self.meta_network.eval()
+            self.meta_network.cuda()
+        elif simulator_type == "vanilla_ensemble":
+            self.meta_model_path = "{root}/train_pytorch_model/vanilla_simulator/{dataset}@{norm}_norm_{target_str}@{meta_arch}*.tar".format(
+                root=PY_ROOT, dataset=dataset, meta_arch="resnet34", norm=norm, target_str=target_str)
+            self.meta_model_path = glob.glob(self.meta_model_path)
+            assert len(self.meta_model_path) > 0
+            self.meta_model_path = self.meta_model_path[0]
+            self.inner_lr = 0.01
+            self.meta_network = self.construct_model("resnet34", dataset)
+            self.pretrained_weights = torch.load(self.meta_model_path, map_location=lambda storage, location: storage)
+            log.info("Load model from {} in epoch {}.".format(self.meta_model_path, self.pretrained_weights["epoch"]))
+            self.pretrained_weights = self.pretrained_weights["state_dict"]
+
         self.batch_weights = {}
         self.batch_size = batch_size
         for i in range(batch_size):
@@ -129,8 +144,8 @@ class MetaModelFinetune(object):
 
 
 class MemoryEfficientMetaModelFinetune(object):
-    def __init__(self, dataset,  batch_size, meta_arch, meta_train_type, distill_loss, data_loss, norm, targeted, use_softmax,
-                 without_resnet):
+    def __init__(self, dataset,  batch_size, meta_arch, meta_train_type, distill_loss, data_loss, norm, targeted, simulator_type,
+                 use_softmax, without_resnet):
         target_str = "targeted_attack_random" if targeted else "untargeted_attack"
         # 2Q_DISTILLATION@CIFAR-100@TRAIN_I_TEST_II@model_resnet34@loss_pair_mse@dataloss_cw_l2_untargeted_attack@epoch_4@meta_batch_size_30@num_support_50@num_updates_12@lr_0.001@inner_lr_0.01.pth.tar
         self.meta_model_path = "{root}/train_pytorch_model/meta_simulator/{meta_train_type}@{dataset}@{split}@model_{meta_arch}@loss_{loss}@dataloss_{data_loss}_{norm}_{target_str}*".format(
@@ -158,11 +173,26 @@ class MemoryEfficientMetaModelFinetune(object):
         self.mse_loss = nn.MSELoss()
         self.pair_wise_distance = nn.PairwiseDistance(p=2)
         self.use_softmax = use_softmax
-        meta_backbone = self.construct_model(arch, dataset)
-        self.meta_network = MetaNetwork(meta_backbone)
-        loaded = torch.load(self.meta_model_path, map_location=lambda storage, location: storage)
-        self.pretrained_weights = loaded["state_dict"]
-        log.info("load meta model {} epoch({})".format(self.meta_model_path, loaded["epoch"]))
+        if simulator_type == "vanilla_ensemble":
+            target_str = "targeted" if targeted else "untargeted"
+            self.meta_model_path = "{root}/train_pytorch_model/vanilla_simulator/{dataset}@{norm}_norm_{target_str}@{meta_arch}*.tar".format(
+                root=PY_ROOT, dataset=dataset, meta_arch="resnet34", norm=norm, target_str=target_str)
+            print(self.meta_model_path)
+            self.meta_model_path = glob.glob(self.meta_model_path)
+
+            assert len(self.meta_model_path) > 0
+            self.meta_model_path = self.meta_model_path[0]
+            self.inner_lr = 0.01
+            self.meta_network = self.construct_model(arch, dataset)
+            self.pretrained_weights = torch.load(self.meta_model_path, map_location=lambda storage, location: storage)
+            log.info("Load model from {} in epoch {}.".format(self.meta_model_path, self.pretrained_weights["epoch"]))
+            self.pretrained_weights = self.pretrained_weights["state_dict"]
+        elif simulator_type == "meta_simulator":
+            meta_backbone = self.construct_model(arch, dataset)
+            self.meta_network = MetaNetwork(meta_backbone)
+            loaded = torch.load(self.meta_model_path, map_location=lambda storage, location: storage)
+            self.pretrained_weights = loaded["state_dict"]
+            log.info("load meta model {} epoch({})".format(self.meta_model_path, loaded["epoch"]))
         self.meta_network.load_state_dict(self.pretrained_weights)
         self.meta_network.eval()
         self.meta_network.cuda()

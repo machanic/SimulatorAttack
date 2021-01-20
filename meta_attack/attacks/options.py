@@ -1,6 +1,10 @@
 
 import argparse
-import random 
+import random
+
+import json
+from types import SimpleNamespace
+
 import numpy as np
 import torch
 
@@ -21,7 +25,7 @@ def get_parse_args():
     parser.add_argument("--maxiter", type = int, default=1000, help = "set 0 to use default value")
     parser.add_argument("--gpu",type=int,required=True)
     parser.add_argument("--max_queries", type=int,default=10000)
-    parser.add_argument("--finetune_interval", type = int, default = 5, help = "iteration interval for finetuneing")
+    parser.add_argument("--finetune_interval", type = int,  help = "iteration interval for finetuneing")
 
     parser.add_argument('--learning_rate', default = 1e-2, type = float, help = 'learning rate')
     parser.add_argument('--update_pixels', default = 125, type = int, help = 'updated pixels every iteration')
@@ -31,7 +35,7 @@ def get_parse_args():
     parser.add_argument("--targeted", action="store_true")
     parser.add_argument('--target_type', type=str, default='increment', choices=['random', 'least_likely', "increment"])
     parser.add_argument("--istransfer", type = str, default = 'False')
-
+    parser.add_argument('--json-config', type=str, default='./configures/meta_attack_conf.json', help='a configures file to be passed in instead of arguments')
     parser.add_argument('--batch_size', type = int, default = 64)
     parser.add_argument('--test_batch_size', type = int, default = 1)
     parser.add_argument('--no_cuda', action = 'store_true')
@@ -43,9 +47,9 @@ def get_parse_args():
     parser.add_argument("--use_resize", action = 'store_true', help = "resize image (only works on imagenet!)")
     parser.add_argument("--seed", type = int, default = 1216)
     parser.add_argument("--solver", choices = ["adam", "newton", "adam_newton", "fake_zero"], default = "adam")
-    parser.add_argument("--save_ckpts", default = "", help = "path to save checkpoint file")
     parser.add_argument("--start_iter", default = 0, type = int, help = "iteration number for start, useful when loading a checkpoint")
     parser.add_argument("--init_size", default = 32, type = int, help = "starting with this size when --use_resize")
+
     parser.add_argument('--inception', action = 'store_true', default = False)
     parser.add_argument('--use_tanh', action = 'store_true', help="must be set")
     parser.add_argument('--arch', default=None, type=str, help='network architecture')
@@ -57,9 +61,9 @@ def get_parse_args():
 
     args = parser.parse_args()
     if args.norm == "linf":
-        assert args.use_tanh is False
+        args.use_tanh = False
     elif args.norm == "l2":
-        assert args.use_tanh is True
+        args.use_tanh = True
     # True False process
     vars(args)['istransfer'] = str2bool(args.istransfer)
     if args.dataset == "ImageNet" and args.targeted:
@@ -68,10 +72,7 @@ def get_parse_args():
     #max iteration process
     if args.targeted:
         args.finetune_interval = 3
-    if args.norm == "l2":
-        args.epsilon = 4.6
-    elif args.norm == "linf":
-        args.epsilon = 0.031372
+
     if args.binary_steps != 0:
         args.init_const = 0.01
     else:
@@ -79,6 +80,13 @@ def get_parse_args():
 
     if args.binary_steps == 0:
         args.binary_steps = 1
+
+    if args.json_config:
+        defaults = json.load(open(args.json_config))[args.dataset][args.norm]
+        arg_vars = vars(args)
+        arg_vars = {k: arg_vars[k] for k in arg_vars if arg_vars[k] is not None}
+        defaults.update(arg_vars)
+        args = SimpleNamespace(**defaults)
 
     random.seed(args.seed)
     np.random.seed(args.seed)

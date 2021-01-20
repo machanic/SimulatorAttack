@@ -3,9 +3,9 @@
       "l2":{
           "batch_size": 100,
           "max_queries": 10000,
-          "image_lr": 2.0,
+          "image_lr": 0.1,
           "norm": "l2",
-          "epsilon": 4.6
+          "epsilon": 1.0
         },
       "linf": {
           "batch_size": 100,
@@ -19,9 +19,9 @@
       "l2":{
           "batch_size": 100,
           "max_queries": 10000,
-          "image_lr": 2.0,
+          "image_lr": 0.1,
           "norm": "l2",
-          "epsilon": 4.6
+          "epsilon": 1.0
         },
       "linf": {
           "batch_size": 100,
@@ -35,9 +35,9 @@
       "l2":{
           "batch_size": 100,
           "max_queries": 10000,
-          "image_lr": 2.0,
+          "image_lr": 0.2,
           "norm": "l2",
-          "epsilon": 4.6
+          "epsilon": 2.0
         },
       "linf": {
           "batch_size": 25,
@@ -50,7 +50,7 @@
     "ImageNet": {
         "l2":{
               "batch_size": 100,
-              "image_lr": 0.5,
+              "image_lr": 0.1,
               "norm": "l2",
               "epsilon": 4.6
         },

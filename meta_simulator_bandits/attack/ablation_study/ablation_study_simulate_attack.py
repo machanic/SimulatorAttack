@@ -89,6 +89,7 @@ class SimulateBanditsAttackShrink(object):
         self.not_done_loss_all = torch.zeros_like(self.query_all)
         self.not_done_prob_all = torch.zeros_like(self.query_all)
         self.meta_finetuner = meta_finetuner
+        self.meta_mode = args.meta_mode
 
     def chunks(self, l, each_slice_len):
         each_slice_len = max(1, each_slice_len)
@@ -183,26 +184,14 @@ class SimulateBanditsAttackShrink(object):
                 else:
                     images, true_labels = data_tuple[0], data_tuple[2]
             else:
-                images, true_labels = data_tuple[0], data_tuple[1]  # TODO 缩减
+                images, true_labels = data_tuple[0], data_tuple[1] 
             if images.size(-1) != model.input_size[-1]:
                 images = F.interpolate(images, size=model.input_size[-1], mode='bilinear',align_corners=True)
             # skip_batch_index_list = np.nonzero(np.asarray(chunk_skip_indexes[data_idx]))[0].tolist()
             selected = torch.arange(data_idx * args.batch_size,
                                     min((data_idx + 1) * args.batch_size, self.total_images))  # 选择这个batch的所有图片的index
             img_idx_to_batch_idx = ImageIdxToOrigBatchIdx(args.batch_size)
-            # if len(skip_batch_index_list) > 0:
-            #     for skip_index in skip_batch_index_list:
-            #         pos = selected[skip_index]
-            #         self.query_all[pos] = args.max_queries
-            #         self.correct_all[pos] = 0
-            #         self.not_done_all[pos] = 1
-            #         self.success_all[pos] = 0 # 让其定义为分类失败
-            #         self.success_query_all[pos] = 0
-            #         self.not_done_loss_all[pos] = 1.0
-            #         self.not_done_prob_all[pos] = 1.0
-            #     images, true_labels = self.delete_tensor_by_index_list(skip_batch_index_list, images, true_labels)
-            #     img_idx_to_batch_idx.del_by_index_list(skip_batch_index_list)
-
+           
             images, true_labels = images.cuda(), true_labels.cuda()
             first_finetune = True
             finetune_queue = FinetuneQueue(args.batch_size, args.meta_seq_len, img_idx_to_batch_idx)
@@ -262,25 +251,40 @@ class SimulateBanditsAttackShrink(object):
                     with torch.no_grad():
                         q1_logits_model = model(q1_images)
                         q2_logits_model = model(q2_images)
-                        q1_logits = q1_logits_model
-                        q2_logits = q2_logits_model
+                        q1_logits = q1_logits_model.clone()
+                        q2_logits = q2_logits_model.clone()
+                        q1_logits = q1_logits / torch.norm(q1_logits, p=2, dim=-1, keepdim=True)  # 加入normalize
+                        q2_logits = q2_logits / torch.norm(q2_logits, p=2, dim=-1, keepdim=True)
 
                     finetune_queue.append(q1_images.detach(), q2_images.detach(), q1_logits.detach(), q2_logits.detach())
                     if step_index >= args.warm_up_steps:
                         q1_images_seq, q2_images_seq, q1_logits_seq, q2_logits_seq = finetune_queue.stack_history_track()
                         finetune_times = args.finetune_times if first_finetune else random.randint(1, 3)
-                        self.meta_finetuner.finetune(q1_images_seq, q2_images_seq, q1_logits_seq, q2_logits_seq,
-                                                     finetune_times, first_finetune, img_idx_to_batch_idx)
+                        if self.meta_mode != "ensemble_avg":
+                            self.meta_finetuner.finetune(q1_images_seq, q2_images_seq, q1_logits_seq, q2_logits_seq,
+                                                         finetune_times, first_finetune, img_idx_to_batch_idx)
+                        else:
+                            self.meta_finetuner.finetune_ensemble_models(q1_images_seq, q2_images_seq, q1_logits_seq, q2_logits_seq,
+                                                         finetune_times, first_finetune, img_idx_to_batch_idx)
                         first_finetune = False
 
                         if args.study_subject == "meta_or_not":
-                            q1_logits_meta, q2_logits_meta = self.meta_finetuner.predict(q1_images, q2_images, img_idx_to_batch_idx)
+                            if self.meta_mode != "ensemble_avg":
+                                q1_logits_meta, q2_logits_meta = self.meta_finetuner.predict(q1_images, q2_images, img_idx_to_batch_idx)
+                            else:
+                                q1_logits_meta, q2_logits_meta = self.meta_finetuner.predict_ensemble(q1_images, q2_images, img_idx_to_batch_idx)
                             logits_error = (mse_error(q1_logits_model, q1_logits_meta) + mse_error(q2_logits_model, q2_logits_meta)) / 2.0
                             logits_error = logits_error.item()
-                            logits_error_seq.append((logits_error, 1))
+                            logits_error_seq.append((logits_error, 1)) # 1 stands for finetune
                     else:
                         if args.study_subject == "meta_or_not":
-                            q1_logits_meta, q2_logits_meta = self.meta_finetuner.predict(q1_images, q2_images, img_idx_to_batch_idx)
+                            if self.meta_mode != "ensemble_avg":
+                                q1_logits_meta, q2_logits_meta = self.meta_finetuner.predict(q1_images, q2_images,
+                                                                                             img_idx_to_batch_idx)
+                            else:
+                                q1_logits_meta, q2_logits_meta = self.meta_finetuner.predict_ensemble(q1_images,
+                                                                                                      q2_images,
+                                                                                                      img_idx_to_batch_idx)
                             logits_error = (mse_error(q1_logits_model, q1_logits_meta) + mse_error(q2_logits_model, q2_logits_meta)) / 2.0
                             logits_error = logits_error.item()
                             logits_error_seq.append((logits_error, 0))
@@ -288,9 +292,16 @@ class SimulateBanditsAttackShrink(object):
                 else:
                     with torch.no_grad():
                         log.info("predict from meta model")
-                        q1_logits_meta, q2_logits_meta = self.meta_finetuner.predict(q1_images, q2_images, img_idx_to_batch_idx)
-                        q1_logits = q1_logits_meta
-                        q2_logits = q2_logits_meta
+                        if self.meta_mode != "ensemble_avg":
+                            q1_logits_meta, q2_logits_meta = self.meta_finetuner.predict(q1_images, q2_images,
+                                                                                         img_idx_to_batch_idx)
+                        else:
+                            q1_logits_meta, q2_logits_meta = self.meta_finetuner.predict_ensemble(q1_images, q2_images,
+                                                                                                  img_idx_to_batch_idx)
+                        q1_logits = q1_logits_meta.clone()
+                        q2_logits = q2_logits_meta.clone()
+                        q1_logits = q1_logits / torch.norm(q1_logits, p=2, dim=-1, keepdim=True)
+                        q2_logits = q2_logits / torch.norm(q2_logits, p=2, dim=-1, keepdim=True)
                         if args.study_subject == "meta_or_not":
                             q1_logits_model = model(q1_images)
                             q2_logits_model = model(q2_images)
@@ -321,7 +332,7 @@ class SimulateBanditsAttackShrink(object):
                 adv_loss = criterion(adv_logit, true_labels, target_labels)
                 ## Continue query count
                 if predict_by_target_model:
-                    query = query + 2 * not_done # TODO 注意query和not_done,这几个变量都是缩减过的
+                    query = query + 2 * not_done
                 if args.targeted:
                     not_done = not_done * (1 - adv_pred.eq(target_labels)).float()  # not_done初始化为 correct, shape = (batch_size,)
                 else:
@@ -329,7 +340,7 @@ class SimulateBanditsAttackShrink(object):
                 success = (1 - not_done) * correct
                 success_query = success * query
                 not_done_loss = adv_loss * not_done
-                not_done_prob = adv_prob[torch.arange(adv_images.size(0)), true_labels] * not_done  # TODO 每次缩减都要填写到all_的全局变量里汇报出去
+                not_done_prob = adv_prob[torch.arange(adv_images.size(0)), true_labels] * not_done 
 
                 log.info('Attacking image {} - {} / {}, step {}'.format(
                     data_idx * args.batch_size, (data_idx + 1) * args.batch_size, self.total_images, step_index
@@ -337,7 +348,7 @@ class SimulateBanditsAttackShrink(object):
                 log.info('       not_done: {:.4f}'.format(len(np.where(not_done.detach().cpu().numpy().astype(np.int32) == 1)[0]) / float(args.batch_size)))
                 log.info('      fd_scalar: {:.9f}'.format((l1 - l2).mean().item()))
                 if success.sum().item() > 0:
-                    log.info('     mean_query: {:.4f}'.format(success_query[success.byte()].mean().item()))  # TODO 注意缩减过
+                    log.info('     mean_query: {:.4f}'.format(success_query[success.byte()].mean().item()))  
                     log.info('   median_query: {:.4f}'.format(success_query[success.byte()].median().item()))
                 if not_done.sum().item() > 0:
                     log.info('  not_done_loss: {:.4f}'.format(not_done_loss[not_done.byte()].mean().item()))
@@ -523,7 +534,7 @@ if __name__ == "__main__":
     parser.add_argument("--warm_up_steps", type=int, default=None)
     parser.add_argument("--meta_seq_len", type=int, default=10)
     parser.add_argument("--meta_arch",type=str, default="resnet34")
-    parser.add_argument("--meta_mode",type=str, default="meta")
+    parser.add_argument("--meta_mode",type=str, required=True)
     parser.add_argument("--study_subject", type=str, choices=["warm_up", "meta_predict_steps", "meta_seq_len", "meta_or_not",
                                                               "loss_type","meta_arch","backbone"])   # logits error 和 loss error 这两种模式在meta_or_not中
 
@@ -591,7 +602,17 @@ if __name__ == "__main__":
         # pool.close()
         # pool.join()
     elif args.study_subject == "meta_or_not":
-        meta_modes = ["meta","uninitial","vanilla","deep_benign_images"]
+        # meta_modes = ["meta","random_init","vanilla","deep_benign_images"]
+
+        # meta_modes = ["reptile_on_benign_images"]
+        # pool = mp.Pool(processes=len(meta_modes))
+        save_result_path = args.exp_dir + "/meta_mode_{}_{}_result.json".format(args.meta_mode, args.arch)
+        log_file_path = osp.join(args.exp_dir, 'run_{}_{}.log'.format(args.arch, args.meta_mode))
+        attack_dataset(copy.deepcopy(args), args.gpu, save_result_path, log_file_path)
+
+    elif args.study_subject == "random_init":
+        # meta_modes = ["meta","random_init","vanilla","deep_benign_images"]
+        meta_modes = ["ensemble_avg"]
         # pool = mp.Pool(processes=len(meta_modes))
         for idx, meta_mode in enumerate(meta_modes):
             gpu = gpus[idx % len(gpus)]

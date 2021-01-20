@@ -1,7 +1,7 @@
 import sys
 import random
-sys.path.append("/home1/machen/meta_perturbations_black_box_attack")
 import os
+sys.path.append(os.getcwd())
 import glog as log
 import torch
 from torch.nn import functional as F
@@ -56,8 +56,9 @@ class SWITCH_rnd_stats_attack(object):
         self.success_query_all = torch.zeros_like(self.query_all)
         self.not_done_prob_all = torch.zeros_like(self.query_all)
         # self.cos_similarity_all = torch.zeros(self.total_images, max_queries)   # N, T
-        self.improve_loss_record_all = OrderedDict()
-        self.improve_loss_after_switch_record_all = OrderedDict()
+        self.increase_loss_from_last_iter_with_1st_model_grad_record_all = OrderedDict()
+        self.increase_loss_from_last_iter_with_2nd_model_grad_record_all = OrderedDict()
+        self.increase_loss_from_last_iter_after_switch_record_all = OrderedDict()
         self.surrogate_model_record_all = OrderedDict()
         self.loss_x_pos_temp_record_all = OrderedDict()
         self.loss_x_neg_temp_record_all = OrderedDict()
@@ -160,9 +161,10 @@ class SWITCH_rnd_stats_attack(object):
         selected = torch.arange(batch_index * args.batch_size,
                                 min((batch_index + 1) * args.batch_size, self.total_images))  # 选择这个batch的所有图片的index
 
-        improve_loss_record = defaultdict(list)  # 记录到底有没有switch
+        increase_loss_from_last_iter_with_1st_model_grad_record = defaultdict(list)  # 记录到底有没有switch
+        increase_loss_from_last_iter_with_2nd_model_grad_record = defaultdict(list)
         surrogate_model_record = defaultdict(list)
-        improve_loss_after_switch_record = defaultdict(list)
+        increase_loss_from_last_iter_after_switch_record = defaultdict(list)
         loss_x_pos_temp_record = defaultdict(list)
         loss_x_neg_temp_record = defaultdict(list)
         loss_after_switch_grad_record = defaultdict(list)
@@ -189,14 +191,15 @@ class SWITCH_rnd_stats_attack(object):
                    (1 - idx_positive_improved) * idx_negative_improved * surrogate_gradients_2 + \
                    (1 - idx_positive_improved) * (1 - idx_negative_improved) * idx_positive_larger_negative * surrogate_gradients_1 + \
                    (1 - idx_positive_improved) * (1 - idx_negative_improved) * (1 - idx_positive_larger_negative) * surrogate_gradients_2
-            select_first_model = torch.ones(adv_images.size(0)).float().cuda()
-            select_second_model = torch.ones(adv_images.size(0)).float().cuda() * 2
+            select_first_model = torch.zeros(adv_images.size(0)).float().cuda()
+            select_second_model = torch.ones(adv_images.size(0)).float().cuda()
             select_models = idx_positive_improved.view(-1) * select_first_model + \
                    (1 - idx_positive_improved.view(-1)) * idx_negative_improved.view(-1) * select_second_model + \
                    (1 - idx_positive_improved.view(-1)) * (1 - idx_negative_improved.view(-1)) * idx_positive_larger_negative.view(-1) * select_first_model + \
                    (1 - idx_positive_improved.view(-1)) * (1 - idx_negative_improved.view(-1)) * (1 - idx_positive_larger_negative.view(-1)) * select_second_model
             for image_idx_, batch_idx_ in sorted(img_idx_to_batch_idx.proj_dict.items(), key=lambda e:e[0]):
-                improve_loss_record[batch_idx_].append(int(idx_positive_improved[image_idx_].item()))
+                increase_loss_from_last_iter_with_1st_model_grad_record[batch_idx_].append(int(idx_positive_improved[image_idx_].item()))
+                increase_loss_from_last_iter_with_2nd_model_grad_record[batch_idx_].append(int(idx_negative_improved[image_idx_].item()))
                 loss_x_pos_temp_record[batch_idx_].append(attempt_positive_loss[image_idx_].item())
                 loss_x_neg_temp_record[batch_idx_].append(attempt_negative_loss[image_idx_].item())
                 surrogate_model_record[batch_idx_].append(int(select_models[image_idx_].item()))
@@ -207,7 +210,7 @@ class SWITCH_rnd_stats_attack(object):
             attempt_loss_2 = criterion(attempt_logits_2, true_labels, target_labels)
             idx_improved_2 = (attempt_loss_2 >= l).long()
             for image_idx_, batch_idx_ in sorted(img_idx_to_batch_idx.proj_dict.items(), key=lambda e:e[0]):
-                improve_loss_after_switch_record[batch_idx_].append(int(idx_improved_2[image_idx_].item()))
+                increase_loss_from_last_iter_after_switch_record[batch_idx_].append(int(idx_improved_2[image_idx_].item()))
                 loss_after_switch_grad_record[batch_idx_].append(attempt_loss_2[image_idx_].item())
 
             adv_images = proj_step(images, args.epsilon, adv_images)
@@ -267,7 +270,9 @@ class SWITCH_rnd_stats_attack(object):
                 value = eval(key)[img_idx].item()
                 value_all[pos] = value  # 由于value_all是全部图片都放在一个数组里，当前batch选择出来
         img_idx_to_batch_idx.proj_dict.clear()
-        for key in ["improve_loss_record", "improve_loss_after_switch_record","loss_x_pos_temp_record", "loss_x_neg_temp_record",
+        for key in ["increase_loss_from_last_iter_with_1st_model_grad_record", "increase_loss_from_last_iter_with_2nd_model_grad_record",
+                    "increase_loss_from_last_iter_after_switch_record",
+                    "loss_x_pos_temp_record", "loss_x_neg_temp_record",
                     "loss_after_switch_grad_record","surrogate_model_record"]:
             values = eval(key)
             for batch_idx, value in sorted(values.items(), key=lambda e:e[0]):
@@ -331,8 +336,9 @@ class SWITCH_rnd_stats_attack(object):
                           "not_done_all": self.not_done_all.detach().cpu().numpy().astype(np.int32).tolist(),
                           "query_all": self.query_all.detach().cpu().numpy().astype(np.int32).tolist(),
                           "not_done_prob": self.not_done_prob_all[self.not_done_all.byte()].mean().item(),
-                          "improve_loss_record": self.improve_loss_record_all,
-                          "improve_loss_after_switch_record": self.improve_loss_after_switch_record_all,
+                          "increase_loss_from_last_iter_with_1st_model_grad_record": self.increase_loss_from_last_iter_with_1st_model_grad_record_all,
+                          "increase_loss_from_last_iter_with_2nd_model_grad_record": self.increase_loss_from_last_iter_with_2nd_model_grad_record_all,
+                          "increase_loss_from_last_iter_after_switch_record": self.increase_loss_from_last_iter_after_switch_record_all,
                           "surrogate_model_record": self.surrogate_model_record_all,
                           "surrogate_models_index_to_name": self.surrogate_model_names,
                           "loss_x_pos_temp_record": self.loss_x_pos_temp_record_all,
@@ -382,7 +388,7 @@ if __name__ == "__main__":
     parser.add_argument("--surrogate_arch", type=str, default="resnet-110", help="The architecture of surrogate model,"
                                                                                  " in original paper it is resnet152")
     parser.add_argument('--json-config', type=str,
-                        default='/home1/machen/meta_perturbations_black_box_attack/configures/SWITCH_attack_conf.json',
+                        default='./configures/SWITCH_attack_conf.json',
                         help='a configuration file to be passed in instead of arguments')
     parser.add_argument('--arch', default=None, type=str, help='network architecture')
     parser.add_argument('--test_archs', action="store_true")
@@ -417,9 +423,16 @@ if __name__ == "__main__":
     if args.targeted:
         if args.dataset == "ImageNet":
             args.max_queries = 50000
-    train_model_names = {"CIFAR-10": ["resnet-110", "densenet-bc-100-12"],
-                         "CIFAR-100": ["resnet-110", "densenet-bc-100-12"],
-                         "TinyImageNet": ["resnet101", "densenet169"]}
+    # train_model_names = {"CIFAR-10": ["resnet-110", "densenet-bc-100-12"],
+    #                      "CIFAR-100": ["resnet-110", "densenet-bc-100-12"],
+    #                      "TinyImageNet": ["resnet101", "densenet169"]}
+    # if args.attack_defense:
+    #     train_model_names = {"CIFAR-10": ["densenet-bc-100-12", "vgg19_bn"],
+    #                          "CIFAR-100": ["densenet-bc-100-12", "vgg19_bn"],
+    #                          "TinyImageNet": ["densenet169", "vgg19_bn"]}
+    train_model_names = {"CIFAR-10": ["resnet-110", "vgg19_bn"],
+                         "CIFAR-100": ["resnet-110", "vgg19_bn"],
+                         "TinyImageNet": ["resnet101", "vgg19_bn"]}
     if args.attack_defense:
         train_model_names = {"CIFAR-10": ["densenet-bc-100-12", "vgg19_bn"],
                              "CIFAR-100": ["densenet-bc-100-12", "vgg19_bn"],

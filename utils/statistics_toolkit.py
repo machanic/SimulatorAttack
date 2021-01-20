@@ -30,7 +30,7 @@ def success_rate_and_query_coorelation(query_all, not_done_indexes, correct_inde
         query_success_rate[query.item()] = float(count) / total_samples
     return query_threshold_success_rate, query_success_rate
 
-def success_rate_avg_query(query_all, not_done_indexes, correct_indexes):
+def success_rate_avg_query(query_all, not_done_indexes, correct_indexes, success_rate_threhold):
     # query为0的是还没攻击就分类错的（当然最好没有这种情况), not_done_indexes是未攻击成功的，还有很多事没有攻击成功的，query很大达到100000
     if isinstance(query_all, torch.Tensor):
         query_all = query_all.detach().cpu().numpy().astype(np.int32)
@@ -42,14 +42,17 @@ def success_rate_avg_query(query_all, not_done_indexes, correct_indexes):
     query_all = query_all[np.where(query_all < 10000)[0]]  # 选择出非0的, 排除原本模型就能分类错位的图片index
     not_done_indexes = not_done_indexes[np.where(query_all < 10000)[0]]
     query_all = query_all.astype(np.float32)
-    success_indexes = np.nonzero(not_done_indexes==0)[0]
+    success_indexes = np.nonzero(not_done_indexes == 0)[0]
     query_all = query_all[success_indexes]
     success_rate_list = list(range(1,101))
     sucess_rate_avg_query_dict = OrderedDict()
     for success_rate in success_rate_list:
+        if success_rate > success_rate_threhold:
+            break
         threshold = np.percentile(query_all, float(success_rate))
         avg_query = np.mean(query_all[np.where(query_all <= threshold)[0]])
         sucess_rate_avg_query_dict[success_rate] = avg_query.item()
+    assert len(sucess_rate_avg_query_dict) > 0, "success_rate_threhold is {}".format(success_rate_threhold)
     return sucess_rate_avg_query_dict
 
 

@@ -1,6 +1,6 @@
 import os
 import sys
-sys.path.append("/home1/machen/meta_perturbations_black_box_attack")
+sys.path.append(os.getcwd())
 import argparse
 from collections import OrderedDict
 
@@ -25,9 +25,11 @@ def read_json_data(json_path, data_key):
         query_all = np.array(data_json["query_all"])
         not_done_all = np.array(data_json["not_done_all"])
         correct_all = np.array(data_json["correct_all"])
+        success_rate_threhold = 1- data_json["avg_not_done"]
+        success_rate_threhold = success_rate_threhold * 100
         if data_key == "success_rate_to_avg_query":
 
-            data = success_rate_avg_query(query_all, not_done_all, correct_all)
+            data = success_rate_avg_query(query_all, not_done_all, correct_all, success_rate_threhold)
         else:
             data, _ = success_rate_and_query_coorelation(query_all, not_done_all, correct_all)
         for key, value in sorted(data.items(), key=lambda e:int(e[0])):
@@ -70,7 +72,7 @@ def get_success_queries(dataset_path_dict, arch):
 method_name_to_paper = {"bandits_attack":"Bandits", "NES-attack":"NES", "P-RGF_biased_attack":"P-RGF","P-RGF_uniform_attack":"RGF",
                         # "ZOO_randomly_sample":"ZOO", "ZOO_importance_sample":"ZOO(I)",
                         "MetaGradAttack":"Meta Attack",
-                        "simulate_bandits_shrink_attack":"MetaSimulator"}
+                        "simulate_bandits_shrink_attack":"Simulator Attack"}
 
 def from_method_to_dir_path(dataset, method, norm, targeted):
     # methods = ["bandits_attack", "MetaGradAttack", "NES-attack","P-RGF_biased","P-RGF_uniform","ZOO","simulate_bandits_shrink_attack"]
@@ -129,7 +131,7 @@ def draw_query_success_rate_figure(dataset, norm, targeted, arch, fig_type, dump
     xtick = np.array([0, 1000, 2000, 3000, 4000, 5000, 6000, 7000, 8000, 9000, 10000])
     for idx, ((dataset, norm, targeted, method), (x,y)) in enumerate(data_info.items()):
         color = colors[idx%len(colors)]
-        if method == "MetaSimulator":
+        if method == "Simulator Attack":
             color = "r"
         # marker = markers[idx%len(markers)]
         # x_smooth = np.linspace(x.min(), x.max(), 300)
@@ -183,7 +185,7 @@ def draw_success_rate_avg_query_fig(dataset, norm, targeted, arch, fig_type, dum
     min_x = 0
     for idx, ((dataset, norm, targeted, method), (x, y)) in enumerate(data_info.items()):
         color = colors[idx % len(colors)]
-        if method == "MetaSimulator":
+        if method == "Simulator Attack":
             color = "r"
         line, = plt.plot(x, y, label=method, color=color, linestyle="-", marker='.')
         if np.max(x).item() > max_x:
@@ -246,7 +248,7 @@ def draw_histogram_fig(dataset, norm, targeted, arch, dump_folder):
     colors = []
     for idx, ((dataset, norm, targeted, method), query_all) in enumerate(data_info.items()):
         color = predefined_colors[idx % len(predefined_colors)]
-        if method == "MetaSimulator":
+        if method == "Simulator Attack":
             color = "r"
         if method == "Meta Attack":
             color = "y"
