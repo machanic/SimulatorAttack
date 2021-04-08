@@ -9,10 +9,14 @@ import numpy as np
 import json
 from scipy.interpolate import make_interp_spline
 import seaborn as sns
-
-from config import MODELS_TEST_STANDARD
 from utils.statistics_toolkit import success_rate_avg_query, success_rate_and_query_coorelation, query_to_bins
 
+from matplotlib import rcParams, rc
+rcParams['xtick.direction'] = 'out'
+rcParams['ytick.direction'] = 'out'
+rcParams['pdf.fonttype'] = 42
+rcParams['ps.fonttype'] = 42
+rc('pdf', fonttype=42)
 
 def read_json_data(json_path, data_key):
     # data_key can be query_success_rate_dict, query_threshold_success_rate_dict, success_rate_to_avg_query
@@ -392,9 +396,8 @@ if __name__ == "__main__":
         archs = ["densenet121", "resnext32_4", "resnext64_4"]
 
     for model in archs:
-        file_path  = dump_folder + "{dataset}_{model}_{norm}_{target_str}_attack_{fig_type}.pdf".format(dataset=args.dataset,
-                      model=model, norm=args.norm, target_str="untargeted" if not args.targeted else "targeted",
-                                                                                fig_type=args.fig_type)
+        file_path = dump_folder + "{dataset}_{model}_{norm}_{target_str}_attack_{fig_type}.pdf".format(dataset=args.dataset,
+                    model=model, norm=args.norm, target_str="untargeted" if not args.targeted else "targeted", fig_type=args.fig_type)
         if args.fig_type == "query_threshold_success_rate_dict":
             x_label = "Maximum Query Number Threshold"
             y_label = "Attack Success Rate (%)"

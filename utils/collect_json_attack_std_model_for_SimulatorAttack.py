@@ -101,10 +101,11 @@ def fetch_all_json_content_given_contraint(dataset, norm, targeted, arch, limite
     folder_list = get_file_name_list(dataset, method_name_to_paper, norm, targeted)
     result = {}
     for method, folder in folder_list.items():
-        if method == "MetaSimulator" and targeted:
+        if method == "MetaSimulator" and targeted and dataset!="TinyImageNet":
             for m in ["3", "5"]:
                 file_path = folder + "/{}_meta_interval_{}_result.json".format(arch, m)
                 assert os.path.exists(file_path), "{} does not exist!".format(file_path)
+                print("Read {}".format(file_path))
                 _, _, _, correct_all, query_all, not_done_all, json_content = read_json_and_extract(file_path)
                 not_done_all[query_all > limited_queries] = 1
                 failure_rate = np.mean(not_done_all[correct_all.astype(np.bool)]).item()
@@ -128,6 +129,7 @@ def fetch_all_json_content_given_contraint(dataset, norm, targeted, arch, limite
         else:
             file_path = folder + "/{}_result.json".format(arch)
             assert os.path.exists(file_path), "{} does not exist!".format(file_path)
+            print("Read {}".format(file_path))
             _, _, _, correct_all, query_all, not_done_all, json_content = read_json_and_extract(file_path)
             not_done_all[query_all>limited_queries] = 1
             # query_all[query_all > limited_queries] = limited_queries
@@ -148,24 +150,22 @@ def fetch_all_json_content_given_contraint(dataset, norm, targeted, arch, limite
                             "avg_query_over_all_samples": avg_query_over_all_samples, "median_query_over_all_samples":median_query_over_all_samples}
     return result
 
-def draw_tables_for_TinyImageNet(norm, archs_result):
+def draw_tables_for_TinyImageNet(archs_result):
     result = archs_result
     avg_q = "avg_query_over_successful_samples"
     med_q = "median_query_over_successful_samples"
-    if norm == "linf":
-        print("""
-RGF & {D121_RGF_ASR}\% & {R32_RGF_ASR}\% & {R64_RGF_ASR}\% & {D121_RGF_AVGQ} & {R32_RGF_AVGQ} & {R64_RGF_AVGQ} & {D121_RGF_MEDQ} & {R32_RGF_MEDQ} & {R64_RGF_MEDQ} \\\\
-P-RGF & {D121_PRGF_ASR}\% & {R32_PRGF_ASR}\% & {R64_PRGF_ASR}\% & {D121_PRGF_AVGQ} & {R32_PRGF_AVGQ} & {R64_PRGF_AVGQ} & {D121_PRGF_MEDQ} & {R32_PRGF_MEDQ} & {R64_PRGF_MEDQ} \\\\
-Bandits & {D121_Bandits_ASR}\% & {R32_Bandits_ASR}\% & {R64_Bandits_ASR}\% & {D121_Bandits_AVGQ} & {R32_Bandits_AVGQ} & {R64_Bandits_AVGQ} & {D121_Bandits_MEDQ} & {R32_Bandits_MEDQ} & {R64_Bandits_MEDQ} \\\\
-PPBA & {D121_PPBA_ASR}\% & {R32_PPBA_ASR}\% & {R64_PPBA_ASR}\% & {D121_PPBA_AVGQ} & {R32_PPBA_AVGQ} & {R64_PPBA_AVGQ} & {D121_PPBA_MEDQ} & {R32_PPBA_MEDQ} & {R64_PPBA_MEDQ} \\\\
-Parsimonious & {D121_Parsimonious_ASR}\% & {R32_Parsimonious_ASR}\% & {R64_Parsimonious_ASR}\% & {D121_Parsimonious_AVGQ} & {R32_Parsimonious_AVGQ} & {R64_Parsimonious_AVGQ} & {D121_Parsimonious_MEDQ} & {R32_Parsimonious_MEDQ} & {R64_Parsimonious_MEDQ} \\\\
-SignHunter & {D121_SignHunter_ASR}\% & {R32_SignHunter_ASR}\% & {R64_SignHunter_ASR}\% & {D121_SignHunter_AVGQ} & {R32_SignHunter_AVGQ} & {R64_SignHunter_AVGQ} & {D121_SignHunter_MEDQ} & {R32_SignHunter_MEDQ} & {R64_SignHunter_MEDQ} \\\\
-Square Attack & {D121_Square_ASR}\% & {R32_Square_ASR}\% & {R64_Square_ASR}\% & {D121_Square_AVGQ} & {R32_Square_AVGQ} & {R64_Square_AVGQ} & {D121_Square_MEDQ} & {R32_Square_MEDQ} & {R64_Square_MEDQ} \\\\
-NO SWITCH & {D121_NO_SWITCH_ASR}\% & {R32_NO_SWITCH_ASR}\% & {R64_NO_SWITCH_ASR}\% & {D121_NO_SWITCH_AVGQ} & {R32_NO_SWITCH_AVGQ} & {R64_NO_SWITCH_AVGQ} & {D121_NO_SWITCH_MEDQ} & {R32_NO_SWITCH_MEDQ} & {R64_NO_SWITCH_MEDQ} \\\\
-SWITCH_neg & {D121_SWITCH_neg_ASR}\% & {R32_SWITCH_neg_ASR}\% & {R64_SWITCH_neg_ASR}\% & {D121_SWITCH_neg_AVGQ} & {R32_SWITCH_neg_AVGQ} & {R64_SWITCH_neg_AVGQ} & {D121_SWITCH_neg_MEDQ} & {R32_SWITCH_neg_MEDQ} & {R64_SWITCH_neg_MEDQ} \\\\
-NO SWITCH_rnd & {D121_NO_SWITCH_rnd_ASR}\% & {R32_NO_SWITCH_rnd_ASR}\% & {R64_NO_SWITCH_rnd_ASR}\% & {D121_NO_SWITCH_rnd_AVGQ} & {R32_NO_SWITCH_rnd_AVGQ} & {R64_NO_SWITCH_rnd_AVGQ} & {D121_NO_SWITCH_rnd_MEDQ} & {R32_NO_SWITCH_rnd_MEDQ} & {R64_NO_SWITCH_rnd_MEDQ} \\\\
-SWITCH_other & {D121_SWITCH_other_ASR}\% & {R32_SWITCH_other_ASR}\% & {R64_SWITCH_other_ASR}\% & {D121_SWITCH_other_AVGQ} & {R32_SWITCH_other_AVGQ} & {R64_SWITCH_other_AVGQ} & {D121_SWITCH_other_MEDQ} & {R32_SWITCH_other_MEDQ} & {R64_SWITCH_other_MEDQ} \\\\
+    print("""
+& NES \cite{{ilyas2018blackbox}} & {D121_NES_ASR}\% & {R32_NES_ASR}\% & {R64_NES_ASR}\% & {D121_NES_AVGQ} & {R32_NES_AVGQ} & {R64_NES_AVGQ} & {D121_NES_MEDQ} & {R32_NES_MEDQ} & {R64_NES_MEDQ} \\\\
+& & RGF \cite{{2017RGF}} & {D121_RGF_ASR}\% & {R32_RGF_ASR}\% & {R64_RGF_ASR}\% & {D121_RGF_AVGQ} & {R32_RGF_AVGQ} & {R64_RGF_AVGQ} & {D121_RGF_MEDQ} & {R32_RGF_MEDQ} & {R64_RGF_MEDQ} \\\\
+& & P-RGF \cite{{cheng2019improving}} & {D121_PRGF_ASR}\% & {R32_PRGF_ASR}\% & {R64_PRGF_ASR}\% & {D121_PRGF_AVGQ} & {R32_PRGF_AVGQ} & {R64_PRGF_AVGQ} & {D121_PRGF_MEDQ} & {R32_PRGF_MEDQ} & {R64_PRGF_MEDQ} \\\\
+& & Meta Attack \cite{{du2020queryefficient}} & {D121_MetaAttack_ASR}\% & {R32_MetaAttack_ASR}\% & {R64_MetaAttack_ASR}\% & {D121_MetaAttack_AVGQ} & {R32_MetaAttack_AVGQ} & {R64_MetaAttack_AVGQ} & {D121_MetaAttack_MEDQ} & {R32_MetaAttack_MEDQ} & {R64_MetaAttack_MEDQ} \\\\
+& & Bandits  \cite{{ilyas2018prior}} & {D121_Bandits_ASR}\% & {R32_Bandits_ASR}\% & {R64_Bandits_ASR}\% & {D121_Bandits_AVGQ} & {R32_Bandits_AVGQ} & {R64_Bandits_AVGQ} & {D121_Bandits_MEDQ} & {R32_Bandits_MEDQ} & {R64_Bandits_MEDQ} \\\\
+& & Simulator Attack & {D121_MetaSimulator_ASR}\% & {R32_MetaSimulator_ASR}\% & {R64_MetaSimulator_ASR}\% & {D121_MetaSimulator_AVGQ} & {R32_MetaSimulator_AVGQ} & {R64_MetaSimulator_AVGQ} & {D121_MetaSimulator_MEDQ} & {R32_MetaSimulator_MEDQ} & {R64_MetaSimulator_MEDQ} \\\\
         """.format(
+            D121_NES_ASR=result["densenet121"]["NES"]["success_rate"],R32_NES_ASR=result["resnext32_4"]["NES"]["success_rate"],R64_NES_ASR=result["resnext64_4"]["NES"]["success_rate"],
+            D121_NES_AVGQ=result["densenet121"]["NES"][avg_q], R32_NES_AVGQ=result["resnext32_4"]["NES"][avg_q], R64_NES_AVGQ=result["resnext64_4"]["NES"][avg_q],
+            D121_NES_MEDQ=result["densenet121"]["NES"][med_q], R32_NES_MEDQ=result["resnext32_4"]["NES"][med_q], R64_NES_MEDQ=result["resnext64_4"]["NES"][med_q],
+
             D121_RGF_ASR=result["densenet121"]["RGF"]["success_rate"],R32_RGF_ASR=result["resnext32_4"]["RGF"]["success_rate"],R64_RGF_ASR=result["resnext64_4"]["RGF"]["success_rate"],
             D121_RGF_AVGQ=result["densenet121"]["RGF"][avg_q], R32_RGF_AVGQ=result["resnext32_4"]["RGF"][avg_q], R64_RGF_AVGQ=result["resnext64_4"]["RGF"][avg_q],
             D121_RGF_MEDQ=result["densenet121"]["RGF"][med_q], R32_RGF_MEDQ=result["resnext32_4"]["RGF"][med_q], R64_RGF_MEDQ=result["resnext64_4"]["RGF"][med_q],
@@ -178,6 +178,10 @@ SWITCH_other & {D121_SWITCH_other_ASR}\% & {R32_SWITCH_other_ASR}\% & {R64_SWITC
             D121_PRGF_MEDQ=result["densenet121"]["PRGF"][med_q], R32_PRGF_MEDQ=result["resnext32_4"]["PRGF"][med_q],
             R64_PRGF_MEDQ=result["resnext64_4"]["PRGF"][med_q],
 
+            D121_MetaAttack_ASR=result["densenet121"]["MetaAttack"]["success_rate"],R32_MetaAttack_ASR=result["resnext32_4"]["MetaAttack"]["success_rate"],R64_MetaAttack_ASR=result["resnext64_4"]["MetaAttack"]["success_rate"],
+            D121_MetaAttack_AVGQ=result["densenet121"]["MetaAttack"][avg_q], R32_MetaAttack_AVGQ=result["resnext32_4"]["MetaAttack"][avg_q], R64_MetaAttack_AVGQ=result["resnext64_4"]["MetaAttack"][avg_q],
+            D121_MetaAttack_MEDQ=result["densenet121"]["MetaAttack"][med_q], R32_MetaAttack_MEDQ=result["resnext32_4"]["MetaAttack"][med_q], R64_MetaAttack_MEDQ=result["resnext64_4"]["MetaAttack"][med_q],
+
             D121_Bandits_ASR=result["densenet121"]["Bandits"]["success_rate"],
             R32_Bandits_ASR=result["resnext32_4"]["Bandits"]["success_rate"],
             R64_Bandits_ASR=result["resnext64_4"]["Bandits"]["success_rate"],
@@ -188,195 +192,11 @@ SWITCH_other & {D121_SWITCH_other_ASR}\% & {R32_SWITCH_other_ASR}\% & {R64_SWITC
             R32_Bandits_MEDQ=result["resnext32_4"]["Bandits"][med_q],
             R64_Bandits_MEDQ=result["resnext64_4"]["Bandits"][med_q],
 
-            D121_PPBA_ASR=result["densenet121"]["PPBA"]["success_rate"],
-            R32_PPBA_ASR=result["resnext32_4"]["PPBA"]["success_rate"],
-            R64_PPBA_ASR=result["resnext64_4"]["PPBA"]["success_rate"],
-            D121_PPBA_AVGQ=result["densenet121"]["PPBA"][avg_q], R32_PPBA_AVGQ=result["resnext32_4"]["PPBA"][avg_q],
-            R64_PPBA_AVGQ=result["resnext64_4"]["PPBA"][avg_q],
-            D121_PPBA_MEDQ=result["densenet121"]["PPBA"][med_q], R32_PPBA_MEDQ=result["resnext32_4"]["PPBA"][med_q],
-            R64_PPBA_MEDQ=result["resnext64_4"]["PPBA"][med_q],
-
-            D121_Parsimonious_ASR=result["densenet121"]["Parsimonious"]["success_rate"],
-            R32_Parsimonious_ASR=result["resnext32_4"]["Parsimonious"]["success_rate"],
-            R64_Parsimonious_ASR=result["resnext64_4"]["Parsimonious"]["success_rate"],
-            D121_Parsimonious_AVGQ=result["densenet121"]["Parsimonious"][avg_q],
-            R32_Parsimonious_AVGQ=result["resnext32_4"]["Parsimonious"][avg_q],
-            R64_Parsimonious_AVGQ=result["resnext64_4"]["Parsimonious"][avg_q],
-            D121_Parsimonious_MEDQ=result["densenet121"]["Parsimonious"][med_q],
-            R32_Parsimonious_MEDQ=result["resnext32_4"]["Parsimonious"][med_q],
-            R64_Parsimonious_MEDQ=result["resnext64_4"]["Parsimonious"][med_q],
-
-            D121_SignHunter_ASR=result["densenet121"]["SignHunter"]["success_rate"],
-            R32_SignHunter_ASR=result["resnext32_4"]["SignHunter"]["success_rate"],
-            R64_SignHunter_ASR=result["resnext64_4"]["SignHunter"]["success_rate"],
-            D121_SignHunter_AVGQ=result["densenet121"]["SignHunter"][avg_q],
-            R32_SignHunter_AVGQ=result["resnext32_4"]["SignHunter"][avg_q],
-            R64_SignHunter_AVGQ=result["resnext64_4"]["SignHunter"][avg_q],
-            D121_SignHunter_MEDQ=result["densenet121"]["SignHunter"][med_q],
-            R32_SignHunter_MEDQ=result["resnext32_4"]["SignHunter"][med_q],
-            R64_SignHunter_MEDQ=result["resnext64_4"]["SignHunter"][med_q],
-
-            D121_Square_ASR=result["densenet121"]["Square"]["success_rate"],
-            R32_Square_ASR=result["resnext32_4"]["Square"]["success_rate"], R64_Square_ASR=result["resnext64_4"]
-            ["Square"]["success_rate"],
-            D121_Square_AVGQ=result["densenet121"]["Square"][avg_q],
-            R32_Square_AVGQ=result["resnext32_4"]["Square"][avg_q],
-            R64_Square_AVGQ=result["resnext64_4"]["Square"][avg_q],
-            D121_Square_MEDQ=result["densenet121"]["Square"][med_q],
-            R32_Square_MEDQ=result["resnext32_4"]["Square"][med_q],
-            R64_Square_MEDQ=result["resnext64_4"]["Square"][med_q],
-
-            D121_NO_SWITCH_ASR=result["densenet121"]["NO_SWITCH"]["success_rate"],
-            R32_NO_SWITCH_ASR=result["resnext32_4"]["NO_SWITCH"]["success_rate"],
-            R64_NO_SWITCH_ASR=result["resnext64_4"]
-            ["NO_SWITCH"]["success_rate"],
-            D121_NO_SWITCH_AVGQ=result["densenet121"]["NO_SWITCH"][avg_q],
-            R32_NO_SWITCH_AVGQ=result["resnext32_4"]["NO_SWITCH"][avg_q],
-            R64_NO_SWITCH_AVGQ=result["resnext64_4"]["NO_SWITCH"][avg_q],
-            D121_NO_SWITCH_MEDQ=result["densenet121"]["NO_SWITCH"][med_q],
-            R32_NO_SWITCH_MEDQ=result["resnext32_4"]["NO_SWITCH"][med_q],
-            R64_NO_SWITCH_MEDQ=result["resnext64_4"]["NO_SWITCH"][med_q],
-
-            D121_SWITCH_neg_ASR=result["densenet121"]["SWITCH_neg"]["success_rate"],
-            R32_SWITCH_neg_ASR=result["resnext32_4"]["SWITCH_neg"]["success_rate"],
-            R64_SWITCH_neg_ASR=result["resnext64_4"]["SWITCH_neg"]["success_rate"],
-            D121_SWITCH_neg_AVGQ=result["densenet121"]["SWITCH_neg"][avg_q],
-            R32_SWITCH_neg_AVGQ=result["resnext32_4"]["SWITCH_neg"][avg_q],
-            R64_SWITCH_neg_AVGQ=result["resnext64_4"]["SWITCH_neg"][avg_q],
-            D121_SWITCH_neg_MEDQ=result["densenet121"]["SWITCH_neg"][med_q],
-            R32_SWITCH_neg_MEDQ=result["resnext32_4"]["SWITCH_neg"][med_q],
-            R64_SWITCH_neg_MEDQ=result["resnext64_4"]["SWITCH_neg"][med_q],
-
-            D121_NO_SWITCH_rnd_ASR=result["densenet121"]["NO_SWITCH_rnd"]["success_rate"],
-            R32_NO_SWITCH_rnd_ASR=result["resnext32_4"]["NO_SWITCH_rnd"]["success_rate"],
-            R64_NO_SWITCH_rnd_ASR=result["resnext64_4"]["NO_SWITCH_rnd"]["success_rate"],
-            D121_NO_SWITCH_rnd_AVGQ=result["densenet121"]["NO_SWITCH_rnd"][avg_q],
-            R32_NO_SWITCH_rnd_AVGQ=result["resnext32_4"]["NO_SWITCH_rnd"][avg_q],
-            R64_NO_SWITCH_rnd_AVGQ=result["resnext64_4"]["NO_SWITCH_rnd"][avg_q],
-            D121_NO_SWITCH_rnd_MEDQ=result["densenet121"]["NO_SWITCH_rnd"][med_q],
-            R32_NO_SWITCH_rnd_MEDQ=result["resnext32_4"]["NO_SWITCH_rnd"][med_q],
-            R64_NO_SWITCH_rnd_MEDQ=result["resnext64_4"]["NO_SWITCH_rnd"][med_q],
-
-            D121_SWITCH_other_ASR=result["densenet121"]["SWITCH_other"]["success_rate"],
-            R32_SWITCH_other_ASR=result["resnext32_4"]["SWITCH_other"]["success_rate"],
-            R64_SWITCH_other_ASR=result["resnext64_4"]["SWITCH_other"]["success_rate"],
-            D121_SWITCH_other_AVGQ=result["densenet121"]["SWITCH_other"][avg_q],
-            R32_SWITCH_other_AVGQ=result["resnext32_4"]["SWITCH_other"][avg_q],
-            R64_SWITCH_other_AVGQ=result["resnext64_4"]["SWITCH_other"][avg_q],
-            D121_SWITCH_other_MEDQ=result["densenet121"]["SWITCH_other"][med_q],
-            R32_SWITCH_other_MEDQ=result["resnext32_4"]["SWITCH_other"][med_q],
-            R64_SWITCH_other_MEDQ=result["resnext64_4"]["SWITCH_other"][med_q]
+            D121_MetaSimulator_ASR=result["densenet121"]["MetaSimulator"]["success_rate"],R32_MetaSimulator_ASR=result["resnext32_4"]["MetaSimulator"]["success_rate"],R64_MetaSimulator_ASR=result["resnext64_4"]["MetaSimulator"]["success_rate"],
+            D121_MetaSimulator_AVGQ=result["densenet121"]["MetaSimulator"][avg_q], R32_MetaSimulator_AVGQ=result["resnext32_4"]["MetaSimulator"][avg_q], R64_MetaSimulator_AVGQ=result["resnext64_4"]["MetaSimulator"][avg_q],
+            D121_MetaSimulator_MEDQ=result["densenet121"]["MetaSimulator"][med_q], R32_MetaSimulator_MEDQ=result["resnext32_4"]["MetaSimulator"][med_q], R64_MetaSimulator_MEDQ=result["resnext64_4"]["MetaSimulator"][med_q],
         )
               )
-    else:
-        print("""
-        RGF & {D121_RGF_ASR}\% & {R32_RGF_ASR}\% & {R64_RGF_ASR}\% & {D121_RGF_AVGQ} & {R32_RGF_AVGQ} & {R64_RGF_AVGQ} & {D121_RGF_MEDQ} & {R32_RGF_MEDQ} & {R64_RGF_MEDQ} \\\\
-        P-RGF & {D121_PRGF_ASR}\% & {R32_PRGF_ASR}\% & {R64_PRGF_ASR}\% & {D121_PRGF_AVGQ} & {R32_PRGF_AVGQ} & {R64_PRGF_AVGQ} & {D121_PRGF_MEDQ} & {R32_PRGF_MEDQ} & {R64_PRGF_MEDQ} \\\\
-        Bandits & {D121_Bandits_ASR}\% & {R32_Bandits_ASR}\% & {R64_Bandits_ASR}\% & {D121_Bandits_AVGQ} & {R32_Bandits_AVGQ} & {R64_Bandits_AVGQ} & {D121_Bandits_MEDQ} & {R32_Bandits_MEDQ} & {R64_Bandits_MEDQ} \\\\
-        PPBA & {D121_PPBA_ASR}\% & {R32_PPBA_ASR}\% & {R64_PPBA_ASR}\% & {D121_PPBA_AVGQ} & {R32_PPBA_AVGQ} & {R64_PPBA_AVGQ} & {D121_PPBA_MEDQ} & {R32_PPBA_MEDQ} & {R64_PPBA_MEDQ} \\\\
-        SignHunter & {D121_SignHunter_ASR}\% & {R32_SignHunter_ASR}\% & {R64_SignHunter_ASR}\% & {D121_SignHunter_AVGQ} & {R32_SignHunter_AVGQ} & {R64_SignHunter_AVGQ} & {D121_SignHunter_MEDQ} & {R32_SignHunter_MEDQ} & {R64_SignHunter_MEDQ} \\\\
-        Square Attack & {D121_Square_ASR}\% & {R32_Square_ASR}\% & {R64_Square_ASR}\% & {D121_Square_AVGQ} & {R32_Square_AVGQ} & {R64_Square_AVGQ} & {D121_Square_MEDQ} & {R32_Square_MEDQ} & {R64_Square_MEDQ} \\\\
-        NO SWITCH & {D121_NO_SWITCH_ASR}\% & {R32_NO_SWITCH_ASR}\% & {R64_NO_SWITCH_ASR}\% & {D121_NO_SWITCH_AVGQ} & {R32_NO_SWITCH_AVGQ} & {R64_NO_SWITCH_AVGQ} & {D121_NO_SWITCH_MEDQ} & {R32_NO_SWITCH_MEDQ} & {R64_NO_SWITCH_MEDQ} \\\\
-        SWITCH_neg & {D121_SWITCH_neg_ASR}\% & {R32_SWITCH_neg_ASR}\% & {R64_SWITCH_neg_ASR}\% & {D121_SWITCH_neg_AVGQ} & {R32_SWITCH_neg_AVGQ} & {R64_SWITCH_neg_AVGQ} & {D121_SWITCH_neg_MEDQ} & {R32_SWITCH_neg_MEDQ} & {R64_SWITCH_neg_MEDQ} \\\\
-        NO SWITCH_rnd & {D121_NO_SWITCH_rnd_ASR}\% & {R32_NO_SWITCH_rnd_ASR}\% & {R64_NO_SWITCH_rnd_ASR}\% & {D121_NO_SWITCH_rnd_AVGQ} & {R32_NO_SWITCH_rnd_AVGQ} & {R64_NO_SWITCH_rnd_AVGQ} & {D121_NO_SWITCH_rnd_MEDQ} & {R32_NO_SWITCH_rnd_MEDQ} & {R64_NO_SWITCH_rnd_MEDQ} \\\\
-        SWITCH_other & {D121_SWITCH_other_ASR}\% & {R32_SWITCH_other_ASR}\% & {R64_SWITCH_other_ASR}\% & {D121_SWITCH_other_AVGQ} & {R32_SWITCH_other_AVGQ} & {R64_SWITCH_other_AVGQ} & {D121_SWITCH_other_MEDQ} & {R32_SWITCH_other_MEDQ} & {R64_SWITCH_other_MEDQ} \\\\
-                """.format(
-            D121_RGF_ASR=result["densenet121"]["RGF"]["success_rate"],
-            R32_RGF_ASR=result["resnext32_4"]["RGF"]["success_rate"],
-            R64_RGF_ASR=result["resnext64_4"]["RGF"]["success_rate"],
-            D121_RGF_AVGQ=result["densenet121"]["RGF"][avg_q], R32_RGF_AVGQ=result["resnext32_4"]["RGF"][avg_q],
-            R64_RGF_AVGQ=result["resnext64_4"]["RGF"][avg_q],
-            D121_RGF_MEDQ=result["densenet121"]["RGF"][med_q], R32_RGF_MEDQ=result["resnext32_4"]["RGF"][med_q],
-            R64_RGF_MEDQ=result["resnext64_4"]["RGF"][med_q],
-
-            D121_PRGF_ASR=result["densenet121"]["PRGF"]["success_rate"],
-            R32_PRGF_ASR=result["resnext32_4"]["PRGF"]["success_rate"],
-            R64_PRGF_ASR=result["resnext64_4"]["PRGF"]["success_rate"],
-            D121_PRGF_AVGQ=result["densenet121"]["PRGF"][avg_q], R32_PRGF_AVGQ=result["resnext32_4"]["PRGF"][avg_q],
-            R64_PRGF_AVGQ=result["resnext64_4"]["PRGF"][avg_q],
-            D121_PRGF_MEDQ=result["densenet121"]["PRGF"][med_q], R32_PRGF_MEDQ=result["resnext32_4"]["PRGF"][med_q],
-            R64_PRGF_MEDQ=result["resnext64_4"]["PRGF"][med_q],
-
-            D121_Bandits_ASR=result["densenet121"]["Bandits"]["success_rate"],
-            R32_Bandits_ASR=result["resnext32_4"]["Bandits"]["success_rate"],
-            R64_Bandits_ASR=result["resnext64_4"]["Bandits"]["success_rate"],
-            D121_Bandits_AVGQ=result["densenet121"]["Bandits"][avg_q],
-            R32_Bandits_AVGQ=result["resnext32_4"]["Bandits"][avg_q],
-            R64_Bandits_AVGQ=result["resnext64_4"]["Bandits"][avg_q],
-            D121_Bandits_MEDQ=result["densenet121"]["Bandits"][med_q],
-            R32_Bandits_MEDQ=result["resnext32_4"]["Bandits"][med_q],
-            R64_Bandits_MEDQ=result["resnext64_4"]["Bandits"][med_q],
-
-            D121_PPBA_ASR=result["densenet121"]["PPBA"]["success_rate"],
-            R32_PPBA_ASR=result["resnext32_4"]["PPBA"]["success_rate"],
-            R64_PPBA_ASR=result["resnext64_4"]["PPBA"]["success_rate"],
-            D121_PPBA_AVGQ=result["densenet121"]["PPBA"][avg_q], R32_PPBA_AVGQ=result["resnext32_4"]["PPBA"][avg_q],
-            R64_PPBA_AVGQ=result["resnext64_4"]["PPBA"][avg_q],
-            D121_PPBA_MEDQ=result["densenet121"]["PPBA"][med_q], R32_PPBA_MEDQ=result["resnext32_4"]["PPBA"][med_q],
-            R64_PPBA_MEDQ=result["resnext64_4"]["PPBA"][med_q],
-
-            D121_SignHunter_ASR=result["densenet121"]["SignHunter"]["success_rate"],
-            R32_SignHunter_ASR=result["resnext32_4"]["SignHunter"]["success_rate"],
-            R64_SignHunter_ASR=result["resnext64_4"]["SignHunter"]["success_rate"],
-            D121_SignHunter_AVGQ=result["densenet121"]["SignHunter"][avg_q],
-            R32_SignHunter_AVGQ=result["resnext32_4"]["SignHunter"][avg_q],
-            R64_SignHunter_AVGQ=result["resnext64_4"]["SignHunter"][avg_q],
-            D121_SignHunter_MEDQ=result["densenet121"]["SignHunter"][med_q],
-            R32_SignHunter_MEDQ=result["resnext32_4"]["SignHunter"][med_q],
-            R64_SignHunter_MEDQ=result["resnext64_4"]["SignHunter"][med_q],
-
-            D121_Square_ASR=result["densenet121"]["Square"]["success_rate"],
-            R32_Square_ASR=result["resnext32_4"]["Square"]["success_rate"], R64_Square_ASR=result["resnext64_4"]
-            ["Square"]["success_rate"],
-            D121_Square_AVGQ=result["densenet121"]["Square"][avg_q],
-            R32_Square_AVGQ=result["resnext32_4"]["Square"][avg_q],
-            R64_Square_AVGQ=result["resnext64_4"]["Square"][avg_q],
-            D121_Square_MEDQ=result["densenet121"]["Square"][med_q],
-            R32_Square_MEDQ=result["resnext32_4"]["Square"][med_q],
-            R64_Square_MEDQ=result["resnext64_4"]["Square"][med_q],
-
-            D121_NO_SWITCH_ASR=result["densenet121"]["NO_SWITCH"]["success_rate"],
-            R32_NO_SWITCH_ASR=result["resnext32_4"]["NO_SWITCH"]["success_rate"],
-            R64_NO_SWITCH_ASR=result["resnext64_4"]
-            ["NO_SWITCH"]["success_rate"],
-            D121_NO_SWITCH_AVGQ=result["densenet121"]["NO_SWITCH"][avg_q],
-            R32_NO_SWITCH_AVGQ=result["resnext32_4"]["NO_SWITCH"][avg_q],
-            R64_NO_SWITCH_AVGQ=result["resnext64_4"]["NO_SWITCH"][avg_q],
-            D121_NO_SWITCH_MEDQ=result["densenet121"]["NO_SWITCH"][med_q],
-            R32_NO_SWITCH_MEDQ=result["resnext32_4"]["NO_SWITCH"][med_q],
-            R64_NO_SWITCH_MEDQ=result["resnext64_4"]["NO_SWITCH"][med_q],
-
-            D121_SWITCH_neg_ASR=result["densenet121"]["SWITCH_neg"]["success_rate"],
-            R32_SWITCH_neg_ASR=result["resnext32_4"]["SWITCH_neg"]["success_rate"],
-            R64_SWITCH_neg_ASR=result["resnext64_4"]["SWITCH_neg"]["success_rate"],
-            D121_SWITCH_neg_AVGQ=result["densenet121"]["SWITCH_neg"][avg_q],
-            R32_SWITCH_neg_AVGQ=result["resnext32_4"]["SWITCH_neg"][avg_q],
-            R64_SWITCH_neg_AVGQ=result["resnext64_4"]["SWITCH_neg"][avg_q],
-            D121_SWITCH_neg_MEDQ=result["densenet121"]["SWITCH_neg"][med_q],
-            R32_SWITCH_neg_MEDQ=result["resnext32_4"]["SWITCH_neg"][med_q],
-            R64_SWITCH_neg_MEDQ=result["resnext64_4"]["SWITCH_neg"][med_q],
-
-            D121_NO_SWITCH_rnd_ASR=result["densenet121"]["NO_SWITCH_rnd"]["success_rate"],
-            R32_NO_SWITCH_rnd_ASR=result["resnext32_4"]["NO_SWITCH_rnd"]["success_rate"],
-            R64_NO_SWITCH_rnd_ASR=result["resnext64_4"]["NO_SWITCH_rnd"]["success_rate"],
-            D121_NO_SWITCH_rnd_AVGQ=result["densenet121"]["NO_SWITCH_rnd"][avg_q],
-            R32_NO_SWITCH_rnd_AVGQ=result["resnext32_4"]["NO_SWITCH_rnd"][avg_q],
-            R64_NO_SWITCH_rnd_AVGQ=result["resnext64_4"]["NO_SWITCH_rnd"][avg_q],
-            D121_NO_SWITCH_rnd_MEDQ=result["densenet121"]["NO_SWITCH_rnd"][med_q],
-            R32_NO_SWITCH_rnd_MEDQ=result["resnext32_4"]["NO_SWITCH_rnd"][med_q],
-            R64_NO_SWITCH_rnd_MEDQ=result["resnext64_4"]["NO_SWITCH_rnd"][med_q],
-
-            D121_SWITCH_other_ASR=result["densenet121"]["SWITCH_other"]["success_rate"],
-            R32_SWITCH_other_ASR=result["resnext32_4"]["SWITCH_other"]["success_rate"],
-            R64_SWITCH_other_ASR=result["resnext64_4"]["SWITCH_other"]["success_rate"],
-            D121_SWITCH_other_AVGQ=result["densenet121"]["SWITCH_other"][avg_q],
-            R32_SWITCH_other_AVGQ=result["resnext32_4"]["SWITCH_other"][avg_q],
-            R64_SWITCH_other_AVGQ=result["resnext64_4"]["SWITCH_other"][avg_q],
-            D121_SWITCH_other_MEDQ=result["densenet121"]["SWITCH_other"][med_q],
-            R32_SWITCH_other_MEDQ=result["resnext32_4"]["SWITCH_other"][med_q],
-            R64_SWITCH_other_MEDQ=result["resnext64_4"]["SWITCH_other"][med_q]
-        )
-        )
 
 def draw_tables_for_CIFAR(targeted, archs_result):
     result = archs_result
@@ -389,7 +209,7 @@ def draw_tables_for_CIFAR(targeted, archs_result):
 & & P-RGF \cite{{cheng2019improving}} & {pyramidnet272_PRGF_ASR}\% & {gdas_PRGF_ASR}\% & {WRN28_PRGF_ASR}\% & {WRN40_PRGF_ASR}\% & {pyramidnet272_PRGF_AVGQ} & {gdas_PRGF_AVGQ} & {WRN28_PRGF_AVGQ} & {WRN40_PRGF_AVGQ} & {pyramidnet272_PRGF_MEDQ} & {gdas_PRGF_MEDQ} & {WRN28_PRGF_MEDQ} & {WRN40_PRGF_MEDQ} \\\\
 & & Meta Attack \cite{{du2020queryefficient}} & {pyramidnet272_MetaAttack_ASR}\% & {gdas_MetaAttack_ASR}\% & {WRN28_MetaAttack_ASR}\% & {WRN40_MetaAttack_ASR}\% & {pyramidnet272_MetaAttack_AVGQ} & {gdas_MetaAttack_AVGQ} & {WRN28_MetaAttack_AVGQ} & {WRN40_MetaAttack_AVGQ} & {pyramidnet272_MetaAttack_MEDQ} & {gdas_MetaAttack_MEDQ} & {WRN28_MetaAttack_MEDQ} & {WRN40_MetaAttack_MEDQ} \\\\
 & & Bandits \cite{{ilyas2018prior}} & {pyramidnet272_Bandits_ASR}\% & {gdas_Bandits_ASR}\% & {WRN28_Bandits_ASR}\% & {WRN40_Bandits_ASR}\% & {pyramidnet272_Bandits_AVGQ} & {gdas_Bandits_AVGQ} & {WRN28_Bandits_AVGQ} & {WRN40_Bandits_AVGQ} & {pyramidnet272_Bandits_MEDQ} & {gdas_Bandits_MEDQ} & {WRN28_Bandits_MEDQ} & {WRN40_Bandits_MEDQ} \\\\
-& & MetaSimulator & {pyramidnet272_MetaSimulator_ASR}\% & {gdas_MetaSimulator_ASR}\% & {WRN28_MetaSimulator_ASR}\% & {WRN40_MetaSimulator_ASR}\% & {pyramidnet272_MetaSimulator_AVGQ} & {gdas_MetaSimulator_AVGQ} & {WRN28_MetaSimulator_AVGQ} & {WRN40_MetaSimulator_AVGQ} & {pyramidnet272_MetaSimulator_MEDQ} & {gdas_MetaSimulator_MEDQ} & {WRN28_MetaSimulator_MEDQ} & {WRN40_MetaSimulator_MEDQ} \\\\
+& & Simulator Attack & {pyramidnet272_MetaSimulator_ASR}\% & {gdas_MetaSimulator_ASR}\% & {WRN28_MetaSimulator_ASR}\% & {WRN40_MetaSimulator_ASR}\% & {pyramidnet272_MetaSimulator_AVGQ} & {gdas_MetaSimulator_AVGQ} & {WRN28_MetaSimulator_AVGQ} & {WRN40_MetaSimulator_AVGQ} & {pyramidnet272_MetaSimulator_MEDQ} & {gdas_MetaSimulator_MEDQ} & {WRN28_MetaSimulator_MEDQ} & {WRN40_MetaSimulator_MEDQ} \\\\
         """.format(
                    pyramidnet272_NES_ASR=result["pyramidnet272"]["NES"]["success_rate"], gdas_NES_ASR=result["gdas"]["NES"]["success_rate"],
                    WRN28_NES_ASR=result["WRN-28-10-drop"]["NES"]["success_rate"], WRN40_NES_ASR=result["WRN-40-10-drop"]["NES"]["success_rate"],
@@ -467,8 +287,8 @@ def draw_tables_for_CIFAR(targeted, archs_result):
 & & NES \cite{{ilyas2018blackbox}} & {pyramidnet272_NES_ASR}\% & {gdas_NES_ASR}\% & {WRN28_NES_ASR}\% & {WRN40_NES_ASR}\% & {pyramidnet272_NES_AVGQ} & {gdas_NES_AVGQ} & {WRN28_NES_AVGQ} & {WRN40_NES_AVGQ} & {pyramidnet272_NES_MEDQ} & {gdas_NES_MEDQ} & {WRN28_NES_MEDQ} & {WRN40_NES_MEDQ} \\\\
 & & Meta Attack \cite{{du2020queryefficient}} & {pyramidnet272_MetaAttack_ASR}\% & {gdas_MetaAttack_ASR}\% & {WRN28_MetaAttack_ASR}\% & {WRN40_MetaAttack_ASR}\% & {pyramidnet272_MetaAttack_AVGQ} & {gdas_MetaAttack_AVGQ} & {WRN28_MetaAttack_AVGQ} & {WRN40_MetaAttack_AVGQ} & {pyramidnet272_MetaAttack_MEDQ} & {gdas_MetaAttack_MEDQ} & {WRN28_MetaAttack_MEDQ} & {WRN40_MetaAttack_MEDQ} \\\\
 & & Bandits \cite{{ilyas2018prior}} & {pyramidnet272_Bandits_ASR}\% & {gdas_Bandits_ASR}\% & {WRN28_Bandits_ASR}\% & {WRN40_Bandits_ASR}\% & {pyramidnet272_Bandits_AVGQ} & {gdas_Bandits_AVGQ} & {WRN28_Bandits_AVGQ} & {WRN40_Bandits_AVGQ} & {pyramidnet272_Bandits_MEDQ} & {gdas_Bandits_MEDQ} & {WRN28_Bandits_MEDQ} & {WRN40_Bandits_MEDQ} \\\\
-& & MetaSimulator (m=3) & {pyramidnet272_MetaSimulator_m3_ASR}\% & {gdas_MetaSimulator_m3_ASR}\% & {WRN28_MetaSimulator_m3_ASR}\% & {WRN40_MetaSimulator_m3_ASR}\% & {pyramidnet272_MetaSimulator_m3_AVGQ} & {gdas_MetaSimulator_m3_AVGQ} & {WRN28_MetaSimulator_m3_AVGQ} & {WRN40_MetaSimulator_m3_AVGQ} & {pyramidnet272_MetaSimulator_m3_MEDQ} & {gdas_MetaSimulator_m3_MEDQ} & {WRN28_MetaSimulator_m3_MEDQ} & {WRN40_MetaSimulator_m3_MEDQ} \\\\
-& & MetaSimulator (m=5) & {pyramidnet272_MetaSimulator_m5_ASR}\% & {gdas_MetaSimulator_m5_ASR}\% & {WRN28_MetaSimulator_m5_ASR}\% & {WRN40_MetaSimulator_m5_ASR}\% & {pyramidnet272_MetaSimulator_m5_AVGQ} & {gdas_MetaSimulator_m5_AVGQ} & {WRN28_MetaSimulator_m5_AVGQ} & {WRN40_MetaSimulator_m5_AVGQ} & {pyramidnet272_MetaSimulator_m5_MEDQ} & {gdas_MetaSimulator_m5_MEDQ} & {WRN28_MetaSimulator_m5_MEDQ} & {WRN40_MetaSimulator_m5_MEDQ} \\\\
+& & Simulator Attack (m=3) & {pyramidnet272_MetaSimulator_m3_ASR}\% & {gdas_MetaSimulator_m3_ASR}\% & {WRN28_MetaSimulator_m3_ASR}\% & {WRN40_MetaSimulator_m3_ASR}\% & {pyramidnet272_MetaSimulator_m3_AVGQ} & {gdas_MetaSimulator_m3_AVGQ} & {WRN28_MetaSimulator_m3_AVGQ} & {WRN40_MetaSimulator_m3_AVGQ} & {pyramidnet272_MetaSimulator_m3_MEDQ} & {gdas_MetaSimulator_m3_MEDQ} & {WRN28_MetaSimulator_m3_MEDQ} & {WRN40_MetaSimulator_m3_MEDQ} \\\\
+& & Simulator Attack (m=5) & {pyramidnet272_MetaSimulator_m5_ASR}\% & {gdas_MetaSimulator_m5_ASR}\% & {WRN28_MetaSimulator_m5_ASR}\% & {WRN40_MetaSimulator_m5_ASR}\% & {pyramidnet272_MetaSimulator_m5_AVGQ} & {gdas_MetaSimulator_m5_AVGQ} & {WRN28_MetaSimulator_m5_AVGQ} & {WRN40_MetaSimulator_m5_AVGQ} & {pyramidnet272_MetaSimulator_m5_MEDQ} & {gdas_MetaSimulator_m5_MEDQ} & {WRN28_MetaSimulator_m5_MEDQ} & {WRN40_MetaSimulator_m5_MEDQ} \\\\
                 """.format(
             pyramidnet272_NES_ASR=result["pyramidnet272"]["NES"]["success_rate"],
             gdas_NES_ASR=result["gdas"]["NES"]["success_rate"],
@@ -538,8 +358,8 @@ def draw_tables_for_CIFAR(targeted, archs_result):
 
 
 if __name__ == "__main__":
-    dataset = "CIFAR-100"
-    norm = "linf"
+    dataset = "TinyImageNet"
+    norm = "l2"
     targeted = True
     limited_queries_big = 10000
     if "CIFAR" in dataset:
@@ -547,12 +367,11 @@ if __name__ == "__main__":
     else:
         archs = ["densenet121", "resnext32_4", "resnext64_4"]
     result_archs_big_queries = {}
-    result_archs_small_queries = {}
     for arch in archs:
         result = fetch_all_json_content_given_contraint(dataset, norm, targeted, arch, limited_queries_big)
         result_archs_big_queries[arch] = result
     if "CIFAR" in dataset:
         draw_tables_for_CIFAR(targeted, result_archs_big_queries)
     elif "TinyImageNet" in dataset:
-        draw_tables_for_TinyImageNet(norm, result_archs_big_queries)
+        draw_tables_for_TinyImageNet(result_archs_big_queries)
     print("THIS IS {} {} {}".format(dataset, norm, "untargeted" if not targeted else "targeted"))

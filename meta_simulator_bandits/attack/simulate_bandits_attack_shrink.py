@@ -316,11 +316,11 @@ class MetaSimulatorBanditsAttack(object):
                 log.info('       not_done: {:.4f}'.format(len(np.where(not_done.detach().cpu().numpy().astype(np.int32) == 1)[0]) / float(args.batch_size)))
                 log.info('      fd_scalar: {:.9f}'.format((l1 - l2).mean().item()))
                 if success.sum().item() > 0:
-                    log.info('     mean_query: {:.4f}'.format(success_query[success.byte()].mean().item()))
-                    log.info('   median_query: {:.4f}'.format(success_query[success.byte()].median().item()))
+                    log.info('     mean_query: {:.4f}'.format(success_query[success.bool()].mean().item()))
+                    log.info('   median_query: {:.4f}'.format(success_query[success.bool()].median().item()))
                 if not_done.sum().item() > 0:
-                    log.info('  not_done_loss: {:.4f}'.format(not_done_loss[not_done.byte()].mean().item()))
-                    log.info('  not_done_prob: {:.4f}'.format(not_done_prob[not_done.byte()].mean().item()))
+                    log.info('  not_done_loss: {:.4f}'.format(not_done_loss[not_done.bool()].mean().item()))
+                    log.info('  not_done_prob: {:.4f}'.format(not_done_prob[not_done.bool()].mean().item()))
 
                 not_done_np = not_done.detach().cpu().numpy().astype(np.int32)
                 done_img_idx_list = np.where(not_done_np == 0)[0].tolist()
@@ -365,15 +365,15 @@ class MetaSimulatorBanditsAttack(object):
 
         log.info('Saving results to {}'.format(result_dump_path))
         meta_info_dict = {"avg_correct": self.correct_all.mean().item(),
-                          "avg_not_done": self.not_done_all[self.correct_all.byte()].mean().item(),
-                          "mean_query": self.success_query_all[self.success_all.byte()].mean().item(),
-                          "median_query": self.success_query_all[self.success_all.byte()].median().item(),
-                          "max_query": self.success_query_all[self.success_all.byte()].max().item(),
+                          "avg_not_done": self.not_done_all[self.correct_all.bool()].mean().item(),
+                          "mean_query": self.success_query_all[self.success_all.bool()].mean().item(),
+                          "median_query": self.success_query_all[self.success_all.bool()].median().item(),
+                          "max_query": self.success_query_all[self.success_all.bool()].max().item(),
                           "correct_all": self.correct_all.detach().cpu().numpy().astype(np.int32).tolist(),
                           "not_done_all": self.not_done_all.detach().cpu().numpy().astype(np.int32).tolist(),
                           "query_all": self.query_all.detach().cpu().numpy().astype(np.int32).tolist(),
-                          "not_done_loss": self.not_done_loss_all[self.not_done_all.byte()].mean().item(),
-                          "not_done_prob": self.not_done_prob_all[self.not_done_all.byte()].mean().item(),
+                          "not_done_loss": self.not_done_loss_all[self.not_done_all.bool()].mean().item(),
+                          "not_done_prob": self.not_done_prob_all[self.not_done_all.bool()].mean().item(),
                           "args": vars(args)}
         with open(result_dump_path, "w") as result_file_obj:
             json.dump(meta_info_dict, result_file_obj, sort_keys=True)
@@ -389,6 +389,9 @@ class MetaSimulatorBanditsAttack(object):
 
 def get_exp_dir_name(dataset, loss, norm, targeted, target_type, distillation_loss, args):
     target_str = "untargeted" if not targeted else "targeted_{}".format(target_type)
+    if args.ablation_study:
+        dirname = 'AblationStudy_{}@{}-cw_loss-{}-{}-mse'.format(args.study_subject, dataset,norm, target_str)
+        return dirname
     if args.simulator == "vanilla_ensemble":
         if args.attack_defense:
             dirname = 'vanilla_simulator_attack_on_defensive_model-{}-{}_loss-{}-{}-{}'.format(dataset,
@@ -463,7 +466,8 @@ if __name__ == "__main__":
     parser.add_argument('--attack_defense', action="store_true")
     parser.add_argument('--defense_model', type=str, default=None)
     parser.add_argument('--simulator', type=str, default="meta_simulator", choices=["meta_simulator", "vanilla_ensemble"])
-
+    parser.add_argument('--ablation_study',action='store_true')
+    parser.add_argument('--study_subject', type=str)
     args = parser.parse_args()
     os.environ["CUDA_DEVICE_ORDER"] = "PCI_BUS_ID"
     os.environ['CUDA_VISIBLE_DEVICES'] = str(args.gpu)
@@ -530,8 +534,14 @@ if __name__ == "__main__":
         assert args.arch is not None
         archs = [args.arch]
     args.arch = ", ".join(archs)
+    if args.ablation_study:
+        if args.study_subject == 'warm_up':
+            key = args.warm_up_steps
+        elif args.study_subject == 'meta_seq_len':
+            key = args.meta_seq_len
+        log_file_path = osp.join(args.exp_dir, 'run_{}.log'.format(key))
 
-    if args.test_archs:
+    elif args.test_archs:
         if args.attack_defense:
             log_file_path = osp.join(args.exp_dir, 'run_defense_{}.log'.format(args.defense_model))
         else:
@@ -553,12 +563,10 @@ if __name__ == "__main__":
                                                       args.data_loss == "xent", without_resnet=args.attack_defense)
     attacker = MetaSimulatorBanditsAttack(args, meta_finetuner)
     for arch in archs:
-        # bandit_result_path = bandit_expr_dir_path + "/{}_result.json".format(arch)
-        # if os.path.exists(bandit_result_path):
-        #     with open(bandit_result_path, "r") as file_obj:
-        #         json_data = json.load(file_obj)
-        #         tot_skip_indexes = np.array(json_data["not_done_all"]).astype(np.int32)  # 出现1了表示以前就fail，跳过去
-        if args.attack_defense:
+        if args.ablation_study:
+            save_result_path = args.exp_dir + "/{}_{}_result.json".format(arch, key)
+            tmp_result_path = args.exp_dir + "/tmp_{}_{}_result.json".format(arch, key)
+        elif args.attack_defense:
             save_result_path = args.exp_dir + "/{}_{}_meta_interval_{}_result.json".format(arch, args.defense_model, args.meta_predict_steps)
             tmp_result_path = args.exp_dir + "/tmp_{}_{}_meta_interval_{}_result.json".format(arch, args.defense_model, args.meta_predict_steps)
         else:

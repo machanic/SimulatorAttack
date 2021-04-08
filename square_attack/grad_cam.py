@@ -189,7 +189,7 @@ class GradCAM(object):
         gradcam = GradCAM(model_dict)
         # get an image and normalize with mean=(0.485, 0.456, 0.406), std=(0.229, 0.224, 0.225)
         img = load_img()
-        normed_img = normalizer(img)
+        normed_img = normalize(img)
         # get a GradCAM saliency map on the class index 10.
         mask, logit = gradcam(normed_img, class_idx=10)
         # make heatmap from mask and synthesize saliency map using heatmap and img
@@ -317,7 +317,7 @@ class GradCAMpp(GradCAM):
         gradcampp = GradCAMpp(model_dict)
         # get an image and normalize with mean=(0.485, 0.456, 0.406), std=(0.229, 0.224, 0.225)
         img = load_img()
-        normed_img = normalizer(img)
+        normed_img = normalize(img)
         # get a GradCAM saliency map on the class index 10.
         mask, logit = gradcampp(normed_img, class_idx=10)
         # make heatmap from mask and synthesize saliency map using heatmap and img

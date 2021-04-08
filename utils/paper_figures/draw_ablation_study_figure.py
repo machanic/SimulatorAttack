@@ -8,9 +8,12 @@ import numpy as np
 import json
 import seaborn as sns
 import re
-from matplotlib import rcParams
+from matplotlib import rcParams,rc
 rcParams['xtick.direction'] = 'out'
 rcParams['ytick.direction'] = 'out'
+rcParams['pdf.fonttype'] = 42
+rcParams['ps.fonttype'] = 42
+rc('pdf', fonttype=42)
 
 
 def get_all_json_data(file_dir_path, ablation_key):
@@ -63,11 +66,11 @@ def draw_meta_predict_interval_curve_figure(ablation_key, json_key, dump_file_pa
         plt.gcf().subplots_adjust(bottom=0.15)
         xtick = [0,3,5,7,10,20, 30, 40, 50, 60, 70, 80, 90]
         # xtick = [0, 5000, 10000]
-        plt.xticks(xtick, fontsize=15)
-        plt.yticks([0, 5, 10, 15, 20, 25, 30, 35, 40, 45, 50, 55, 60, 65, 70, 75, 80, 85, 90, 95, 100], fontsize=15)
-        plt.xlabel(xlabel, fontsize=18)
-        plt.ylabel(ylabel, fontsize=18)
-        plt.legend(loc='lower right', prop={'size': 18}, fancybox=True, framealpha=0.5)
+        plt.xticks(xtick, fontsize=22)
+        plt.yticks([0, 10,  20,  30,  40,  50, 60,  70, 80, 90, 100], fontsize=22)
+        plt.xlabel(xlabel, fontsize=25)
+        plt.ylabel(ylabel, fontsize=25)
+        plt.legend(loc='lower right', prop={'size': 22}, fancybox=True, framealpha=0.5)
         plt.savefig(dump_file_path, dpi=200)
 
 
@@ -99,11 +102,12 @@ def draw_other_curve_figure(ablation_key, json_key, dump_file_path):
         plt.ylim(0, 660)
         plt.gcf().subplots_adjust(bottom=0.15)
         # xtick = [0, 5000, 10000]
-        plt.xticks([0] + x.tolist(), fontsize=15)
-        plt.yticks(np.arange(0,661,20).tolist(), fontsize=15)
-        plt.xlabel(label, fontsize=18)
-        plt.ylabel("Avg. Query", fontsize=18)
-        plt.legend(loc='lower right', prop={'size': 18}, fancybox=True, framealpha=0.5)
+        plt.xticks([0] + x.tolist()[1::2], fontsize=22)
+        # plt.xticks(np.arange(0,101,10), fontsize=22)
+        plt.yticks(np.arange(0,671,50).tolist(), fontsize=22)
+        plt.xlabel(label, fontsize=25)
+        plt.ylabel("Avg. Query", fontsize=25)
+        plt.legend(loc='center right', prop={'size': 22}, fancybox=True, framealpha=0.5)
         # if ablation_key == "meta_seq_len":
         #     plt.legend(prop={'size': 15},loc='upper right')
         # elif ablation_key == "warm_up":
@@ -142,7 +146,7 @@ def draw_meta_or_not_curve_figure(dump_file_path):
                 simulator_name = "Simulator$_{benign}$"
             else:
                 simulator_name = "Rnd_init Simulator"
-            line, = plt.plot(x, y, label=r"$\ell_2$ norm untargeted attack result of {}".format(simulator_name),
+            line, = plt.plot(x, y, label=r"$\ell_2$ norm attack of {}".format(simulator_name),
                              color=colors[mode], linestyle="-")
         first_finetune = True
         for x_, is_finetune in enumerate(is_finetune_list):
@@ -157,11 +161,11 @@ def draw_meta_or_not_curve_figure(dump_file_path):
         plt.ylim(0, 20)
         plt.gcf().subplots_adjust(bottom=0.15)
         # xtick = [0, 5000, 10000]
-        plt.xticks([1,10] + np.arange(25,xtick_max+1,25).tolist(), fontsize=15)
-        plt.yticks([0, 5, 10,15, 20], fontsize=15)
-        plt.xlabel("attack iterations", fontsize=18)
-        plt.ylabel("MSE between outputs of simulator and target model", fontsize=18)
-        plt.legend(loc='upper right', prop={'size': 18}, fancybox=True, framealpha=0.5)
+        plt.xticks([1,10] + np.arange(25,xtick_max+1,25).tolist(), fontsize=22)
+        plt.yticks([0, 5, 10,15, 20], fontsize=22)
+        plt.xlabel("attack iterations", fontsize=25)
+        plt.ylabel("MSE of the outputs", fontsize=25)
+        plt.legend(loc='upper right', prop={'size': 22}, fancybox=True, framealpha=0.5)
         # legend = plt.legend(loc='upper right', prop={'size': 15}, shadow=True, facecolor="white")
         # legend.get_frame().set_facecolor('#E6E6FA')
         plt.savefig(dump_file_path, dpi=200)
@@ -179,26 +183,23 @@ if __name__ == "__main__":
     args = parse_args()
     x_label = "simulator-predict interval"
     y_label = "Attack Success Rate (%)"
-    dump_folder = "/home1/machen/meta_perturbations_black_box_attack/figures/ablation_study/"
+    dump_folder = "/home1/machen/meta_perturbations_black_box_attack/figures/ablation_study_big_text/"
     os.makedirs(dump_folder, exist_ok=True)
     file_path = dump_folder + "simulator_predict_interval.pdf"
     draw_meta_predict_interval_curve_figure("meta_predict_steps", "success_rate", file_path, x_label, y_label)
     print("written to {}".format(file_path))
-    #
-    #
-    # dump_folder = "/home1/machen/meta_perturbations_black_box_attack/figures/ablation_study/"
-    # os.makedirs(dump_folder, exist_ok=True)
-    # file_path = dump_folder + "warm_up.pdf"
-    # draw_other_curve_figure("warm_up", "mean_query", file_path)
-    # print("written to {}".format(file_path))
-    # #
-    # dump_folder = "/home1/machen/meta_perturbations_black_box_attack/figures/ablation_study/"
-    # os.makedirs(dump_folder, exist_ok=True)
-    # file_path = dump_folder + "deque_length.pdf"
-    # draw_other_curve_figure("meta_seq_len", "mean_query", file_path)
-    # print("written to {}".format(file_path))
 
-    dump_folder = "/home1/machen/meta_perturbations_black_box_attack/figures/ablation_study/"
+
+    os.makedirs(dump_folder, exist_ok=True)
+    file_path = dump_folder + "warm_up.pdf"
+    draw_other_curve_figure("warm_up", "mean_query", file_path)
+    print("written to {}".format(file_path))
+    #
+    os.makedirs(dump_folder, exist_ok=True)
+    file_path = dump_folder + "deque_length.pdf"
+    draw_other_curve_figure("meta_seq_len", "mean_query", file_path)
+    print("written to {}".format(file_path))
+
     os.makedirs(dump_folder, exist_ok=True)
     file_path = dump_folder + "meta_or_not.pdf"
     draw_meta_or_not_curve_figure(file_path)

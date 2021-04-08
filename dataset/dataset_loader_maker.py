@@ -15,7 +15,7 @@ from torchvision.datasets.utils import download_url, check_integrity
 
 from config import IMAGE_DATA_ROOT, IMAGE_SIZE
 from dataset.tiny_imagenet import TinyImageNet
-from dataset.npz_dataset import NpzDataset
+from dataset.npz_dataset import NpzDataset, NpzImageIdDataset
 
 
 def pil_loader(path):
@@ -522,3 +522,8 @@ class DataLoaderMaker(object):
         loader = torch.utils.data.DataLoader(dataset, batch_size=batch_size, num_workers=0, shuffle=False)
         return loader
 
+    @staticmethod
+    def get_imageid_test_attacked_data(datasetname, batch_size):
+        dataset = NpzImageIdDataset(datasetname)
+        loader = torch.utils.data.DataLoader(dataset, batch_size=batch_size, num_workers=0, shuffle=False)
+        return loader

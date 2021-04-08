@@ -7,7 +7,7 @@ import sys
 
 import random
 
-sys.path.append("/home1/machen/meta_perturbations_black_box_attack")
+sys.path.append(os.getcwd())
 
 import argparse
 from types import SimpleNamespace

@@ -19,7 +19,7 @@ class MemoryEfficientMetaModelFinetune(object):
         if mode == "meta":
             target_str = "targeted_attack_random" if targeted else "untargeted_attack"
             # 2Q_DISTILLATION@CIFAR-100@TRAIN_I_TEST_II@model_resnet34@loss_pair_mse@dataloss_cw_l2_untargeted_attack@epoch_4@meta_batch_size_30@num_support_50@num_updates_12@lr_0.001@inner_lr_0.01.pth.tar
-            self.meta_model_path = "{root}/train_pytorch_model/meta_simulator/{meta_train_type}@{dataset}@{split}@model_{meta_arch}@loss_{loss}@dataloss_{data_loss}_{norm}_{target_str}*".format(
+            self.meta_model_path = "{root}/train_pytorch_model/meta_simulator/{meta_train_type}@{dataset}@{split}@model_{meta_arch}@loss_{loss}@dataloss_{data_loss}_{norm}_{target_str}*inner_lr_0.01.pth.tar".format(
                 root=PY_ROOT, meta_train_type=meta_train_type.upper(), dataset=dataset, split=SPLIT_DATA_PROTOCOL.TRAIN_I_TEST_II,
                 meta_arch=meta_arch, loss=distill_loss, data_loss=data_loss, norm=norm, target_str=target_str)
             log.info("start using {}".format(self.meta_model_path))

@@ -53,7 +53,7 @@ class Tracker:
 class Attack:
     def __init__(self, image, epsilon, true_labels, target_labels, model, image_height, image_width, in_channels):
         self.model = model
-        self.dims    = image_height * image_width * in_channels                   #problem dimensions
+        self.dims  = image_height * image_width * in_channels                   #problem dimensions
         self.channels = in_channels
         self.image_height = image_height
         self.image_width = image_width

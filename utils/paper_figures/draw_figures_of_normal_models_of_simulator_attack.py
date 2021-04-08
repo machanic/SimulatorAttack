@@ -7,11 +7,19 @@ from collections import OrderedDict
 import matplotlib.pyplot as plt
 import numpy as np
 import json
-from scipy.interpolate import make_interp_spline
-import seaborn as sns
 
-from config import MODELS_TEST_STANDARD
 from utils.statistics_toolkit import success_rate_avg_query, success_rate_and_query_coorelation, query_to_bins
+# from matplotlib import rcParams, rc
+# rcParams['xtick.direction'] = 'out'
+# rcParams['ytick.direction'] = 'out'
+# rcParams['pdf.fonttype'] = 42
+# rcParams['ps.fonttype'] = 42
+# rc('pdf', fonttype=42)
+
+plt.switch_backend('agg')
+plt.rcParams['pdf.use14corefonts'] = True
+font = {'family': 'Helvetica'}
+plt.rc('font', **font)
 
 
 def read_json_data(json_path, data_key):
@@ -217,11 +225,11 @@ def draw_query_success_rate_figure(dataset, norm, targeted, arch, fig_type, dump
     plt.gcf().subplots_adjust(bottom=0.15)
 
     # xtick = [0, 5000, 10000]
-    plt.xticks(xtick, fontsize=15)
-    plt.yticks([0, 10, 20, 30, 40, 50, 60, 70, 80, 90,100], fontsize=15)
-    plt.xlabel(xlabel, fontsize=18)
-    plt.ylabel(ylabel, fontsize=18)
-    plt.legend(loc='lower right', prop={'size': 18})
+    plt.xticks(xtick, ["0"] + ["{}K".format(int(xtick_each//1000)) for xtick_each in xtick[1:]], fontsize=22)
+    plt.yticks([0, 10, 20, 30, 40, 50, 60, 70, 80, 90,100], fontsize=22)
+    plt.xlabel(xlabel, fontsize=25)
+    plt.ylabel(ylabel, fontsize=25)
+    plt.legend(loc='lower right', prop={'size': 22})
     plt.savefig(dump_file_path, dpi=200)
     plt.close()
     print("save to {}".format(dump_file_path))
@@ -238,8 +246,8 @@ def draw_success_rate_avg_query_fig(dataset, norm, targeted, arch, fig_type, dum
     plt.figure(figsize=(10, 8))
     colors = ['b', 'g',  'c', 'm', 'y', 'orange', "pink","brown","slategrey","cornflowerblue","greenyellow"]
     # markers = [".", ",", "o", "^", "s", "p", "x"]
-    # max_x = 0
-    # min_x = 0
+    max_x = 0
+    min_x = 0
     max_y = 0
     our_method = 'Simulator Attack'
     for idx, ((dataset, norm, targeted, method), (x, y)) in enumerate(data_info.items()):
@@ -249,8 +257,8 @@ def draw_success_rate_avg_query_fig(dataset, norm, targeted, arch, fig_type, dum
         line, = plt.plot(x, y, label=method, color=color, linestyle="-", marker='.')
         if np.max(y).item() > max_y:
             max_y = np.max(y).item()
-        # if np.min(x).item() < min_x:
-        #     min_x = np.min(x).item()
+        if np.min(x).item() < min_x:
+            min_x = np.min(x).item()
     plt.xlim(0, 100)
     # if norm == "l2" or (dataset == "CIFAR-100" and norm == 'linf'):
     #     plt.ylim(0, 1000)
@@ -268,7 +276,7 @@ def draw_success_rate_avg_query_fig(dataset, norm, targeted, arch, fig_type, dum
     #         plt.ylim(0, 3000)
 
     plt.gcf().subplots_adjust(bottom=0.15)
-    xtick = np.arange(0,101,5)
+    xtick = np.arange(0,101,10)
     # if norm == "l2" or (dataset == "CIFAR-100" and norm == 'linf'):
     #     ytick = [0,200,400,600,800,1000]
     # else:
@@ -276,7 +284,7 @@ def draw_success_rate_avg_query_fig(dataset, norm, targeted, arch, fig_type, dum
     # if dataset == "TinyImageNet":
     #     ytick = np.arange(0,4001,200).tolist()
     space_len = int(max_y / 20.0)
-    ytick = np.arange(0, max_y, space_len).tolist()
+    ytick = np.arange(0, max_y+20, 200).tolist()
 
     # if dataset == "TinyImageNet":
     #     ytick = np.arange(0, 2751, 250).tolist() #,6500,7000,7500,8000,8500,9000,9500,10000]
@@ -308,11 +316,11 @@ def draw_success_rate_avg_query_fig(dataset, norm, targeted, arch, fig_type, dum
     # else:
     #     ytick = np.arange(0, 4001, 200).tolist()
     # xtick = [0, 5000, 10000]
-    plt.xticks(xtick, fontsize=15)
-    plt.yticks(ytick, fontsize=15)
-    plt.xlabel(xlabel, fontsize=18)
-    plt.ylabel(ylabel, fontsize=18)
-    plt.legend(loc='upper left', prop={'size': 18})
+    plt.xticks(xtick, fontsize=22)
+    plt.yticks(ytick, fontsize=22)
+    plt.xlabel(xlabel, fontsize=25)
+    plt.ylabel(ylabel, fontsize=25)
+    plt.legend(loc='upper left', prop={'size': 23})
     plt.savefig(dump_file_path, dpi=200)
     plt.close('all')
     print("save to {}".format(dump_file_path))
@@ -353,10 +361,10 @@ def draw_histogram_fig(dataset, norm, targeted, arch, dump_folder):
     #     bins = 10
     plt.hist(datasets, bins=bins, range=(0,max_value),histtype='bar', color=colors,label=labels)
     plt.xticks(np.arange(0,max_value+1,max_value//bins), fontsize=10)
-    plt.xlabel(x_label, fontsize=10)
-    plt.ylabel(y_label, fontsize=10)
+    plt.xlabel(x_label, fontsize=15)
+    plt.ylabel(y_label, fontsize=15)
     plt.xlim(0,max_value)
-    plt.legend(loc='upper right', prop={'size': 10})
+    plt.legend(loc='upper right', prop={'size': 15})
     plt.grid(True, linewidth=0.5) #,axis="y")
     dump_file_path = dump_folder + "/{dataset}_{norm}_{targeted}_attack_on_{arch}.pdf".format(dataset=dataset,
                                                                                               norm=norm,
@@ -380,7 +388,7 @@ def parse_args():
 
 if __name__ == "__main__":
     args = parse_args()
-    dump_folder = "/home1/machen/meta_perturbations_black_box_attack/figures/{}/".format(args.fig_type)
+    dump_folder = "/home1/machen/meta_perturbations_black_box_attack/figures_without_font_embed/{}/".format(args.fig_type)
     os.makedirs(dump_folder, exist_ok=True)
 
     if "CIFAR" in args.dataset:
@@ -389,9 +397,7 @@ if __name__ == "__main__":
         archs = ["densenet121", "resnext32_4", "resnext64_4"]
 
     for model in archs:
-        file_path  = dump_folder + "{dataset}_{model}_{norm}_{target_str}_attack_{fig_type}.pdf".format(dataset=args.dataset,
-                      model=model, norm=args.norm, target_str="untargeted" if not args.targeted else "targeted",
-                                                                                fig_type=args.fig_type)
+
         if args.fig_type == "query_threshold_success_rate_dict":
             x_label = "Maximum Query Number Threshold"
             y_label = "Attack Success Rate (%)"
@@ -401,18 +407,23 @@ if __name__ == "__main__":
         else:
             x_label = "Attack Success Rate (%)"
             y_label = "Query Numbers"
-        if args.fig_type == "query_threshold_success_rate_dict":
-            draw_query_success_rate_figure(args.dataset, args.norm, args.targeted, model, args.fig_type, file_path, x_label, y_label)
-        elif args.fig_type == "success_rate_to_avg_query":
-            draw_success_rate_avg_query_fig(args.dataset, args.norm, args.targeted, model, args.fig_type, file_path)
-        elif args.fig_type == "query_hist":
-            target_str = "/untargeted" if not args.targeted else "targeted"
-            os.makedirs(dump_folder, exist_ok=True)
-            for dataset in ["CIFAR-10","CIFAR-100", "TinyImageNet"]:
-                if "CIFAR" in dataset:
-                    archs = ['pyramidnet272', "gdas", "WRN-28-10-drop", "WRN-40-10-drop"]
-                else:
-                    archs = ["densenet121", "resnext32_4", "resnext64_4"]
-                for norm in ["l2","linf"]:
-                    for model in archs:
+
+        target_str = "/untargeted" if not args.targeted else "targeted"
+        os.makedirs(dump_folder, exist_ok=True)
+        for dataset in ['CIFAR-10','CIFAR-100',"TinyImageNet"]:
+            if "CIFAR" in dataset:
+                archs = ['pyramidnet272', "gdas", "WRN-28-10-drop", "WRN-40-10-drop"]
+            else:
+                archs = ["densenet121", "resnext32_4", "resnext64_4"]
+            for norm in ["linf","l2"]:
+                for model in archs:
+                    file_path = dump_folder + "{dataset}_{model}_{norm}_{target_str}_attack_{fig_type}.pdf".format(
+                        dataset=dataset, model=model, norm=norm, target_str="untargeted" if not args.targeted else "targeted",
+                        fig_type=args.fig_type)
+                    if args.fig_type == 'query_hist':
                         draw_histogram_fig(dataset, norm, args.targeted, model, dump_folder + target_str)
+                    elif args.fig_type == 'query_threshold_success_rate_dict':
+                        draw_query_success_rate_figure(dataset, norm, args.targeted, model,args.fig_type, file_path, x_label,y_label)
+                    elif args.fig_type == "success_rate_to_avg_query":
+                        draw_success_rate_avg_query_fig(dataset, norm, args.targeted, model,
+                                                        args.fig_type, file_path)

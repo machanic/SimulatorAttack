@@ -23,8 +23,6 @@ class NES(object):
         self.dataset_name = dataset_name
         self.num_classes = CLASS_NUM[self.dataset_name]
         self.dataset_loader = DataLoaderMaker.get_test_attacked_data(dataset_name, 1)
-        log.info("label index dict data build begin")
-        log.info("label index dict data build over!")
         self.total_images = len(self.dataset_loader.dataset)
         self.targeted = targeted
         self.query_all = torch.zeros(self.total_images)
@@ -270,7 +268,9 @@ class NES(object):
         while query[0].item() < args.max_queries:
             # CHECK IF WE SHOULD STOP
             if not not_done.byte().any() and epsilon <= goal_epsilon:  # all success
-                log.info("Attack success on {}-th image by using {} queries".format(batch_index, query[0].item()))
+                success_indicator_str = "success" if query[0].item() > 0 else "on a incorrectly classified image"
+                log.info("Attack {} on {}-th image by using {} queries".format(success_indicator_str,
+                                                                               batch_index, query[0].item()))
                 break
 
             prev_g = g.clone()

@@ -12,6 +12,11 @@ import seaborn as sns
 
 from config import MODELS_TEST_STANDARD
 from utils.statistics_toolkit import success_rate_avg_query, success_rate_and_query_coorelation
+from matplotlib import rcParams,rc
+plt.switch_backend('agg')
+plt.rcParams['pdf.use14corefonts'] = True
+font = {'family': 'Helvetica'}
+plt.rc('font', **font)
 
 
 def read_json_data(json_path, data_key):
@@ -45,8 +50,7 @@ def read_all_data(dataset_path_dict, arch, data_key):
     for (dataset, norm, targeted, method), dir_path in dataset_path_dict.items():
         for file_path in os.listdir(dir_path):
             resnet_50_name = "resnet-50" if dataset != "TinyImageNet" else "resnet50"
-            if arch in file_path and file_path.endswith(".json") and (not file_path.startswith("tmp")) and resnet_50_name in file_path \
-                    and "adv_train" not in file_path:  # FIXME
+            if arch in file_path and file_path.endswith(".json") and (not file_path.startswith("tmp")) and resnet_50_name in file_path:  # FIXME
                 file_path = dir_path + "/" + file_path
                 x, y = read_json_data(file_path, data_key)
                 data_info[(dataset, norm, targeted, method)] = (x,y)
@@ -58,7 +62,10 @@ def get_success_queries(dataset_path_dict, arch):
     for (dataset, norm, targeted, method), dir_path in dataset_path_dict.items():
         for file_path in os.listdir(dir_path):
             if arch in file_path and file_path.endswith(".json") and not file_path.startswith("tmp"):
+                if "pcl_loss_adv_train" in file_path:
+                    continue
                 file_path = dir_path + "/" + file_path
+                print("Read {}".format(file_path))
                 with open(file_path, "r") as file_obj:
                     json_data = json.load(file_obj)
                     query_all = np.array(json_data["query_all"],dtype=np.int32)
@@ -120,7 +127,7 @@ def draw_query_success_rate_figure(dataset, norm, targeted, arch, fig_type, dump
     methods = list(method_name_to_paper.keys())
     if targeted:
         methods = list(filter(lambda method_name:"RGF" not in method_name, methods))
-    dataset_path_dict= get_all_exists_folder(dataset, methods, norm, targeted)
+    dataset_path_dict = get_all_exists_folder(dataset, methods, norm, targeted)
     data_info = read_all_data(dataset_path_dict, arch, fig_type)  # dataset_path_dict {("CIFAR-10","l2","untargeted", "NES"): ([x],[y])， }
     plt.style.use('seaborn-whitegrid')
     plt.figure(figsize=(10, 8))
@@ -159,12 +166,14 @@ def draw_query_success_rate_figure(dataset, norm, targeted, arch, fig_type, dump
     plt.gcf().subplots_adjust(bottom=0.15)
 
     # xtick = [0, 5000, 10000]
-    plt.xticks(xtick, fontsize=15)
-    plt.yticks([0, 10, 20, 30, 40, 50, 60, 70, 80, 90,100], fontsize=15)
-    plt.xlabel(xlabel, fontsize=18)
-    plt.ylabel(ylabel, fontsize=18)
-    plt.legend(loc='lower right', prop={'size': 18})
+    plt.xticks(xtick, ["0"] + ["{}K".format(int(xtick_each//1000)) for xtick_each in xtick[1:]], fontsize=22)
+    plt.yticks([0, 10, 20, 30, 40, 50, 60, 70, 80, 90, 100], fontsize=22)
+    plt.xlabel(xlabel, fontsize=25)
+    plt.ylabel(ylabel, fontsize=25)
+    plt.legend(loc='upper right', prop={'size': 22})
     plt.savefig(dump_file_path, dpi=200)
+    plt.close()
+    print(dump_file_path)
 
 def draw_success_rate_avg_query_fig(dataset, norm, targeted, arch, fig_type, dump_file_path):
     xlabel = "Attack Success Rate (%)"
@@ -206,7 +215,7 @@ def draw_success_rate_avg_query_fig(dataset, norm, targeted, arch, fig_type, dum
         plt.ylim(0, 3000)
 
     plt.gcf().subplots_adjust(bottom=0.15)
-    xtick = np.arange(0,101,5)
+    xtick = np.arange(0,101,10)
     # if norm == "l2" or (dataset == "CIFAR-100" and norm == 'linf'):
     #     ytick = [0,200,400,600,800,1000]
     # else:
@@ -228,11 +237,11 @@ def draw_success_rate_avg_query_fig(dataset, norm, targeted, arch, fig_type, dum
     if dataset == "TinyImageNet":
         ytick = np.arange(0, 3001, 200).tolist()
     # xtick = [0, 5000, 10000]
-    plt.xticks(xtick, fontsize=15)
-    plt.yticks(ytick, fontsize=15)
-    plt.xlabel(xlabel, fontsize=18)
-    plt.ylabel(ylabel, fontsize=18)
-    plt.legend(loc='upper left', prop={'size': 18})
+    plt.xticks(xtick, fontsize=22)
+    plt.yticks(ytick, fontsize=22)
+    plt.xlabel(xlabel, fontsize=25)
+    plt.ylabel(ylabel, fontsize=25)
+    plt.legend(loc='upper left', prop={'size': 22})
     plt.savefig(dump_file_path, dpi=200)
 
 def draw_histogram_fig(dataset, norm, targeted, arch, dump_folder):
@@ -267,10 +276,10 @@ def draw_histogram_fig(dataset, norm, targeted, arch, dump_folder):
     #     bins = 10
     plt.hist(datasets, bins=bins, range=(0,max_value),histtype='bar', color=colors,label=labels)
     plt.xticks(np.arange(0,max_value+1,max_value//bins), fontsize=10)
-    plt.xlabel(x_label, fontsize=10)
-    plt.ylabel(y_label, fontsize=10)
+    plt.xlabel(x_label, fontsize=15)
+    plt.ylabel(y_label, fontsize=15)
     plt.xlim(0,max_value)
-    plt.legend(loc='upper right', prop={'size': 10})
+    plt.legend(loc='upper right', prop={'size': 15})
     plt.grid(True, linewidth=0.5) #,axis="y")
     plt.savefig(dump_folder + "/{dataset}_{norm}_{targeted}_attack_on_{arch}.pdf".format(dataset=dataset, norm=norm,
                                                                                     targeted="untargeted" if not targeted else "targeted",
@@ -295,11 +304,9 @@ def parse_args():
 
 if __name__ == "__main__":
     args = parse_args()
-    dump_folder = "/home1/machen/meta_perturbations_black_box_attack/figures/{}_defensive_model/".format(args.fig_type)
+    dump_folder = "/home1/machen/meta_perturbations_black_box_attack/figures_without_font_embed/{}_defensive_model/".format(args.fig_type)
     os.makedirs(dump_folder, exist_ok=True)
-    file_path  = dump_folder + "{dataset}_{model}_{norm}_{target_str}_attack_{fig_type}.pdf".format(dataset=args.dataset,
-                  model=args.model, norm=args.norm, target_str="untargeted" if not args.targeted else "targeted",
-                                                                            fig_type=args.fig_type)
+
     if args.fig_type == "query_threshold_success_rate_dict":
         x_label = "Maximum Query Number Threshold"
         y_label = "Attack Success Rate (%)"
@@ -309,16 +316,23 @@ if __name__ == "__main__":
     else:
         x_label = "Attack Success Rate (%)"
         y_label = "Query Numbers"
-    if args.fig_type == "query_threshold_success_rate_dict":
-        draw_query_success_rate_figure(args.dataset, args.norm, args.targeted, args.model, args.fig_type, file_path, x_label, y_label)
-    elif args.fig_type == "success_rate_to_avg_query":
-        draw_success_rate_avg_query_fig(args.dataset, args.norm, args.targeted, args.model, args.fig_type, file_path)
-    elif args.fig_type == "query_hist":
-        dump_folder += "/untargeted" if not args.targeted else "targeted"
-        os.makedirs(dump_folder, exist_ok=True)
-        for dataset in ["CIFAR-10", "CIFAR-100", "TinyImageNet"]:
-            models = ["com_defend","feature_distillation","pcl_loss"]
-            if dataset == "TinyImageNet":
-                models.append("feature_scatter")
-            for model in models:
+
+    dump_folder += "/untargeted/" if not args.targeted else "targeted"
+    os.makedirs(dump_folder, exist_ok=True)
+    for dataset in ["CIFAR-10", "CIFAR-100", "TinyImageNet"]:
+        models = ["com_defend","feature_distillation","pcl_loss", "adv_train"]
+        if dataset == "TinyImageNet":
+            models.append("feature_scatter")
+        for model in models:
+            file_path = dump_folder + "{dataset}_{model}_{norm}_{target_str}_attack_{fig_type}.pdf".format(
+                dataset=dataset,
+                model=model, norm=args.norm, target_str="untargeted" if not args.targeted else "targeted",
+                fig_type=args.fig_type)
+            if args.fig_type == "query_hist":
                 draw_histogram_fig(dataset, "linf", args.targeted, model, dump_folder)
+            elif args.fig_type == 'query_threshold_success_rate_dict':
+                draw_query_success_rate_figure(dataset, "linf", args.targeted, model, args.fig_type, file_path, x_label,
+                                           y_label)
+            elif args.fig_type == "success_rate_to_avg_query":
+                draw_success_rate_avg_query_fig(dataset, "linf", args.targeted, model,
+                                        args.fig_type, file_path)
