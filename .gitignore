@@ -25,9 +25,7 @@ venv/
 *.iso
 *.rar
 *.tar
-*.zip
-*.txt
-*.mp4
+*.zip*.txt*.mp4
 *.mat
 *.so
 
