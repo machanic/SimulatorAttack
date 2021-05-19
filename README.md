@@ -3,7 +3,7 @@ The official implementation code of the paper CVPR 2021 paper "Simulating Unknow
 
 By **Chen Ma**, Li Chen, and Jun-Hai Yong.
 
-[[Paper]](https://arxiv.org/abs/2009.00960) [[Slides]](https://raw.githubusercontent.com/machanic/SimulatorAttack/master/paper_material/Slide.pdf) [[����Slides]](https://raw.githubusercontent.com/machanic/SimulatorAttack/master/paper_material/ChineseSlide.pdf) [[Poster]](https://raw.githubusercontent.com/machanic/SimulatorAttack/master/paper_material/simulator_attack_poster.pdf)
+[[Paper]](https://arxiv.org/abs/2009.00960) [[Slides]](https://raw.githubusercontent.com/machanic/SimulatorAttack/master/paper_material/Slide.pdf) [[中文Slides]](https://raw.githubusercontent.com/machanic/SimulatorAttack/master/paper_material/ChineseSlide.pdf) [[Poster]](https://raw.githubusercontent.com/machanic/SimulatorAttack/master/paper_material/simulator_attack_poster.pdf)
 
 <p align="center"><img src="paper_material/attack.png"></p>
 
