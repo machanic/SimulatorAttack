@@ -300,18 +300,18 @@ class SwitchNeg(object):
         log.info("done, write stats info to {}".format(result_dump_path))
 
 
-def get_exp_dir_name(dataset, lr, loss, norm, targeted, target_type, surrogate_arch, args):
+def get_exp_dir_name(dataset, lr, loss, norm, targeted, target_type, args):
     target_str = "untargeted" if not targeted else "targeted_{}".format(target_type)
     if args.NO_SWITCH:
         if args.attack_defense:
-            dirname = 'NO_SWITCH_on_defensive_model-{}-{}-loss-{}-{}-using_{}'.format(dataset, loss, norm, target_str, surrogate_arch)
+            dirname = 'NO_SWITCH_on_defensive_model-{}-{}-loss-{}-{}'.format(dataset, loss, norm, target_str)
         else:
-            dirname = 'NO_SWITCH-{}-{}-loss-{}-{}-using_{}'.format(dataset, loss, norm, target_str, surrogate_arch)
+            dirname = 'NO_SWITCH-{}-{}-loss-{}-{}'.format(dataset, loss, norm, target_str)
     else:
         if args.attack_defense:
-            dirname = 'SWITCH_neg_on_defensive_model-{}-{}_lr_{}-loss-{}-{}-using_{}'.format(dataset, loss, lr, norm, target_str, surrogate_arch)
+            dirname = 'SWITCH_neg_on_defensive_model-{}-{}_lr_{}-loss-{}-{}'.format(dataset, loss, lr, norm, target_str)
         else:
-            dirname = 'SWITCH_neg-{}-{}_lr_{}-loss-{}-{}-using_{}'.format(dataset, loss, lr, norm, target_str, surrogate_arch)
+            dirname = 'SWITCH_neg-{}-{}_lr_{}-loss-{}-{}'.format(dataset, loss, lr, norm, target_str)
     return dirname
 
 def print_args(args):
@@ -332,7 +332,7 @@ if __name__ == "__main__":
     parser.add_argument("--gpu",type=int, required=True)
     parser.add_argument('--max-queries', type=int, default=10000)
     parser.add_argument('--image-lr', type=float, help='Learning rate for the image (iterative attack)')
-    parser.add_argument('--norm', type=str, required=True, help='Which lp constraint to run bandits [linf|l2]')
+    parser.add_argument('--norm', type=str, required=True, help='Which lp constraint to run attack [linf|l2]')
     parser.add_argument("--loss", type=str, required=True, choices=["xent", "cw"])
     parser.add_argument('--epsilon', type=float, help='the lp perturbation bound')
     parser.add_argument('--batch-size', type=int, default=100, help='The mini-batch size')
@@ -374,7 +374,7 @@ if __name__ == "__main__":
         if args.dataset == "ImageNet":
             args.max_queries = 50000
     args.exp_dir = osp.join(args.exp_dir, get_exp_dir_name(args.dataset, args.image_lr, args.loss, args.norm,
-                                                           args.targeted, args.target_type, args.surrogate_arch, args))  # 随机产生一个目录用于实验
+                                                           args.targeted, args.target_type, args))  # 随机产生一个目录用于实验
     os.makedirs(args.exp_dir, exist_ok=True)
     if args.test_archs:
         if args.attack_defense:

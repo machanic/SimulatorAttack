@@ -30,9 +30,10 @@ method_name_to_paper = {"bandits_attack":"Bandits",  "P-RGF_biased_attack":"PRGF
                         # "MetaGradAttack":"Meta Attack",
                         # "simulate_bandits_shrink_attack":"MetaSimulator",
                         "NO_SWITCH": "NO_SWITCH",
-                        "NO_SWITCH_rnd": "NO_SWITCH_rnd",
-                        "SWITCH_rnd_save":'SWITCH_other',
-                        "SWITCH_neg_save":'SWITCH_neg',
+                        #"NO_SWITCH_rnd": "NO_SWITCH_rnd",
+                        #"SWITCH_rnd_save":'SWITCH_other',
+                        "SWITCH_neg_save":'SWITCH_naive',
+                        "SWITCH_RGF":'SWITCH_RGF',
                        # "SimBA_DCT_attack":"SimBA",
                         "PPBA_attack":"PPBA", "parsimonious_attack":"Parsimonious","sign_hunter_attack":"SignHunter",
                         "square_attack":"Square"}
@@ -103,7 +104,16 @@ def from_method_to_dir_path(dataset, method, norm, targeted):
                                                                             loss="cw" if not targeted else "xent",
                                                                             norm=norm,
                                                                             target_str="untargeted" if not targeted else "targeted_increment")
-
+    elif method == "SWITCH_RGF":
+        if dataset.startswith("CIFAR"):
+            path = "SWITCH_RGF_on_defensive_model-resnet-110-{dataset}-{loss}-loss-{norm}-{target_str}".format(dataset=dataset,
+                                                                                                               loss="cw" if not targeted else "xent",
+                                                                                                               norm=norm, target_str="untargeted" if not targeted else "targeted_increment")
+        elif dataset == "TinyImageNet":
+            path = "SWITCH_RGF_on_defensive_model-resnet101-{dataset}-{loss}-loss-{norm}-{target_str}".format(
+                dataset=dataset,
+                loss="cw" if not targeted else "xent",
+                norm=norm, target_str="untargeted" if not targeted else "targeted_increment")
     return path
 
 
@@ -180,113 +190,138 @@ def draw_tables_for_TinyImageNet(norm, archs_result):
     med_q = "median_query_over_successful_samples"
     if norm == "linf":
         print("""
-        RGF & {ComDefend_RGF_ASR}\% & {FeatureDistillation_RGF_ASR}\% & {ComDefend_RGF_AVGQ} & {FeatureDistillation_RGF_AVGQ}& {ComDefend_RGF_MEDQ} & {FeatureDistillation_RGF_MEDQ}  \\\\
-        P-RGF & {ComDefend_PRGF_ASR}\% & {FeatureDistillation_PRGF_ASR}\%  & {ComDefend_PRGF_AVGQ} & {FeatureDistillation_PRGF_AVGQ} & {ComDefend_PRGF_MEDQ} & {FeatureDistillation_PRGF_MEDQ}  \\\\
-        Bandits & {ComDefend_Bandits_ASR}\% & {FeatureDistillation_Bandits_ASR}\% & {ComDefend_Bandits_AVGQ} & {FeatureDistillation_Bandits_AVGQ} & {ComDefend_Bandits_MEDQ} & {FeatureDistillation_Bandits_MEDQ}  \\\\
-        PPBA & {ComDefend_PPBA_ASR}\% & {FeatureDistillation_PPBA_ASR}\% & {ComDefend_PPBA_AVGQ} & {FeatureDistillation_PPBA_AVGQ} & {ComDefend_PPBA_MEDQ} & {FeatureDistillation_PPBA_MEDQ}  \\\\
-        Parsimonious & {ComDefend_Parsimonious_ASR}\% & {FeatureDistillation_Parsimonious_ASR}\% & {ComDefend_Parsimonious_AVGQ} & {FeatureDistillation_Parsimonious_AVGQ} & {ComDefend_Parsimonious_MEDQ} & {FeatureDistillation_Parsimonious_MEDQ} \\\\
-        SignHunter & {ComDefend_SignHunter_ASR}\% & {FeatureDistillation_SignHunter_ASR}\% & {ComDefend_SignHunter_AVGQ} & {FeatureDistillation_SignHunter_AVGQ} & {ComDefend_SignHunter_MEDQ} & {FeatureDistillation_SignHunter_MEDQ}  \\\\
-        Square Attack & {ComDefend_Square_ASR}\% & {FeatureDistillation_Square_ASR}\% & {ComDefend_Square_AVGQ} & {FeatureDistillation_Square_AVGQ} & {ComDefend_Square_MEDQ} & {FeatureDistillation_Square_MEDQ}\\\\
-        NO SWITCH & {ComDefend_NO_SWITCH_ASR}\% & {FeatureDistillation_NO_SWITCH_ASR}\% & {ComDefend_NO_SWITCH_AVGQ} & {FeatureDistillation_NO_SWITCH_AVGQ} &  {ComDefend_NO_SWITCH_MEDQ} & {FeatureDistillation_NO_SWITCH_MEDQ}  \\\\
-        SWITCH_neg & {ComDefend_SWITCH_neg_ASR}\% & {FeatureDistillation_SWITCH_neg_ASR}\% & {ComDefend_SWITCH_neg_AVGQ} & {FeatureDistillation_SWITCH_neg_AVGQ} &  {ComDefend_SWITCH_neg_MEDQ} & {FeatureDistillation_SWITCH_neg_MEDQ} \\\\
-        NO SWITCH_rnd & {ComDefend_NO_SWITCH_rnd_ASR}\% & {FeatureDistillation_NO_SWITCH_rnd_ASR}\% & {ComDefend_NO_SWITCH_rnd_AVGQ} & {FeatureDistillation_NO_SWITCH_rnd_AVGQ}  & {ComDefend_NO_SWITCH_rnd_MEDQ} & {FeatureDistillation_NO_SWITCH_rnd_MEDQ}  \\\\
-        SWITCH other & {ComDefend_SWITCH_other_ASR}\% & {FeatureDistillation_SWITCH_other_ASR}\% & {ComDefend_SWITCH_other_AVGQ} & {FeatureDistillation_SWITCH_other_AVGQ}  & {ComDefend_SWITCH_other_MEDQ} & {FeatureDistillation_SWITCH_other_MEDQ}  \\\\
-                """.format(
+                                RGF & {ComDefend_RGF_ASR}\% & {FeatureDistillation_RGF_ASR}\% & {jpeg_RGF_ASR}\% & {ComDefend_RGF_AVGQ} & {FeatureDistillation_RGF_AVGQ} & {jpeg_RGF_AVGQ}   \\\\
+                                P-RGF & {ComDefend_PRGF_ASR}\% & {FeatureDistillation_PRGF_ASR}\%  & {jpeg_PRGF_ASR}\%  & {ComDefend_PRGF_AVGQ} & {FeatureDistillation_PRGF_AVGQ} & {jpeg_PRGF_AVGQ}  \\\\
+                                Bandits & {ComDefend_Bandits_ASR}\% & {FeatureDistillation_Bandits_ASR}\% & {jpeg_Bandits_ASR}\% & {ComDefend_Bandits_AVGQ} & {FeatureDistillation_Bandits_AVGQ} &  {jpeg_Bandits_AVGQ}  \\\\
+                                PPBA & {ComDefend_PPBA_ASR}\% & {FeatureDistillation_PPBA_ASR}\% &  {jpeg_PPBA_ASR}\%  & {ComDefend_PPBA_AVGQ} & {FeatureDistillation_PPBA_AVGQ} &  {jpeg_PPBA_AVGQ}  \\\\
+                                Parsimonious & {ComDefend_Parsimonious_ASR}\% & {FeatureDistillation_Parsimonious_ASR}\% & {jpeg_Parsimonious_ASR}\% &{ComDefend_Parsimonious_AVGQ} & {FeatureDistillation_Parsimonious_AVGQ} & {jpeg_Parsimonious_AVGQ}  \\\\
+                                SignHunter & {ComDefend_SignHunter_ASR}\% & {FeatureDistillation_SignHunter_ASR}\% & {jpeg_SignHunter_ASR}\% & {ComDefend_SignHunter_AVGQ} & {FeatureDistillation_SignHunter_AVGQ} & {jpeg_SignHunter_AVGQ}  \\\\
+                                Square Attack & {ComDefend_Square_ASR}\% & {FeatureDistillation_Square_ASR}\%& {jpeg_Square_ASR}\% & {ComDefend_Square_AVGQ} & {FeatureDistillation_Square_AVGQ} & {jpeg_Square_AVGQ} \\\\
+                                NO SWITCH & {ComDefend_NO_SWITCH_ASR}\% & {FeatureDistillation_NO_SWITCH_ASR}\% &  {jpeg_NO_SWITCH_ASR}\% &{ComDefend_NO_SWITCH_AVGQ} & {FeatureDistillation_NO_SWITCH_AVGQ} &  {jpeg_NO_SWITCH_AVGQ}  \\\\
+                                SWITCH$_\\text{{naive}}$ & {ComDefend_SWITCH_naive_ASR}\% & {FeatureDistillation_SWITCH_naive_ASR}\% & {jpeg_SWITCH_naive_ASR}\% & {ComDefend_SWITCH_naive_AVGQ} & {FeatureDistillation_SWITCH_naive_AVGQ} & {jpeg_SWITCH_naive_AVGQ} \\\\
+                                SWITCH$_\\text{{RGF}}$ & {ComDefend_SWITCH_RGF_ASR}\% & {FeatureDistillation_SWITCH_RGF_ASR}\% & {jpeg_SWITCH_RGF_ASR}\% & {ComDefend_SWITCH_RGF_AVGQ} & {FeatureDistillation_SWITCH_RGF_AVGQ} & {jpeg_SWITCH_RGF_AVGQ} \\\\
+                                        """.format(
             ComDefend_RGF_ASR=result["com_defend"]["RGF"]["success_rate"],
             FeatureDistillation_RGF_ASR=result["feature_distillation"]["RGF"]["success_rate"],
             ComDefend_RGF_AVGQ=result["com_defend"]["RGF"][avg_q],
             FeatureDistillation_RGF_AVGQ=result["feature_distillation"]["RGF"][avg_q],
-            ComDefend_RGF_MEDQ=result["com_defend"]["RGF"][med_q],
-            FeatureDistillation_RGF_MEDQ=result["feature_distillation"]["RGF"][med_q],
+            jpeg_RGF_ASR=result["jpeg"]["RGF"]["success_rate"],
+            jpeg_RGF_AVGQ=result["jpeg"]["RGF"][avg_q],
+            # ComDefend_RGF_MEDQ=result["com_defend"]["RGF"][med_q],
+            # FeatureDistillation_RGF_MEDQ=result["feature_distillation"]["RGF"][med_q],
 
             ComDefend_PRGF_ASR=result["com_defend"]["PRGF"]["success_rate"],
             FeatureDistillation_PRGF_ASR=result["feature_distillation"]["PRGF"]["success_rate"],
 
             ComDefend_PRGF_AVGQ=result["com_defend"]["PRGF"][avg_q],
             FeatureDistillation_PRGF_AVGQ=result["feature_distillation"]["PRGF"][avg_q],
+            jpeg_PRGF_ASR=result["jpeg"]["PRGF"]["success_rate"],
+            jpeg_PRGF_AVGQ=result["jpeg"]["PRGF"][avg_q],
 
-            ComDefend_PRGF_MEDQ=result["com_defend"]["PRGF"][med_q],
-            FeatureDistillation_PRGF_MEDQ=result["feature_distillation"]["PRGF"][med_q],
+            # ComDefend_PRGF_MEDQ=result["com_defend"]["PRGF"][med_q],
+            # FeatureDistillation_PRGF_MEDQ=result["feature_distillation"]["PRGF"][med_q],
 
             ComDefend_Bandits_ASR=result["com_defend"]["Bandits"]["success_rate"],
             FeatureDistillation_Bandits_ASR=result["feature_distillation"]["Bandits"]["success_rate"],
 
             ComDefend_Bandits_AVGQ=result["com_defend"]["Bandits"][avg_q],
             FeatureDistillation_Bandits_AVGQ=result["feature_distillation"]["Bandits"][avg_q],
+            jpeg_Bandits_ASR=result["jpeg"]["Bandits"]["success_rate"],
+            jpeg_Bandits_AVGQ=result["jpeg"]["Bandits"][avg_q],
 
-            ComDefend_Bandits_MEDQ=result["com_defend"]["Bandits"][med_q],
-            FeatureDistillation_Bandits_MEDQ=result["feature_distillation"]["Bandits"][med_q],
+            # ComDefend_Bandits_MEDQ=result["com_defend"]["Bandits"][med_q],
+            # FeatureDistillation_Bandits_MEDQ=result["feature_distillation"]["Bandits"][med_q],
 
             ComDefend_PPBA_ASR=result["com_defend"]["PPBA"]["success_rate"],
             FeatureDistillation_PPBA_ASR=result["feature_distillation"]["PPBA"]["success_rate"],
 
             ComDefend_PPBA_AVGQ=result["com_defend"]["PPBA"][avg_q],
             FeatureDistillation_PPBA_AVGQ=result["feature_distillation"]["PPBA"][avg_q],
-
-            ComDefend_PPBA_MEDQ=result["com_defend"]["PPBA"][med_q],
-            FeatureDistillation_PPBA_MEDQ=result["feature_distillation"]["PPBA"][med_q],
+            jpeg_PPBA_ASR=result["jpeg"]["PPBA"]["success_rate"],
+            jpeg_PPBA_AVGQ=result["jpeg"]["PPBA"][avg_q],
+            # ComDefend_PPBA_MEDQ=result["com_defend"]["PPBA"][med_q],
+            # FeatureDistillation_PPBA_MEDQ=result["feature_distillation"]["PPBA"][med_q],
 
             ComDefend_Parsimonious_ASR=result["com_defend"]["Parsimonious"]["success_rate"],
             FeatureDistillation_Parsimonious_ASR=result["feature_distillation"]["Parsimonious"]["success_rate"],
 
             ComDefend_Parsimonious_AVGQ=result["com_defend"]["Parsimonious"][avg_q],
             FeatureDistillation_Parsimonious_AVGQ=result["feature_distillation"]["Parsimonious"][avg_q],
-
-            ComDefend_Parsimonious_MEDQ=result["com_defend"]["Parsimonious"][med_q],
-            FeatureDistillation_Parsimonious_MEDQ=result["feature_distillation"]["Parsimonious"][med_q],
+            jpeg_Parsimonious_ASR=result["jpeg"]["Parsimonious"]["success_rate"],
+            jpeg_Parsimonious_AVGQ=result["jpeg"]["Parsimonious"][avg_q],
+            # ComDefend_Parsimonious_MEDQ=result["com_defend"]["Parsimonious"][med_q],
+            # FeatureDistillation_Parsimonious_MEDQ=result["feature_distillation"]["Parsimonious"][med_q],
 
             ComDefend_SignHunter_ASR=result["com_defend"]["SignHunter"]["success_rate"],
             FeatureDistillation_SignHunter_ASR=result["feature_distillation"]["SignHunter"]["success_rate"],
 
             ComDefend_SignHunter_AVGQ=result["com_defend"]["SignHunter"][avg_q],
             FeatureDistillation_SignHunter_AVGQ=result["feature_distillation"]["SignHunter"][avg_q],
+            jpeg_SignHunter_ASR=result["jpeg"]["SignHunter"]["success_rate"],
+            jpeg_SignHunter_AVGQ=result["jpeg"]["SignHunter"][avg_q],
 
-            ComDefend_SignHunter_MEDQ=result["com_defend"]["SignHunter"][med_q],
-            FeatureDistillation_SignHunter_MEDQ=result["feature_distillation"]["SignHunter"][med_q],
+            # ComDefend_SignHunter_MEDQ=result["com_defend"]["SignHunter"][med_q],
+            # FeatureDistillation_SignHunter_MEDQ=result["feature_distillation"]["SignHunter"][med_q],
 
             ComDefend_Square_ASR=result["com_defend"]["Square"]["success_rate"],
             FeatureDistillation_Square_ASR=result["feature_distillation"]["Square"]["success_rate"],
             ComDefend_Square_AVGQ=result["com_defend"]["Square"][avg_q],
             FeatureDistillation_Square_AVGQ=result["feature_distillation"]["Square"][avg_q],
+            jpeg_Square_ASR=result["jpeg"]["Square"]["success_rate"],
+            jpeg_Square_AVGQ=result["jpeg"]["Square"][avg_q],
 
-            ComDefend_Square_MEDQ=result["com_defend"]["Square"][med_q],
-            FeatureDistillation_Square_MEDQ=result["feature_distillation"]["Square"][med_q],
+            # ComDefend_Square_MEDQ=result["com_defend"]["Square"][med_q],
+            # FeatureDistillation_Square_MEDQ=result["feature_distillation"]["Square"][med_q],
 
             ComDefend_NO_SWITCH_ASR=result["com_defend"]["NO_SWITCH"]["success_rate"],
             FeatureDistillation_NO_SWITCH_ASR=result["feature_distillation"]["NO_SWITCH"]["success_rate"],
 
             ComDefend_NO_SWITCH_AVGQ=result["com_defend"]["NO_SWITCH"][avg_q],
             FeatureDistillation_NO_SWITCH_AVGQ=result["feature_distillation"]["NO_SWITCH"][avg_q],
+            jpeg_NO_SWITCH_ASR=result["jpeg"]["NO_SWITCH"]["success_rate"],
+            jpeg_NO_SWITCH_AVGQ=result["jpeg"]["NO_SWITCH"][avg_q],
+            # ComDefend_NO_SWITCH_MEDQ=result["com_defend"]["NO_SWITCH"][med_q],
+            # FeatureDistillation_NO_SWITCH_MEDQ=result["feature_distillation"]["NO_SWITCH"][med_q],
 
-            ComDefend_NO_SWITCH_MEDQ=result["com_defend"]["NO_SWITCH"][med_q],
-            FeatureDistillation_NO_SWITCH_MEDQ=result["feature_distillation"]["NO_SWITCH"][med_q],
+            ComDefend_SWITCH_naive_ASR=result["com_defend"]["SWITCH_naive"]["success_rate"],
+            FeatureDistillation_SWITCH_naive_ASR=result["feature_distillation"]["SWITCH_naive"]["success_rate"],
 
-            ComDefend_SWITCH_neg_ASR=result["com_defend"]["SWITCH_neg"]["success_rate"],
-            FeatureDistillation_SWITCH_neg_ASR=result["feature_distillation"]["SWITCH_neg"]["success_rate"],
+            ComDefend_SWITCH_naive_AVGQ=result["com_defend"]["SWITCH_naive"][avg_q],
+            FeatureDistillation_SWITCH_naive_AVGQ=result["feature_distillation"]["SWITCH_naive"][avg_q],
+            jpeg_SWITCH_naive_ASR=result["jpeg"]["SWITCH_naive"]["success_rate"],
+            jpeg_SWITCH_naive_AVGQ=result["jpeg"]["SWITCH_naive"][avg_q],
 
-            ComDefend_SWITCH_neg_AVGQ=result["com_defend"]["SWITCH_neg"][avg_q],
-            FeatureDistillation_SWITCH_neg_AVGQ=result["feature_distillation"]["SWITCH_neg"][avg_q],
+            # ComDefend_SWITCH_naive_MEDQ=result["com_defend"]["SWITCH_naive"][med_q],
+            # FeatureDistillation_SWITCH_naive_MEDQ=result["feature_distillation"]["SWITCH_naive"][med_q],
 
-            ComDefend_SWITCH_neg_MEDQ=result["com_defend"]["SWITCH_neg"][med_q],
-            FeatureDistillation_SWITCH_neg_MEDQ=result["feature_distillation"]["SWITCH_neg"][med_q],
+            ComDefend_SWITCH_RGF_ASR=result["com_defend"]["SWITCH_RGF"]["success_rate"],
+            FeatureDistillation_SWITCH_RGF_ASR=result["feature_distillation"]["SWITCH_RGF"]["success_rate"],
 
-            ComDefend_NO_SWITCH_rnd_ASR=result["com_defend"]["NO_SWITCH_rnd"]["success_rate"],
-            FeatureDistillation_NO_SWITCH_rnd_ASR=result["feature_distillation"]["NO_SWITCH_rnd"]["success_rate"],
+            ComDefend_SWITCH_RGF_AVGQ=result["com_defend"]["SWITCH_RGF"][avg_q],
+            FeatureDistillation_SWITCH_RGF_AVGQ=result["feature_distillation"]["SWITCH_RGF"][avg_q],
+            jpeg_SWITCH_RGF_ASR=result["jpeg"]["SWITCH_RGF"]["success_rate"],
+            jpeg_SWITCH_RGF_AVGQ=result["jpeg"]["SWITCH_RGF"][avg_q],
 
-            ComDefend_NO_SWITCH_rnd_AVGQ=result["com_defend"]["NO_SWITCH_rnd"][avg_q],
-            FeatureDistillation_NO_SWITCH_rnd_AVGQ=result["feature_distillation"]["NO_SWITCH_rnd"][avg_q],
+            # ComDefend_SWITCH_RGF_MEDQ=result["com_defend"]["SWITCH_RGF"][med_q],
+            # FeatureDistillation_SWITCH_RGF_MEDQ=result["feature_distillation"]["SWITCH_RGF"][med_q],
 
-            ComDefend_NO_SWITCH_rnd_MEDQ=result["com_defend"]["NO_SWITCH_rnd"][med_q],
-            FeatureDistillation_NO_SWITCH_rnd_MEDQ=result["feature_distillation"]["NO_SWITCH_rnd"][med_q],
+            # ComDefend_NO_SWITCH_rnd_ASR=result["com_defend"]["NO_SWITCH_rnd"]["success_rate"],
+            # FeatureDistillation_NO_SWITCH_rnd_ASR=result["feature_distillation"]["NO_SWITCH_rnd"]["success_rate"],
+            #
+            # ComDefend_NO_SWITCH_rnd_AVGQ=result["com_defend"]["NO_SWITCH_rnd"][avg_q],
+            # FeatureDistillation_NO_SWITCH_rnd_AVGQ=result["feature_distillation"]["NO_SWITCH_rnd"][avg_q],
+            #
+            # ComDefend_NO_SWITCH_rnd_MEDQ=result["com_defend"]["NO_SWITCH_rnd"][med_q],
+            # FeatureDistillation_NO_SWITCH_rnd_MEDQ=result["feature_distillation"]["NO_SWITCH_rnd"][med_q],
 
-            ComDefend_SWITCH_other_ASR=result["com_defend"]["SWITCH_other"]["success_rate"],
-            FeatureDistillation_SWITCH_other_ASR=result["feature_distillation"]["SWITCH_other"]["success_rate"],
+            # ComDefend_SWITCH_other_ASR=result["com_defend"]["SWITCH_other"]["success_rate"],
+            # FeatureDistillation_SWITCH_other_ASR=result["feature_distillation"]["SWITCH_other"]["success_rate"],
 
-            ComDefend_SWITCH_other_AVGQ=result["com_defend"]["SWITCH_other"][avg_q],
-            FeatureDistillation_SWITCH_other_AVGQ=result["feature_distillation"]["SWITCH_other"][avg_q],
-
-            ComDefend_SWITCH_other_MEDQ=result["com_defend"]["SWITCH_other"][med_q],
-            FeatureDistillation_SWITCH_other_MEDQ=result["feature_distillation"]["SWITCH_other"][med_q],
+            # ComDefend_SWITCH_other_AVGQ=result["com_defend"]["SWITCH_other"][avg_q],
+            # FeatureDistillation_SWITCH_other_AVGQ=result["feature_distillation"]["SWITCH_other"][avg_q],
+            #
+            # ComDefend_SWITCH_other_MEDQ=result["com_defend"]["SWITCH_other"][med_q],
+            # FeatureDistillation_SWITCH_other_MEDQ=result["feature_distillation"]["SWITCH_other"][med_q],
         )
         )
     else:
@@ -404,180 +439,99 @@ def draw_tables_for_CIFAR(norm, archs_result):
     result = archs_result
     avg_q = "avg_query_over_successful_samples"
     med_q = "median_query_over_successful_samples"
-    # archs_result = {"pyramidnet272" : {"NES": {}, "P-RGF": {}, }, "gdas": { 各种方法}}
     if norm == "linf":
         print("""
-                & {norm_str} & RGF & {pyramidnet272_RGF_ASR}\% & {gdas_RGF_ASR}\% & {WRN28_RGF_ASR}\% & {WRN40_RGF_ASR}\% & {pyramidnet272_RGF_AVGQ} & {gdas_RGF_AVGQ} & {WRN28_RGF_AVGQ} & {WRN40_RGF_AVGQ} & {pyramidnet272_RGF_MEDQ} & {gdas_RGF_MEDQ} & {WRN28_RGF_MEDQ} & {WRN40_RGF_MEDQ} \\\\
-                & & P-RGF & {pyramidnet272_PRGF_ASR}\% & {gdas_PRGF_ASR}\% & {WRN28_PRGF_ASR}\% & {WRN40_PRGF_ASR}\% & {pyramidnet272_PRGF_AVGQ} & {gdas_PRGF_AVGQ} & {WRN28_PRGF_AVGQ} & {WRN40_PRGF_AVGQ} & {pyramidnet272_PRGF_MEDQ} & {gdas_PRGF_MEDQ} & {WRN28_PRGF_MEDQ} & {WRN40_PRGF_MEDQ} \\\\
-                & & Bandits & {pyramidnet272_Bandits_ASR}\% & {gdas_Bandits_ASR}\% & {WRN28_Bandits_ASR}\% & {WRN40_Bandits_ASR}\% & {pyramidnet272_Bandits_AVGQ} & {gdas_Bandits_AVGQ} & {WRN28_Bandits_AVGQ} & {WRN40_Bandits_AVGQ} & {pyramidnet272_Bandits_MEDQ} & {gdas_Bandits_MEDQ} & {WRN28_Bandits_MEDQ} & {WRN40_Bandits_MEDQ} \\\\
-                & & PPBA & {pyramidnet272_PPBA_ASR}\% & {gdas_PPBA_ASR}\% & {WRN28_PPBA_ASR}\% & {WRN40_PPBA_ASR}\% & {pyramidnet272_PPBA_AVGQ} & {gdas_PPBA_AVGQ} & {WRN28_PPBA_AVGQ} & {WRN40_PPBA_AVGQ} & {pyramidnet272_PPBA_MEDQ} & {gdas_PPBA_MEDQ} & {WRN28_PPBA_MEDQ} & {WRN40_PPBA_MEDQ} \\\\
-                & & Parsimonious & {pyramidnet272_Parsimonious_ASR}\% & {gdas_Parsimonious_ASR}\% & {WRN28_Parsimonious_ASR}\% & {WRN40_Parsimonious_ASR}\% & {pyramidnet272_Parsimonious_AVGQ} & {gdas_Parsimonious_AVGQ} & {WRN28_Parsimonious_AVGQ} & {WRN40_Parsimonious_AVGQ} & {pyramidnet272_Parsimonious_MEDQ} & {gdas_Parsimonious_MEDQ} & {WRN28_Parsimonious_MEDQ} & {WRN40_Parsimonious_MEDQ} \\\\
-                & & SignHunter & {pyramidnet272_SignHunter_ASR}\% & {gdas_SignHunter_ASR}\% & {WRN28_SignHunter_ASR}\% & {WRN40_SignHunter_ASR}\% & {pyramidnet272_SignHunter_AVGQ} & {gdas_SignHunter_AVGQ} & {WRN28_SignHunter_AVGQ} & {WRN40_SignHunter_AVGQ} & {pyramidnet272_SignHunter_MEDQ} & {gdas_SignHunter_MEDQ} & {WRN28_SignHunter_MEDQ} & {WRN40_SignHunter_MEDQ} \\\\
-                & & Square Attack & {pyramidnet272_Square_ASR}\% & {gdas_Square_ASR}\% & {WRN28_Square_ASR}\% & {WRN40_Square_ASR}\% & {pyramidnet272_Square_AVGQ} & {gdas_Square_AVGQ} & {WRN28_Square_AVGQ} & {WRN40_Square_AVGQ} & {pyramidnet272_Square_MEDQ} & {gdas_Square_MEDQ} & {WRN28_Square_MEDQ} & {WRN40_Square_MEDQ} \\\\
-                & & NO SWITCH & {pyramidnet272_NO_SWITCH_ASR}\% & {gdas_NO_SWITCH_ASR}\% & {WRN28_NO_SWITCH_ASR}\% & {WRN40_NO_SWITCH_ASR}\% & {pyramidnet272_NO_SWITCH_AVGQ} & {gdas_NO_SWITCH_AVGQ} & {WRN28_NO_SWITCH_AVGQ} & {WRN40_NO_SWITCH_AVGQ} & {pyramidnet272_NO_SWITCH_MEDQ} & {gdas_NO_SWITCH_MEDQ} & {WRN28_NO_SWITCH_MEDQ} & {WRN40_NO_SWITCH_MEDQ} \\\\
-                & & SWITCH$_neg$ & {pyramidnet272_SWITCH_neg_ASR}\% & {gdas_SWITCH_neg_ASR}\% & {WRN28_SWITCH_neg_ASR}\% & {WRN40_SWITCH_neg_ASR}\% & {pyramidnet272_SWITCH_neg_AVGQ} & {gdas_SWITCH_neg_AVGQ} & {WRN28_SWITCH_neg_AVGQ} & {WRN40_SWITCH_neg_AVGQ} & {pyramidnet272_SWITCH_neg_MEDQ} & {gdas_SWITCH_neg_MEDQ} & {WRN28_SWITCH_neg_MEDQ} & {WRN40_SWITCH_neg_MEDQ} \\\\
-                & & NO SWITCH$_rnd$ & {pyramidnet272_NO_SWITCH_rnd_ASR}\% & {gdas_NO_SWITCH_rnd_ASR}\% & {WRN28_NO_SWITCH_rnd_ASR}\% & {WRN40_NO_SWITCH_rnd_ASR}\% & {pyramidnet272_NO_SWITCH_rnd_AVGQ} & {gdas_NO_SWITCH_rnd_AVGQ} & {WRN28_NO_SWITCH_rnd_AVGQ} & {WRN40_NO_SWITCH_rnd_AVGQ} & {pyramidnet272_NO_SWITCH_rnd_MEDQ} & {gdas_NO_SWITCH_rnd_MEDQ} & {WRN28_NO_SWITCH_rnd_MEDQ} & {WRN40_NO_SWITCH_rnd_MEDQ} \\\\
-                & & SWITCH$_other$ & {pyramidnet272_SWITCH_other_ASR}\% & {gdas_SWITCH_other_ASR}\% & {WRN28_SWITCH_other_ASR}\% & {WRN40_SWITCH_other_ASR}\% & {pyramidnet272_SWITCH_other_AVGQ} & {gdas_SWITCH_other_AVGQ} & {WRN28_SWITCH_other_AVGQ} & {WRN40_SWITCH_other_AVGQ} & {pyramidnet272_SWITCH_other_MEDQ} & {gdas_SWITCH_other_MEDQ} & {WRN28_SWITCH_other_MEDQ} & {WRN40_SWITCH_other_MEDQ} \\\\
-        """.format(norm_str="$\ell_\infty$" if norm == "linf" else "$\ell_2$",
-                   # pyramidnet272_NES_ASR=result["pyramidnet272"]["NES"]["success_rate"], gdas_NES_ASR=result["gdas"]["NES"]["success_rate"],
-                   # WRN28_NES_ASR=result["WRN-28-10-drop"]["NES"]["success_rate"], WRN40_NES_ASR=result["WRN-40-10-drop"]["NES"]["success_rate"],
-                   # pyramidnet272_NES_AVGQ=result["pyramidnet272"]["NES"][avg_q],
-                   # gdas_NES_AVGQ=result["gdas"]["NES"][avg_q], WRN28_NES_AVGQ=result["WRN-28-10-drop"]["NES"][avg_q],  WRN40_NES_AVGQ=result["WRN-40-10-drop"]["NES"][avg_q],
-                   # pyramidnet272_NES_MEDQ=result["pyramidnet272"]["NES"][med_q],
-                   # gdas_NES_MEDQ=result["gdas"]["NES"][med_q], WRN28_NES_MEDQ=result["WRN-28-10-drop"]["NES"][med_q],
-                   # WRN40_NES_MEDQ=result["WRN-40-10-drop"]["NES"][med_q],
+                        RGF & {ComDefend_RGF_ASR}\% & {FeatureDistillation_RGF_ASR}\% & {jpeg_RGF_ASR}\% & {ComDefend_RGF_AVGQ} & {FeatureDistillation_RGF_AVGQ} & {jpeg_RGF_AVGQ}   \\\\
+                        P-RGF & {ComDefend_PRGF_ASR}\% & {FeatureDistillation_PRGF_ASR}\%  & {jpeg_PRGF_ASR}\%  & {ComDefend_PRGF_AVGQ} & {FeatureDistillation_PRGF_AVGQ} & {jpeg_PRGF_AVGQ}  \\\\
+                        Bandits & {ComDefend_Bandits_ASR}\% & {FeatureDistillation_Bandits_ASR}\% & {jpeg_Bandits_ASR}\% & {ComDefend_Bandits_AVGQ} & {FeatureDistillation_Bandits_AVGQ} &  {jpeg_Bandits_AVGQ}  \\\\
+                        PPBA & {ComDefend_PPBA_ASR}\% & {FeatureDistillation_PPBA_ASR}\% &  {jpeg_PPBA_ASR}\%  & {ComDefend_PPBA_AVGQ} & {FeatureDistillation_PPBA_AVGQ} &  {jpeg_PPBA_AVGQ}  \\\\
+                        Parsimonious & {ComDefend_Parsimonious_ASR}\% & {FeatureDistillation_Parsimonious_ASR}\% & {jpeg_Parsimonious_ASR}\% &{ComDefend_Parsimonious_AVGQ} & {FeatureDistillation_Parsimonious_AVGQ} & {jpeg_Parsimonious_AVGQ}  \\\\
+                        SignHunter & {ComDefend_SignHunter_ASR}\% & {FeatureDistillation_SignHunter_ASR}\% & {jpeg_SignHunter_ASR}\% & {ComDefend_SignHunter_AVGQ} & {FeatureDistillation_SignHunter_AVGQ} & {jpeg_SignHunter_AVGQ}  \\\\
+                        Square Attack & {ComDefend_Square_ASR}\% & {FeatureDistillation_Square_ASR}\%& {jpeg_Square_ASR}\% & {ComDefend_Square_AVGQ} & {FeatureDistillation_Square_AVGQ} & {jpeg_Square_AVGQ} \\\\
+                        NO SWITCH & {ComDefend_NO_SWITCH_ASR}\% & {FeatureDistillation_NO_SWITCH_ASR}\% &  {jpeg_NO_SWITCH_ASR}\% &{ComDefend_NO_SWITCH_AVGQ} & {FeatureDistillation_NO_SWITCH_AVGQ} &  {jpeg_NO_SWITCH_AVGQ}  \\\\
+                        SWITCH$_\\text{{naive}}$ & {ComDefend_SWITCH_naive_ASR}\% & {FeatureDistillation_SWITCH_naive_ASR}\% & {jpeg_SWITCH_naive_ASR}\% & {ComDefend_SWITCH_naive_AVGQ} & {FeatureDistillation_SWITCH_naive_AVGQ} & {jpeg_SWITCH_naive_AVGQ} \\\\
+                        SWITCH$_\\text{{RGF}}$ & {ComDefend_SWITCH_RGF_ASR}\% & {FeatureDistillation_SWITCH_RGF_ASR}\% & {jpeg_SWITCH_RGF_ASR}\% & {ComDefend_SWITCH_RGF_AVGQ} & {FeatureDistillation_SWITCH_RGF_AVGQ} & {jpeg_SWITCH_RGF_AVGQ} \\\\
+                                                                """.format(
+            ComDefend_RGF_ASR=result["com_defend"]["RGF"]["success_rate"],
+            FeatureDistillation_RGF_ASR=result["feature_distillation"]["RGF"]["success_rate"],
+            ComDefend_RGF_AVGQ=result["com_defend"]["RGF"][avg_q],
+            FeatureDistillation_RGF_AVGQ=result["feature_distillation"]["RGF"][avg_q],
+            jpeg_RGF_ASR=result["jpeg"]["RGF"]["success_rate"],
+            jpeg_RGF_AVGQ=result["jpeg"]["RGF"][avg_q],
 
-                   pyramidnet272_RGF_ASR=result["pyramidnet272"]["RGF"]["success_rate"],
-                   gdas_RGF_ASR=result["gdas"]["RGF"]["success_rate"],
-                   WRN28_RGF_ASR=result["WRN-28-10-drop"]["RGF"]["success_rate"],
-                   WRN40_RGF_ASR=result["WRN-40-10-drop"]["RGF"]["success_rate"],
-                   pyramidnet272_RGF_AVGQ=result["pyramidnet272"]["RGF"][avg_q],
-                   gdas_RGF_AVGQ=result["gdas"]["RGF"][avg_q], WRN28_RGF_AVGQ=result["WRN-28-10-drop"]["RGF"][avg_q],
-                   WRN40_RGF_AVGQ=result["WRN-40-10-drop"]["RGF"][avg_q],
-                   pyramidnet272_RGF_MEDQ=result["pyramidnet272"]["RGF"][med_q],
-                   gdas_RGF_MEDQ=result["gdas"]["RGF"][med_q], WRN28_RGF_MEDQ=result["WRN-28-10-drop"]["RGF"][med_q],
-                   WRN40_RGF_MEDQ=result["WRN-40-10-drop"]["RGF"][med_q],
+            ComDefend_PRGF_ASR=result["com_defend"]["PRGF"]["success_rate"],
+            FeatureDistillation_PRGF_ASR=result["feature_distillation"]["PRGF"]["success_rate"],
 
-                   pyramidnet272_PRGF_ASR=result["pyramidnet272"]["PRGF"]["success_rate"],
-                   gdas_PRGF_ASR=result["gdas"]["PRGF"]["success_rate"],
-                   WRN28_PRGF_ASR=result["WRN-28-10-drop"]["PRGF"]["success_rate"],
-                   WRN40_PRGF_ASR=result["WRN-40-10-drop"]["PRGF"]["success_rate"],
-                   pyramidnet272_PRGF_AVGQ=result["pyramidnet272"]["PRGF"][avg_q],
-                   gdas_PRGF_AVGQ=result["gdas"]["PRGF"][avg_q], WRN28_PRGF_AVGQ=result["WRN-28-10-drop"]["PRGF"][avg_q],
-                   WRN40_PRGF_AVGQ=result["WRN-40-10-drop"]["PRGF"][avg_q],
-                   pyramidnet272_PRGF_MEDQ=result["pyramidnet272"]["PRGF"][med_q],
-                   gdas_PRGF_MEDQ=result["gdas"]["PRGF"][med_q], WRN28_PRGF_MEDQ=result["WRN-28-10-drop"]["PRGF"][med_q],
-                   WRN40_PRGF_MEDQ=result["WRN-40-10-drop"]["PRGF"][med_q],
+            ComDefend_PRGF_AVGQ=result["com_defend"]["PRGF"][avg_q],
+            FeatureDistillation_PRGF_AVGQ=result["feature_distillation"]["PRGF"][avg_q],
+            jpeg_PRGF_ASR=result["jpeg"]["PRGF"]["success_rate"],
+            jpeg_PRGF_AVGQ=result["jpeg"]["PRGF"][avg_q],
 
-                   pyramidnet272_Bandits_ASR=result["pyramidnet272"]["Bandits"]["success_rate"],
-                   gdas_Bandits_ASR=result["gdas"]["Bandits"]["success_rate"],
-                   WRN28_Bandits_ASR=result["WRN-28-10-drop"]["Bandits"]["success_rate"],
-                   WRN40_Bandits_ASR=result["WRN-40-10-drop"]["Bandits"]["success_rate"],
-                   pyramidnet272_Bandits_AVGQ=result["pyramidnet272"]["Bandits"][avg_q],
-                   gdas_Bandits_AVGQ=result["gdas"]["Bandits"][avg_q],
-                   WRN28_Bandits_AVGQ=result["WRN-28-10-drop"]["Bandits"][avg_q],
-                   WRN40_Bandits_AVGQ=result["WRN-40-10-drop"]["Bandits"][avg_q],
-                   pyramidnet272_Bandits_MEDQ=result["pyramidnet272"]["Bandits"][med_q],
-                   gdas_Bandits_MEDQ=result["gdas"]["Bandits"][med_q],
-                   WRN28_Bandits_MEDQ=result["WRN-28-10-drop"]["Bandits"][med_q],
-                   WRN40_Bandits_MEDQ=result["WRN-40-10-drop"]["Bandits"][med_q],
+            ComDefend_Bandits_ASR=result["com_defend"]["Bandits"]["success_rate"],
+            FeatureDistillation_Bandits_ASR=result["feature_distillation"]["Bandits"]["success_rate"],
 
-                   pyramidnet272_PPBA_ASR=result["pyramidnet272"]["PPBA"]["success_rate"],
-                   gdas_PPBA_ASR=result["gdas"]["PPBA"]["success_rate"],
-                   WRN28_PPBA_ASR=result["WRN-28-10-drop"]["PPBA"]["success_rate"],
-                   WRN40_PPBA_ASR=result["WRN-40-10-drop"]["PPBA"]["success_rate"],
-                   pyramidnet272_PPBA_AVGQ=result["pyramidnet272"]["PPBA"][avg_q],
-                   gdas_PPBA_AVGQ=result["gdas"]["PPBA"][avg_q], WRN28_PPBA_AVGQ=result["WRN-28-10-drop"]["PPBA"][avg_q],
-                   WRN40_PPBA_AVGQ=result["WRN-40-10-drop"]["PPBA"][avg_q],
-                   pyramidnet272_PPBA_MEDQ=result["pyramidnet272"]["PPBA"][med_q],
-                   gdas_PPBA_MEDQ=result["gdas"]["PPBA"][med_q], WRN28_PPBA_MEDQ=result["WRN-28-10-drop"]["PPBA"][med_q],
-                   WRN40_PPBA_MEDQ=result["WRN-40-10-drop"]["PPBA"][med_q],
+            ComDefend_Bandits_AVGQ=result["com_defend"]["Bandits"][avg_q],
+            FeatureDistillation_Bandits_AVGQ=result["feature_distillation"]["Bandits"][avg_q],
+            jpeg_Bandits_ASR=result["jpeg"]["Bandits"]["success_rate"],
+            jpeg_Bandits_AVGQ=result["jpeg"]["Bandits"][avg_q],
 
-                   pyramidnet272_Parsimonious_ASR=result["pyramidnet272"]["Parsimonious"]["success_rate"],
-                   gdas_Parsimonious_ASR=result["gdas"]["Parsimonious"]["success_rate"],
-                   WRN28_Parsimonious_ASR=result["WRN-28-10-drop"]["Parsimonious"]["success_rate"],
-                   WRN40_Parsimonious_ASR=result["WRN-40-10-drop"]["Parsimonious"]["success_rate"],
-                   pyramidnet272_Parsimonious_AVGQ=result["pyramidnet272"]["Parsimonious"][avg_q],
-                   gdas_Parsimonious_AVGQ=result["gdas"]["Parsimonious"][avg_q],
-                   WRN28_Parsimonious_AVGQ=result["WRN-28-10-drop"]["Parsimonious"][avg_q],
-                   WRN40_Parsimonious_AVGQ=result["WRN-40-10-drop"]["Parsimonious"][avg_q],
-                   pyramidnet272_Parsimonious_MEDQ=result["pyramidnet272"]["Parsimonious"][med_q],
-                   gdas_Parsimonious_MEDQ=result["gdas"]["Parsimonious"][med_q],
-                   WRN28_Parsimonious_MEDQ=result["WRN-28-10-drop"]["Parsimonious"][med_q],
-                   WRN40_Parsimonious_MEDQ=result["WRN-40-10-drop"]["Parsimonious"][med_q],
+            ComDefend_PPBA_ASR=result["com_defend"]["PPBA"]["success_rate"],
+            FeatureDistillation_PPBA_ASR=result["feature_distillation"]["PPBA"]["success_rate"],
 
-                   # pyramidnet272_SimBA_ASR=result["pyramidnet272"]["SimBA"]["success_rate"],
-                   # gdas_SimBA_ASR=result["gdas"]["SimBA"]["success_rate"],
-                   # WRN28_SimBA_ASR=result["WRN-28-10-drop"]["SimBA"]["success_rate"],
-                   # WRN40_SimBA_ASR=result["WRN-40-10-drop"]["SimBA"]["success_rate"],
-                   # pyramidnet272_SimBA_AVGQ=result["pyramidnet272"]["SimBA"][avg_q],
-                   # gdas_SimBA_AVGQ=result["gdas"]["SimBA"][avg_q],
-                   # WRN28_SimBA_AVGQ=result["WRN-28-10-drop"]["SimBA"][avg_q],
-                   # WRN40_SimBA_AVGQ=result["WRN-40-10-drop"]["SimBA"][avg_q],
-                   # pyramidnet272_SimBA_MEDQ=result["pyramidnet272"]["SimBA"][med_q],
-                   # gdas_SimBA_MEDQ=result["gdas"]["SimBA"][med_q],
-                   # WRN28_SimBA_MEDQ=result["WRN-28-10-drop"]["SimBA"][med_q],
-                   # WRN40_SimBA_MEDQ=result["WRN-40-10-drop"]["SimBA"][med_q],
+            ComDefend_PPBA_AVGQ=result["com_defend"]["PPBA"][avg_q],
+            FeatureDistillation_PPBA_AVGQ=result["feature_distillation"]["PPBA"][avg_q],
+            jpeg_PPBA_ASR=result["jpeg"]["PPBA"]["success_rate"],
+            jpeg_PPBA_AVGQ=result["jpeg"]["PPBA"][avg_q],
 
-                   pyramidnet272_SignHunter_ASR=result["pyramidnet272"]["SignHunter"]["success_rate"],
-                   gdas_SignHunter_ASR=result["gdas"]["SignHunter"]["success_rate"],
-                   WRN28_SignHunter_ASR=result["WRN-28-10-drop"]["SignHunter"]["success_rate"],
-                   WRN40_SignHunter_ASR=result["WRN-40-10-drop"]["SignHunter"]["success_rate"],
-                   pyramidnet272_SignHunter_AVGQ=result["pyramidnet272"]["SignHunter"][avg_q],
-                   gdas_SignHunter_AVGQ=result["gdas"]["SignHunter"][avg_q],
-                   WRN28_SignHunter_AVGQ=result["WRN-28-10-drop"]["SignHunter"][avg_q],
-                   WRN40_SignHunter_AVGQ=result["WRN-40-10-drop"]["SignHunter"][avg_q],
-                   pyramidnet272_SignHunter_MEDQ=result["pyramidnet272"]["SignHunter"][med_q],
-                   gdas_SignHunter_MEDQ=result["gdas"]["SignHunter"][med_q],
-                   WRN28_SignHunter_MEDQ=result["WRN-28-10-drop"]["SignHunter"][med_q],
-                   WRN40_SignHunter_MEDQ=result["WRN-40-10-drop"]["SignHunter"][med_q],
+            ComDefend_Parsimonious_ASR=result["com_defend"]["Parsimonious"]["success_rate"],
+            FeatureDistillation_Parsimonious_ASR=result["feature_distillation"]["Parsimonious"]["success_rate"],
 
-                   pyramidnet272_Square_ASR=result["pyramidnet272"]["Square"]["success_rate"],
-                   gdas_Square_ASR=result["gdas"]["Square"]["success_rate"],
-                   WRN28_Square_ASR=result["WRN-28-10-drop"]["Square"]["success_rate"],
-                   WRN40_Square_ASR=result["WRN-40-10-drop"]["Square"]["success_rate"],
-                   pyramidnet272_Square_AVGQ=result["pyramidnet272"]["Square"][avg_q],
-                   gdas_Square_AVGQ=result["gdas"]["Square"][avg_q],
-                   WRN28_Square_AVGQ=result["WRN-28-10-drop"]["Square"][avg_q],
-                   WRN40_Square_AVGQ=result["WRN-40-10-drop"]["Square"][avg_q],
-                   pyramidnet272_Square_MEDQ=result["pyramidnet272"]["Square"][med_q],
-                   gdas_Square_MEDQ=result["gdas"]["Square"][med_q],
-                   WRN28_Square_MEDQ=result["WRN-28-10-drop"]["Square"][med_q],
-                   WRN40_Square_MEDQ=result["WRN-40-10-drop"]["Square"][med_q],
+            ComDefend_Parsimonious_AVGQ=result["com_defend"]["Parsimonious"][avg_q],
+            FeatureDistillation_Parsimonious_AVGQ=result["feature_distillation"]["Parsimonious"][avg_q],
+            jpeg_Parsimonious_ASR=result["jpeg"]["Parsimonious"]["success_rate"],
+            jpeg_Parsimonious_AVGQ=result["jpeg"]["Parsimonious"][avg_q],
 
-                   pyramidnet272_NO_SWITCH_ASR=result["pyramidnet272"]["NO_SWITCH"]["success_rate"],
-                   gdas_NO_SWITCH_ASR=result["gdas"]["NO_SWITCH"]["success_rate"],
-                   WRN28_NO_SWITCH_ASR=result["WRN-28-10-drop"]["NO_SWITCH"]["success_rate"],
-                   WRN40_NO_SWITCH_ASR=result["WRN-40-10-drop"]["NO_SWITCH"]["success_rate"],
-                   pyramidnet272_NO_SWITCH_AVGQ=result["pyramidnet272"]["NO_SWITCH"][avg_q],
-                   gdas_NO_SWITCH_AVGQ=result["gdas"]["NO_SWITCH"][avg_q],
-                   WRN28_NO_SWITCH_AVGQ=result["WRN-28-10-drop"]["NO_SWITCH"][avg_q],
-                   WRN40_NO_SWITCH_AVGQ=result["WRN-40-10-drop"]["NO_SWITCH"][avg_q],
-                   pyramidnet272_NO_SWITCH_MEDQ=result["pyramidnet272"]["NO_SWITCH"][med_q],
-                   gdas_NO_SWITCH_MEDQ=result["gdas"]["NO_SWITCH"][med_q],
-                   WRN28_NO_SWITCH_MEDQ=result["WRN-28-10-drop"]["NO_SWITCH"][med_q],
-                   WRN40_NO_SWITCH_MEDQ=result["WRN-40-10-drop"]["NO_SWITCH"][med_q],
+            ComDefend_SignHunter_ASR=result["com_defend"]["SignHunter"]["success_rate"],
+            FeatureDistillation_SignHunter_ASR=result["feature_distillation"]["SignHunter"]["success_rate"],
 
-                   pyramidnet272_SWITCH_neg_ASR=result["pyramidnet272"]["SWITCH_neg"]["success_rate"],
-                   gdas_SWITCH_neg_ASR=result["gdas"]["SWITCH_neg"]["success_rate"],
-                   WRN28_SWITCH_neg_ASR=result["WRN-28-10-drop"]["SWITCH_neg"]["success_rate"],
-                   WRN40_SWITCH_neg_ASR=result["WRN-40-10-drop"]["SWITCH_neg"]["success_rate"],
-                   pyramidnet272_SWITCH_neg_AVGQ=result["pyramidnet272"]["SWITCH_neg"][avg_q],
-                   gdas_SWITCH_neg_AVGQ=result["gdas"]["SWITCH_neg"][avg_q],
-                   WRN28_SWITCH_neg_AVGQ=result["WRN-28-10-drop"]["SWITCH_neg"][avg_q],
-                   WRN40_SWITCH_neg_AVGQ=result["WRN-40-10-drop"]["SWITCH_neg"][avg_q],
-                   pyramidnet272_SWITCH_neg_MEDQ=result["pyramidnet272"]["SWITCH_neg"][med_q],
-                   gdas_SWITCH_neg_MEDQ=result["gdas"]["SWITCH_neg"][med_q],
-                   WRN28_SWITCH_neg_MEDQ=result["WRN-28-10-drop"]["SWITCH_neg"][med_q],
-                   WRN40_SWITCH_neg_MEDQ=result["WRN-40-10-drop"]["SWITCH_neg"][med_q],
+            ComDefend_SignHunter_AVGQ=result["com_defend"]["SignHunter"][avg_q],
+            FeatureDistillation_SignHunter_AVGQ=result["feature_distillation"]["SignHunter"][avg_q],
+            jpeg_SignHunter_ASR=result["jpeg"]["SignHunter"]["success_rate"],
+            jpeg_SignHunter_AVGQ=result["jpeg"]["SignHunter"][avg_q],
 
-                   pyramidnet272_SWITCH_other_ASR=result["pyramidnet272"]["SWITCH_other"]["success_rate"],
-                   gdas_SWITCH_other_ASR=result["gdas"]["SWITCH_other"]["success_rate"],
-                   WRN28_SWITCH_other_ASR=result["WRN-28-10-drop"]["SWITCH_other"]["success_rate"],
-                   WRN40_SWITCH_other_ASR=result["WRN-40-10-drop"]["SWITCH_other"]["success_rate"],
-                   pyramidnet272_SWITCH_other_AVGQ=result["pyramidnet272"]["SWITCH_other"][avg_q],
-                   gdas_SWITCH_other_AVGQ=result["gdas"]["SWITCH_other"][avg_q],
-                   WRN28_SWITCH_other_AVGQ=result["WRN-28-10-drop"]["SWITCH_other"][avg_q],
-                   WRN40_SWITCH_other_AVGQ=result["WRN-40-10-drop"]["SWITCH_other"][avg_q],
-                   pyramidnet272_SWITCH_other_MEDQ=result["pyramidnet272"]["SWITCH_other"][med_q],
-                   gdas_SWITCH_other_MEDQ=result["gdas"]["SWITCH_other"][med_q],
-                   WRN28_SWITCH_other_MEDQ=result["WRN-28-10-drop"]["SWITCH_other"][med_q],
-                   WRN40_SWITCH_other_MEDQ=result["WRN-40-10-drop"]["SWITCH_other"][med_q],
+            ComDefend_Square_ASR=result["com_defend"]["Square"]["success_rate"],
+            FeatureDistillation_Square_ASR=result["feature_distillation"]["Square"]["success_rate"],
+            ComDefend_Square_AVGQ=result["com_defend"]["Square"][avg_q],
+            FeatureDistillation_Square_AVGQ=result["feature_distillation"]["Square"][avg_q],
+            jpeg_Square_ASR=result["jpeg"]["Square"]["success_rate"],
+            jpeg_Square_AVGQ=result["jpeg"]["Square"][avg_q],
 
-                   pyramidnet272_NO_SWITCH_rnd_ASR=result["pyramidnet272"]["NO_SWITCH_rnd"]["success_rate"],
-                   gdas_NO_SWITCH_rnd_ASR=result["gdas"]["NO_SWITCH_rnd"]["success_rate"],
-                   WRN28_NO_SWITCH_rnd_ASR=result["WRN-28-10-drop"]["NO_SWITCH_rnd"]["success_rate"],
-                   WRN40_NO_SWITCH_rnd_ASR=result["WRN-40-10-drop"]["NO_SWITCH_rnd"]["success_rate"],
-                   pyramidnet272_NO_SWITCH_rnd_AVGQ=result["pyramidnet272"]["NO_SWITCH_rnd"][avg_q],
-                   gdas_NO_SWITCH_rnd_AVGQ=result["gdas"]["NO_SWITCH_rnd"][avg_q],
-                   WRN28_NO_SWITCH_rnd_AVGQ=result["WRN-28-10-drop"]["NO_SWITCH_rnd"][avg_q],
-                   WRN40_NO_SWITCH_rnd_AVGQ=result["WRN-40-10-drop"]["NO_SWITCH_rnd"][avg_q],
-                   pyramidnet272_NO_SWITCH_rnd_MEDQ=result["pyramidnet272"]["NO_SWITCH_rnd"][med_q],
-                   gdas_NO_SWITCH_rnd_MEDQ=result["gdas"]["NO_SWITCH_rnd"][med_q],
-                   WRN28_NO_SWITCH_rnd_MEDQ=result["WRN-28-10-drop"]["NO_SWITCH_rnd"][med_q],
-                   WRN40_NO_SWITCH_rnd_MEDQ=result["WRN-40-10-drop"]["NO_SWITCH_rnd"][med_q],
-                   )
-              )
+            ComDefend_NO_SWITCH_ASR=result["com_defend"]["NO_SWITCH"]["success_rate"],
+            FeatureDistillation_NO_SWITCH_ASR=result["feature_distillation"]["NO_SWITCH"]["success_rate"],
+
+            ComDefend_NO_SWITCH_AVGQ=result["com_defend"]["NO_SWITCH"][avg_q],
+            FeatureDistillation_NO_SWITCH_AVGQ=result["feature_distillation"]["NO_SWITCH"][avg_q],
+            jpeg_NO_SWITCH_ASR=result["jpeg"]["NO_SWITCH"]["success_rate"],
+            jpeg_NO_SWITCH_AVGQ=result["jpeg"]["NO_SWITCH"][avg_q],
+
+            ComDefend_SWITCH_naive_ASR=result["com_defend"]["SWITCH_naive"]["success_rate"],
+            FeatureDistillation_SWITCH_naive_ASR=result["feature_distillation"]["SWITCH_naive"]["success_rate"],
+
+            ComDefend_SWITCH_naive_AVGQ=result["com_defend"]["SWITCH_naive"][avg_q],
+            FeatureDistillation_SWITCH_naive_AVGQ=result["feature_distillation"]["SWITCH_naive"][avg_q],
+            jpeg_SWITCH_naive_ASR=result["jpeg"]["SWITCH_naive"]["success_rate"],
+            jpeg_SWITCH_naive_AVGQ=result["jpeg"]["SWITCH_naive"][avg_q],
+
+            ComDefend_SWITCH_RGF_ASR=result["com_defend"]["SWITCH_RGF"]["success_rate"],
+            FeatureDistillation_SWITCH_RGF_ASR=result["feature_distillation"]["SWITCH_RGF"]["success_rate"],
+
+            ComDefend_SWITCH_RGF_AVGQ=result["com_defend"]["SWITCH_RGF"][avg_q],
+            FeatureDistillation_SWITCH_RGF_AVGQ=result["feature_distillation"]["SWITCH_RGF"][avg_q],
+            jpeg_SWITCH_RGF_ASR=result["jpeg"]["SWITCH_RGF"]["success_rate"],
+            jpeg_SWITCH_RGF_AVGQ=result["jpeg"]["SWITCH_RGF"][avg_q],
+
+        )
+        )
     else:
         print("""
                         & {norm_str} & RGF & {pyramidnet272_RGF_ASR}\% & {gdas_RGF_ASR}\% & {WRN28_RGF_ASR}\% & {WRN40_RGF_ASR}\% & {pyramidnet272_RGF_AVGQ} & {gdas_RGF_AVGQ} & {WRN28_RGF_AVGQ} & {WRN40_RGF_AVGQ} & {pyramidnet272_RGF_MEDQ} & {gdas_RGF_MEDQ} & {WRN28_RGF_MEDQ} & {WRN40_RGF_MEDQ} \\\\
@@ -743,7 +697,7 @@ if __name__ == "__main__":
         arch = 'resnet-50'
     else:
         arch = "resnet50"
-    defense_models = ["com_defend", "feature_distillation"]
+    defense_models = ["com_defend", "feature_distillation","jpeg"]
     result = fetch_all_json_content_given_contraint(dataset, norm, targeted, arch, defense_models)
     if "CIFAR" in dataset:
         draw_tables_for_CIFAR(norm, result)

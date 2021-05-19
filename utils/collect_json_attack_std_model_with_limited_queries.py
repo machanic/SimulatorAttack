@@ -28,9 +28,10 @@ method_name_to_paper = {"bandits_attack":"Bandits",  "P-RGF_biased_attack":"PRGF
                         # "MetaGradAttack":"Meta Attack",
                         # "simulate_bandits_shrink_attack":"MetaSimulator",
                         "NO_SWITCH": "NO_SWITCH",
-                        "NO_SWITCH_rnd": "NO_SWITCH_rnd",
-                        "SWITCH_rnd_save":'SWITCH_other',
+                        # "NO_SWITCH_rnd": "NO_SWITCH_rnd",
+                        # "SWITCH_rnd_save":'SWITCH_other',
                         "SWITCH_neg_save":'SWITCH_neg',
+                        "SWITCH_RGF":'SWITCH_RGF',
                        # "SimBA_DCT_attack":"SimBA",
                         "PPBA_attack":"PPBA", "parsimonious_attack":"Parsimonious","sign_hunter_attack":"SignHunter",
                         "square_attack":"Square"}
@@ -103,7 +104,16 @@ def from_method_to_dir_path(dataset, method, norm, targeted):
                                                                             loss="cw" if not targeted else "xent",
                                                                             norm=norm,
                                                                             target_str="untargeted" if not targeted else "targeted_increment")
-
+    elif method == "SWITCH_RGF":
+        if dataset.startswith("CIFAR"):
+            path = "SWITCH_RGF-resnet-110-{dataset}-{loss}-loss-{norm}-{target_str}".format(dataset=dataset,
+                                                                                                               loss="cw" if not targeted else "xent",
+                                                                                                               norm=norm, target_str="untargeted" if not targeted else "targeted_increment")
+        elif dataset == "TinyImageNet":
+            path = "SWITCH_RGF-resnet101-{dataset}-{loss}-loss-{norm}-{target_str}".format(
+                dataset=dataset,
+                loss="cw" if not targeted else "xent",
+                norm=norm, target_str="untargeted" if not targeted else "targeted_increment")
     return path
 
 
@@ -200,8 +210,7 @@ SignHunter \cite{{al2019sign}} & {D121_SignHunter_ASR}\% & {R32_SignHunter_ASR}\
 Square Attack \cite{{ACFH2020square}} & {D121_Square_ASR}\% & {R32_Square_ASR}\% & {R64_Square_ASR}\% & {D121_Square_AVGQ} & {R32_Square_AVGQ} & {R64_Square_AVGQ} & {D121_Square_MEDQ} & {R32_Square_MEDQ} & {R64_Square_MEDQ} \\\\
 NO SWITCH & {D121_NO_SWITCH_ASR}\% & {R32_NO_SWITCH_ASR}\% & {R64_NO_SWITCH_ASR}\% & {D121_NO_SWITCH_AVGQ} & {R32_NO_SWITCH_AVGQ} & {R64_NO_SWITCH_AVGQ} & {D121_NO_SWITCH_MEDQ} & {R32_NO_SWITCH_MEDQ} & {R64_NO_SWITCH_MEDQ} \\\\
 SWITCH & {D121_SWITCH_neg_ASR}\% & {R32_SWITCH_neg_ASR}\% & {R64_SWITCH_neg_ASR}\% & {D121_SWITCH_neg_AVGQ} & {R32_SWITCH_neg_AVGQ} & {R64_SWITCH_neg_AVGQ} & {D121_SWITCH_neg_MEDQ} & {R32_SWITCH_neg_MEDQ} & {R64_SWITCH_neg_MEDQ} \\\\
-NO SWITCH_rnd & {D121_NO_SWITCH_rnd_ASR}\% & {R32_NO_SWITCH_rnd_ASR}\% & {R64_NO_SWITCH_rnd_ASR}\% & {D121_NO_SWITCH_rnd_AVGQ} & {R32_NO_SWITCH_rnd_AVGQ} & {R64_NO_SWITCH_rnd_AVGQ} & {D121_NO_SWITCH_rnd_MEDQ} & {R32_NO_SWITCH_rnd_MEDQ} & {R64_NO_SWITCH_rnd_MEDQ} \\\\
-SWITCH_other & {D121_SWITCH_other_ASR}\% & {R32_SWITCH_other_ASR}\% & {R64_SWITCH_other_ASR}\% & {D121_SWITCH_other_AVGQ} & {R32_SWITCH_other_AVGQ} & {R64_SWITCH_other_AVGQ} & {D121_SWITCH_other_MEDQ} & {R32_SWITCH_other_MEDQ} & {R64_SWITCH_other_MEDQ} \\\\
+SWITCH$_\\text{{RGF}}$ & {D121_SWITCH_RGF_ASR}\% & {R32_SWITCH_RGF_ASR}\% & {R64_SWITCH_RGF_ASR}\% & {D121_SWITCH_RGF_AVGQ} & {R32_SWITCH_RGF_AVGQ} & {R64_SWITCH_RGF_AVGQ} & {D121_SWITCH_RGF_MEDQ} & {R32_SWITCH_RGF_MEDQ} & {R64_SWITCH_RGF_MEDQ} \\\\
         """.format(
             D121_RGF_ASR=result["densenet121"]["RGF"]["success_rate"],R32_RGF_ASR=result["resnext32_4"]["RGF"]["success_rate"],R64_RGF_ASR=result["resnext64_4"]["RGF"]["success_rate"],
             D121_RGF_AVGQ=result["densenet121"]["RGF"][avg_q], R32_RGF_AVGQ=result["resnext32_4"]["RGF"][avg_q], R64_RGF_AVGQ=result["resnext64_4"]["RGF"][avg_q],
@@ -284,25 +293,17 @@ SWITCH_other & {D121_SWITCH_other_ASR}\% & {R32_SWITCH_other_ASR}\% & {R64_SWITC
             R32_SWITCH_neg_MEDQ=result["resnext32_4"]["SWITCH_neg"][med_q],
             R64_SWITCH_neg_MEDQ=result["resnext64_4"]["SWITCH_neg"][med_q],
 
-            D121_NO_SWITCH_rnd_ASR=result["densenet121"]["NO_SWITCH_rnd"]["success_rate"],
-            R32_NO_SWITCH_rnd_ASR=result["resnext32_4"]["NO_SWITCH_rnd"]["success_rate"],
-            R64_NO_SWITCH_rnd_ASR=result["resnext64_4"]["NO_SWITCH_rnd"]["success_rate"],
-            D121_NO_SWITCH_rnd_AVGQ=result["densenet121"]["NO_SWITCH_rnd"][avg_q],
-            R32_NO_SWITCH_rnd_AVGQ=result["resnext32_4"]["NO_SWITCH_rnd"][avg_q],
-            R64_NO_SWITCH_rnd_AVGQ=result["resnext64_4"]["NO_SWITCH_rnd"][avg_q],
-            D121_NO_SWITCH_rnd_MEDQ=result["densenet121"]["NO_SWITCH_rnd"][med_q],
-            R32_NO_SWITCH_rnd_MEDQ=result["resnext32_4"]["NO_SWITCH_rnd"][med_q],
-            R64_NO_SWITCH_rnd_MEDQ=result["resnext64_4"]["NO_SWITCH_rnd"][med_q],
+            D121_SWITCH_RGF_ASR=result["densenet121"]["SWITCH_RGF"]["success_rate"],
+            R32_SWITCH_RGF_ASR=result["resnext32_4"]["SWITCH_RGF"]["success_rate"],
+            R64_SWITCH_RGF_ASR=result["resnext64_4"]["SWITCH_RGF"]["success_rate"],
+            D121_SWITCH_RGF_AVGQ=result["densenet121"]["SWITCH_RGF"][avg_q],
+            R32_SWITCH_RGF_AVGQ=result["resnext32_4"]["SWITCH_RGF"][avg_q],
+            R64_SWITCH_RGF_AVGQ=result["resnext64_4"]["SWITCH_RGF"][avg_q],
+            D121_SWITCH_RGF_MEDQ=result["densenet121"]["SWITCH_RGF"][med_q],
+            R32_SWITCH_RGF_MEDQ=result["resnext32_4"]["SWITCH_RGF"][med_q],
+            R64_SWITCH_RGF_MEDQ=result["resnext64_4"]["SWITCH_RGF"][med_q],
 
-            D121_SWITCH_other_ASR=result["densenet121"]["SWITCH_other"]["success_rate"],
-            R32_SWITCH_other_ASR=result["resnext32_4"]["SWITCH_other"]["success_rate"],
-            R64_SWITCH_other_ASR=result["resnext64_4"]["SWITCH_other"]["success_rate"],
-            D121_SWITCH_other_AVGQ=result["densenet121"]["SWITCH_other"][avg_q],
-            R32_SWITCH_other_AVGQ=result["resnext32_4"]["SWITCH_other"][avg_q],
-            R64_SWITCH_other_AVGQ=result["resnext64_4"]["SWITCH_other"][avg_q],
-            D121_SWITCH_other_MEDQ=result["densenet121"]["SWITCH_other"][med_q],
-            R32_SWITCH_other_MEDQ=result["resnext32_4"]["SWITCH_other"][med_q],
-            R64_SWITCH_other_MEDQ=result["resnext64_4"]["SWITCH_other"][med_q]
+
         )
               )
     else:
@@ -315,8 +316,7 @@ SWITCH_other & {D121_SWITCH_other_ASR}\% & {R32_SWITCH_other_ASR}\% & {R64_SWITC
         Square Attack \cite{{ACFH2020square}} & {D121_Square_ASR}\% & {R32_Square_ASR}\% & {R64_Square_ASR}\% & {D121_Square_AVGQ} & {R32_Square_AVGQ} & {R64_Square_AVGQ} & {D121_Square_MEDQ} & {R32_Square_MEDQ} & {R64_Square_MEDQ} \\\\
         NO SWITCH & {D121_NO_SWITCH_ASR}\% & {R32_NO_SWITCH_ASR}\% & {R64_NO_SWITCH_ASR}\% & {D121_NO_SWITCH_AVGQ} & {R32_NO_SWITCH_AVGQ} & {R64_NO_SWITCH_AVGQ} & {D121_NO_SWITCH_MEDQ} & {R32_NO_SWITCH_MEDQ} & {R64_NO_SWITCH_MEDQ} \\\\
         SWITCH & {D121_SWITCH_neg_ASR}\% & {R32_SWITCH_neg_ASR}\% & {R64_SWITCH_neg_ASR}\% & {D121_SWITCH_neg_AVGQ} & {R32_SWITCH_neg_AVGQ} & {R64_SWITCH_neg_AVGQ} & {D121_SWITCH_neg_MEDQ} & {R32_SWITCH_neg_MEDQ} & {R64_SWITCH_neg_MEDQ} \\\\
-        NO SWITCH_rnd & {D121_NO_SWITCH_rnd_ASR}\% & {R32_NO_SWITCH_rnd_ASR}\% & {R64_NO_SWITCH_rnd_ASR}\% & {D121_NO_SWITCH_rnd_AVGQ} & {R32_NO_SWITCH_rnd_AVGQ} & {R64_NO_SWITCH_rnd_AVGQ} & {D121_NO_SWITCH_rnd_MEDQ} & {R32_NO_SWITCH_rnd_MEDQ} & {R64_NO_SWITCH_rnd_MEDQ} \\\\
-        SWITCH_other & {D121_SWITCH_other_ASR}\% & {R32_SWITCH_other_ASR}\% & {R64_SWITCH_other_ASR}\% & {D121_SWITCH_other_AVGQ} & {R32_SWITCH_other_AVGQ} & {R64_SWITCH_other_AVGQ} & {D121_SWITCH_other_MEDQ} & {R32_SWITCH_other_MEDQ} & {R64_SWITCH_other_MEDQ} \\\\
+        SWITCH$_\\text{{RGF}}$ & {D121_SWITCH_RGF_ASR}\% & {R32_SWITCH_RGF_ASR}\% & {R64_SWITCH_RGF_ASR}\% & {D121_SWITCH_RGF_AVGQ} & {R32_SWITCH_RGF_AVGQ} & {R64_SWITCH_RGF_AVGQ} & {D121_SWITCH_RGF_MEDQ} & {R32_SWITCH_RGF_MEDQ} & {R64_SWITCH_RGF_MEDQ} \\\\
                 """.format(
             D121_RGF_ASR=result["densenet121"]["RGF"]["success_rate"],
             R32_RGF_ASR=result["resnext32_4"]["RGF"]["success_rate"],
@@ -374,8 +374,7 @@ SWITCH_other & {D121_SWITCH_other_ASR}\% & {R32_SWITCH_other_ASR}\% & {R64_SWITC
 
             D121_NO_SWITCH_ASR=result["densenet121"]["NO_SWITCH"]["success_rate"],
             R32_NO_SWITCH_ASR=result["resnext32_4"]["NO_SWITCH"]["success_rate"],
-            R64_NO_SWITCH_ASR=result["resnext64_4"]
-            ["NO_SWITCH"]["success_rate"],
+            R64_NO_SWITCH_ASR=result["resnext64_4"]["NO_SWITCH"]["success_rate"],
             D121_NO_SWITCH_AVGQ=result["densenet121"]["NO_SWITCH"][avg_q],
             R32_NO_SWITCH_AVGQ=result["resnext32_4"]["NO_SWITCH"][avg_q],
             R64_NO_SWITCH_AVGQ=result["resnext64_4"]["NO_SWITCH"][avg_q],
@@ -393,25 +392,15 @@ SWITCH_other & {D121_SWITCH_other_ASR}\% & {R32_SWITCH_other_ASR}\% & {R64_SWITC
             R32_SWITCH_neg_MEDQ=result["resnext32_4"]["SWITCH_neg"][med_q],
             R64_SWITCH_neg_MEDQ=result["resnext64_4"]["SWITCH_neg"][med_q],
 
-            D121_NO_SWITCH_rnd_ASR=result["densenet121"]["NO_SWITCH_rnd"]["success_rate"],
-            R32_NO_SWITCH_rnd_ASR=result["resnext32_4"]["NO_SWITCH_rnd"]["success_rate"],
-            R64_NO_SWITCH_rnd_ASR=result["resnext64_4"]["NO_SWITCH_rnd"]["success_rate"],
-            D121_NO_SWITCH_rnd_AVGQ=result["densenet121"]["NO_SWITCH_rnd"][avg_q],
-            R32_NO_SWITCH_rnd_AVGQ=result["resnext32_4"]["NO_SWITCH_rnd"][avg_q],
-            R64_NO_SWITCH_rnd_AVGQ=result["resnext64_4"]["NO_SWITCH_rnd"][avg_q],
-            D121_NO_SWITCH_rnd_MEDQ=result["densenet121"]["NO_SWITCH_rnd"][med_q],
-            R32_NO_SWITCH_rnd_MEDQ=result["resnext32_4"]["NO_SWITCH_rnd"][med_q],
-            R64_NO_SWITCH_rnd_MEDQ=result["resnext64_4"]["NO_SWITCH_rnd"][med_q],
-
-            D121_SWITCH_other_ASR=result["densenet121"]["SWITCH_other"]["success_rate"],
-            R32_SWITCH_other_ASR=result["resnext32_4"]["SWITCH_other"]["success_rate"],
-            R64_SWITCH_other_ASR=result["resnext64_4"]["SWITCH_other"]["success_rate"],
-            D121_SWITCH_other_AVGQ=result["densenet121"]["SWITCH_other"][avg_q],
-            R32_SWITCH_other_AVGQ=result["resnext32_4"]["SWITCH_other"][avg_q],
-            R64_SWITCH_other_AVGQ=result["resnext64_4"]["SWITCH_other"][avg_q],
-            D121_SWITCH_other_MEDQ=result["densenet121"]["SWITCH_other"][med_q],
-            R32_SWITCH_other_MEDQ=result["resnext32_4"]["SWITCH_other"][med_q],
-            R64_SWITCH_other_MEDQ=result["resnext64_4"]["SWITCH_other"][med_q]
+            D121_SWITCH_RGF_ASR=result["densenet121"]["SWITCH_RGF"]["success_rate"],
+            R32_SWITCH_RGF_ASR=result["resnext32_4"]["SWITCH_RGF"]["success_rate"],
+            R64_SWITCH_RGF_ASR=result["resnext64_4"]["SWITCH_RGF"]["success_rate"],
+            D121_SWITCH_RGF_AVGQ=result["densenet121"]["SWITCH_RGF"][avg_q],
+            R32_SWITCH_RGF_AVGQ=result["resnext32_4"]["SWITCH_RGF"][avg_q],
+            R64_SWITCH_RGF_AVGQ=result["resnext64_4"]["SWITCH_RGF"][avg_q],
+            D121_SWITCH_RGF_MEDQ=result["densenet121"]["SWITCH_RGF"][med_q],
+            R32_SWITCH_RGF_MEDQ=result["resnext32_4"]["SWITCH_RGF"][med_q],
+            R64_SWITCH_RGF_MEDQ=result["resnext64_4"]["SWITCH_RGF"][med_q]
         )
         )
 
@@ -431,8 +420,7 @@ SignHunter \cite{{al2019sign}} & {D121_SignHunter_ASR}\% & {R32_SignHunter_ASR}\
 Square Attack \cite{{ACFH2020square}} & {D121_Square_ASR}\% & {R32_Square_ASR}\% & {R64_Square_ASR}\% & {D121_Square_MEDQ} & {R32_Square_MEDQ} & {R64_Square_MEDQ} & {D121_Square_AVGQ} & {R32_Square_AVGQ} & {R64_Square_AVGQ}  \\\\
 NO SWITCH & {D121_NO_SWITCH_ASR}\% & {R32_NO_SWITCH_ASR}\% & {R64_NO_SWITCH_ASR}\% & {D121_NO_SWITCH_MEDQ} & {R32_NO_SWITCH_MEDQ} & {R64_NO_SWITCH_MEDQ} & {D121_NO_SWITCH_AVGQ} & {R32_NO_SWITCH_AVGQ} & {R64_NO_SWITCH_AVGQ}  \\\\
 SWITCH & {D121_SWITCH_neg_ASR}\% & {R32_SWITCH_neg_ASR}\% & {R64_SWITCH_neg_ASR}\% & {D121_SWITCH_neg_MEDQ} & {R32_SWITCH_neg_MEDQ} & {R64_SWITCH_neg_MEDQ} & {D121_SWITCH_neg_AVGQ} & {R32_SWITCH_neg_AVGQ} & {R64_SWITCH_neg_AVGQ}  \\\\
-NO SWITCH_rnd & {D121_NO_SWITCH_rnd_ASR}\% & {R32_NO_SWITCH_rnd_ASR}\% & {R64_NO_SWITCH_rnd_ASR}\% & {D121_NO_SWITCH_rnd_MEDQ} & {R32_NO_SWITCH_rnd_MEDQ} & {R64_NO_SWITCH_rnd_MEDQ} & {D121_NO_SWITCH_rnd_AVGQ} & {R32_NO_SWITCH_rnd_AVGQ} & {R64_NO_SWITCH_rnd_AVGQ}  \\\\
-SWITCH_other & {D121_SWITCH_other_ASR}\% & {R32_SWITCH_other_ASR}\% & {R64_SWITCH_other_ASR}\% & {D121_SWITCH_other_MEDQ} & {R32_SWITCH_other_MEDQ} & {R64_SWITCH_other_MEDQ} & {D121_SWITCH_other_AVGQ} & {R32_SWITCH_other_AVGQ} & {R64_SWITCH_other_AVGQ}  \\\\
+SWITCH$_\\text{{RGF}}$ & {D121_SWITCH_RGF_ASR}\% & {R32_SWITCH_RGF_ASR}\% & {R64_SWITCH_RGF_ASR}\% & {D121_SWITCH_RGF_MEDQ} & {R32_SWITCH_RGF_MEDQ} & {R64_SWITCH_RGF_MEDQ} & {D121_SWITCH_RGF_AVGQ} & {R32_SWITCH_RGF_AVGQ} & {R64_SWITCH_RGF_AVGQ}  \\\\
         """.format(
             D121_RGF_ASR=result["densenet121"]["RGF"]["success_rate"],R32_RGF_ASR=result["resnext32_4"]["RGF"]["success_rate"],R64_RGF_ASR=result["resnext64_4"]["RGF"]["success_rate"],
             D121_RGF_AVGQ=result["densenet121"]["RGF"][avg_q], R32_RGF_AVGQ=result["resnext32_4"]["RGF"][avg_q], R64_RGF_AVGQ=result["resnext64_4"]["RGF"][avg_q],
@@ -515,25 +503,16 @@ SWITCH_other & {D121_SWITCH_other_ASR}\% & {R32_SWITCH_other_ASR}\% & {R64_SWITC
             R32_SWITCH_neg_MEDQ=result["resnext32_4"]["SWITCH_neg"][med_q],
             R64_SWITCH_neg_MEDQ=result["resnext64_4"]["SWITCH_neg"][med_q],
 
-            D121_NO_SWITCH_rnd_ASR=result["densenet121"]["NO_SWITCH_rnd"]["success_rate"],
-            R32_NO_SWITCH_rnd_ASR=result["resnext32_4"]["NO_SWITCH_rnd"]["success_rate"],
-            R64_NO_SWITCH_rnd_ASR=result["resnext64_4"]["NO_SWITCH_rnd"]["success_rate"],
-            D121_NO_SWITCH_rnd_AVGQ=result["densenet121"]["NO_SWITCH_rnd"][avg_q],
-            R32_NO_SWITCH_rnd_AVGQ=result["resnext32_4"]["NO_SWITCH_rnd"][avg_q],
-            R64_NO_SWITCH_rnd_AVGQ=result["resnext64_4"]["NO_SWITCH_rnd"][avg_q],
-            D121_NO_SWITCH_rnd_MEDQ=result["densenet121"]["NO_SWITCH_rnd"][med_q],
-            R32_NO_SWITCH_rnd_MEDQ=result["resnext32_4"]["NO_SWITCH_rnd"][med_q],
-            R64_NO_SWITCH_rnd_MEDQ=result["resnext64_4"]["NO_SWITCH_rnd"][med_q],
+            D121_SWITCH_RGF_ASR=result["densenet121"]["SWITCH_RGF"]["success_rate"],
+            R32_SWITCH_RGF_ASR=result["resnext32_4"]["SWITCH_RGF"]["success_rate"],
+            R64_SWITCH_RGF_ASR=result["resnext64_4"]["SWITCH_RGF"]["success_rate"],
+            D121_SWITCH_RGF_AVGQ=result["densenet121"]["SWITCH_RGF"][avg_q],
+            R32_SWITCH_RGF_AVGQ=result["resnext32_4"]["SWITCH_RGF"][avg_q],
+            R64_SWITCH_RGF_AVGQ=result["resnext64_4"]["SWITCH_RGF"][avg_q],
+            D121_SWITCH_RGF_MEDQ=result["densenet121"]["SWITCH_RGF"][med_q],
+            R32_SWITCH_RGF_MEDQ=result["resnext32_4"]["SWITCH_RGF"][med_q],
+            R64_SWITCH_RGF_MEDQ=result["resnext64_4"]["SWITCH_RGF"][med_q],
 
-            D121_SWITCH_other_ASR=result["densenet121"]["SWITCH_other"]["success_rate"],
-            R32_SWITCH_other_ASR=result["resnext32_4"]["SWITCH_other"]["success_rate"],
-            R64_SWITCH_other_ASR=result["resnext64_4"]["SWITCH_other"]["success_rate"],
-            D121_SWITCH_other_AVGQ=result["densenet121"]["SWITCH_other"][avg_q],
-            R32_SWITCH_other_AVGQ=result["resnext32_4"]["SWITCH_other"][avg_q],
-            R64_SWITCH_other_AVGQ=result["resnext64_4"]["SWITCH_other"][avg_q],
-            D121_SWITCH_other_MEDQ=result["densenet121"]["SWITCH_other"][med_q],
-            R32_SWITCH_other_MEDQ=result["resnext32_4"]["SWITCH_other"][med_q],
-            R64_SWITCH_other_MEDQ=result["resnext64_4"]["SWITCH_other"][med_q]
         )
               )
     else:
@@ -546,8 +525,7 @@ SignHunter \cite{{al2019sign}} & {D121_SignHunter_ASR}\% & {R32_SignHunter_ASR}\
 Square Attack \cite{{ACFH2020square}} & {D121_Square_ASR}\% & {R32_Square_ASR}\% & {R64_Square_ASR}\% & {D121_Square_MEDQ} & {R32_Square_MEDQ} & {R64_Square_MEDQ} & {D121_Square_AVGQ} & {R32_Square_AVGQ} & {R64_Square_AVGQ}  \\\\
 NO SWITCH & {D121_NO_SWITCH_ASR}\% & {R32_NO_SWITCH_ASR}\% & {R64_NO_SWITCH_ASR}\% & {D121_NO_SWITCH_MEDQ} & {R32_NO_SWITCH_MEDQ} & {R64_NO_SWITCH_MEDQ} & {D121_NO_SWITCH_AVGQ} & {R32_NO_SWITCH_AVGQ} & {R64_NO_SWITCH_AVGQ}  \\\\
 SWITCH & {D121_SWITCH_neg_ASR}\% & {R32_SWITCH_neg_ASR}\% & {R64_SWITCH_neg_ASR}\% & {D121_SWITCH_neg_MEDQ} & {R32_SWITCH_neg_MEDQ} & {R64_SWITCH_neg_MEDQ} & {D121_SWITCH_neg_AVGQ} & {R32_SWITCH_neg_AVGQ} & {R64_SWITCH_neg_AVGQ}  \\\\
-NO SWITCH_rnd & {D121_NO_SWITCH_rnd_ASR}\% & {R32_NO_SWITCH_rnd_ASR}\% & {R64_NO_SWITCH_rnd_ASR}\% & {D121_NO_SWITCH_rnd_MEDQ} & {R32_NO_SWITCH_rnd_MEDQ} & {R64_NO_SWITCH_rnd_MEDQ} & {D121_NO_SWITCH_rnd_AVGQ} & {R32_NO_SWITCH_rnd_AVGQ} & {R64_NO_SWITCH_rnd_AVGQ}  \\\\
-SWITCH_other & {D121_SWITCH_other_ASR}\% & {R32_SWITCH_other_ASR}\% & {R64_SWITCH_other_ASR}\% & {D121_SWITCH_other_MEDQ} & {R32_SWITCH_other_MEDQ} & {R64_SWITCH_other_MEDQ} & {D121_SWITCH_other_AVGQ} & {R32_SWITCH_other_AVGQ} & {R64_SWITCH_other_AVGQ}  \\\\
+SWITCH_RGF & {D121_SWITCH_RGF_ASR}\% & {R32_SWITCH_RGF_ASR}\% & {R64_SWITCH_RGF_ASR}\% & {D121_SWITCH_RGF_MEDQ} & {R32_SWITCH_RGF_MEDQ} & {R64_SWITCH_RGF_MEDQ} & {D121_SWITCH_RGF_AVGQ} & {R32_SWITCH_RGF_AVGQ} & {R64_SWITCH_RGF_AVGQ}  \\\\
                 """.format(
             D121_RGF_ASR=result["densenet121"]["RGF"]["success_rate"],
             R32_RGF_ASR=result["resnext32_4"]["RGF"]["success_rate"],
@@ -624,25 +602,15 @@ SWITCH_other & {D121_SWITCH_other_ASR}\% & {R32_SWITCH_other_ASR}\% & {R64_SWITC
             R32_SWITCH_neg_MEDQ=result["resnext32_4"]["SWITCH_neg"][med_q],
             R64_SWITCH_neg_MEDQ=result["resnext64_4"]["SWITCH_neg"][med_q],
 
-            D121_NO_SWITCH_rnd_ASR=result["densenet121"]["NO_SWITCH_rnd"]["success_rate"],
-            R32_NO_SWITCH_rnd_ASR=result["resnext32_4"]["NO_SWITCH_rnd"]["success_rate"],
-            R64_NO_SWITCH_rnd_ASR=result["resnext64_4"]["NO_SWITCH_rnd"]["success_rate"],
-            D121_NO_SWITCH_rnd_AVGQ=result["densenet121"]["NO_SWITCH_rnd"][avg_q],
-            R32_NO_SWITCH_rnd_AVGQ=result["resnext32_4"]["NO_SWITCH_rnd"][avg_q],
-            R64_NO_SWITCH_rnd_AVGQ=result["resnext64_4"]["NO_SWITCH_rnd"][avg_q],
-            D121_NO_SWITCH_rnd_MEDQ=result["densenet121"]["NO_SWITCH_rnd"][med_q],
-            R32_NO_SWITCH_rnd_MEDQ=result["resnext32_4"]["NO_SWITCH_rnd"][med_q],
-            R64_NO_SWITCH_rnd_MEDQ=result["resnext64_4"]["NO_SWITCH_rnd"][med_q],
-
-            D121_SWITCH_other_ASR=result["densenet121"]["SWITCH_other"]["success_rate"],
-            R32_SWITCH_other_ASR=result["resnext32_4"]["SWITCH_other"]["success_rate"],
-            R64_SWITCH_other_ASR=result["resnext64_4"]["SWITCH_other"]["success_rate"],
-            D121_SWITCH_other_AVGQ=result["densenet121"]["SWITCH_other"][avg_q],
-            R32_SWITCH_other_AVGQ=result["resnext32_4"]["SWITCH_other"][avg_q],
-            R64_SWITCH_other_AVGQ=result["resnext64_4"]["SWITCH_other"][avg_q],
-            D121_SWITCH_other_MEDQ=result["densenet121"]["SWITCH_other"][med_q],
-            R32_SWITCH_other_MEDQ=result["resnext32_4"]["SWITCH_other"][med_q],
-            R64_SWITCH_other_MEDQ=result["resnext64_4"]["SWITCH_other"][med_q]
+            D121_SWITCH_RGF_ASR=result["densenet121"]["SWITCH_RGF"]["success_rate"],
+            R32_SWITCH_RGF_ASR=result["resnext32_4"]["SWITCH_RGF"]["success_rate"],
+            R64_SWITCH_RGF_ASR=result["resnext64_4"]["SWITCH_RGF"]["success_rate"],
+            D121_SWITCH_RGF_AVGQ=result["densenet121"]["SWITCH_RGF"][avg_q],
+            R32_SWITCH_RGF_AVGQ=result["resnext32_4"]["SWITCH_RGF"][avg_q],
+            R64_SWITCH_RGF_AVGQ=result["resnext64_4"]["SWITCH_RGF"][avg_q],
+            D121_SWITCH_RGF_MEDQ=result["densenet121"]["SWITCH_RGF"][med_q],
+            R32_SWITCH_RGF_MEDQ=result["resnext32_4"]["SWITCH_RGF"][med_q],
+            R64_SWITCH_RGF_MEDQ=result["resnext64_4"]["SWITCH_RGF"][med_q]
         )
         )
 
@@ -967,8 +935,7 @@ def draw_tables_for_CIFAR(norm, archs_result):
                 & & Square Attack \cite{{ACFH2020square}} & {pyramidnet272_Square_ASR}\% & {gdas_Square_ASR}\% & {WRN28_Square_ASR}\% & {WRN40_Square_ASR}\% & {pyramidnet272_Square_AVGQ} & {gdas_Square_AVGQ} & {WRN28_Square_AVGQ} & {WRN40_Square_AVGQ} & {pyramidnet272_Square_MEDQ} & {gdas_Square_MEDQ} & {WRN28_Square_MEDQ} & {WRN40_Square_MEDQ} \\\\
                 & & NO SWITCH & {pyramidnet272_NO_SWITCH_ASR}\% & {gdas_NO_SWITCH_ASR}\% & {WRN28_NO_SWITCH_ASR}\% & {WRN40_NO_SWITCH_ASR}\% & {pyramidnet272_NO_SWITCH_AVGQ} & {gdas_NO_SWITCH_AVGQ} & {WRN28_NO_SWITCH_AVGQ} & {WRN40_NO_SWITCH_AVGQ} & {pyramidnet272_NO_SWITCH_MEDQ} & {gdas_NO_SWITCH_MEDQ} & {WRN28_NO_SWITCH_MEDQ} & {WRN40_NO_SWITCH_MEDQ} \\\\
                 & & SWITCH & {pyramidnet272_SWITCH_neg_ASR}\% & {gdas_SWITCH_neg_ASR}\% & {WRN28_SWITCH_neg_ASR}\% & {WRN40_SWITCH_neg_ASR}\% & {pyramidnet272_SWITCH_neg_AVGQ} & {gdas_SWITCH_neg_AVGQ} & {WRN28_SWITCH_neg_AVGQ} & {WRN40_SWITCH_neg_AVGQ} & {pyramidnet272_SWITCH_neg_MEDQ} & {gdas_SWITCH_neg_MEDQ} & {WRN28_SWITCH_neg_MEDQ} & {WRN40_SWITCH_neg_MEDQ} \\\\
-                & & NO SWITCH$_rnd$ & {pyramidnet272_NO_SWITCH_rnd_ASR}\% & {gdas_NO_SWITCH_rnd_ASR}\% & {WRN28_NO_SWITCH_rnd_ASR}\% & {WRN40_NO_SWITCH_rnd_ASR}\% & {pyramidnet272_NO_SWITCH_rnd_AVGQ} & {gdas_NO_SWITCH_rnd_AVGQ} & {WRN28_NO_SWITCH_rnd_AVGQ} & {WRN40_NO_SWITCH_rnd_AVGQ} & {pyramidnet272_NO_SWITCH_rnd_MEDQ} & {gdas_NO_SWITCH_rnd_MEDQ} & {WRN28_NO_SWITCH_rnd_MEDQ} & {WRN40_NO_SWITCH_rnd_MEDQ} \\\\
-                & & SWITCH$_other$ & {pyramidnet272_SWITCH_other_ASR}\% & {gdas_SWITCH_other_ASR}\% & {WRN28_SWITCH_other_ASR}\% & {WRN40_SWITCH_other_ASR}\% & {pyramidnet272_SWITCH_other_AVGQ} & {gdas_SWITCH_other_AVGQ} & {WRN28_SWITCH_other_AVGQ} & {WRN40_SWITCH_other_AVGQ} & {pyramidnet272_SWITCH_other_MEDQ} & {gdas_SWITCH_other_MEDQ} & {WRN28_SWITCH_other_MEDQ} & {WRN40_SWITCH_other_MEDQ} \\\\
+                & & SWITCH$_\\text{{RGF}}$ & {pyramidnet272_SWITCH_RGF_ASR}\% & {gdas_SWITCH_RGF_ASR}\% & {WRN28_SWITCH_RGF_ASR}\% & {WRN40_SWITCH_RGF_ASR}\% & {pyramidnet272_SWITCH_RGF_AVGQ} & {gdas_SWITCH_RGF_AVGQ} & {WRN28_SWITCH_RGF_AVGQ} & {WRN40_SWITCH_RGF_AVGQ} & {pyramidnet272_SWITCH_RGF_MEDQ} & {gdas_SWITCH_RGF_MEDQ} & {WRN28_SWITCH_RGF_MEDQ} & {WRN40_SWITCH_RGF_MEDQ} \\\\
         """.format(norm_str="$\ell_\infty$" if norm == "linf" else "$\ell_2$",
                    # pyramidnet272_NES_ASR=result["pyramidnet272"]["NES"]["success_rate"], gdas_NES_ASR=result["gdas"]["NES"]["success_rate"],
                    # WRN28_NES_ASR=result["WRN-28-10-drop"]["NES"]["success_rate"], WRN40_NES_ASR=result["WRN-40-10-drop"]["NES"]["success_rate"],
@@ -1102,31 +1069,18 @@ def draw_tables_for_CIFAR(norm, archs_result):
                    WRN28_SWITCH_neg_MEDQ=result["WRN-28-10-drop"]["SWITCH_neg"][med_q],
                    WRN40_SWITCH_neg_MEDQ=result["WRN-40-10-drop"]["SWITCH_neg"][med_q],
 
-                   pyramidnet272_SWITCH_other_ASR=result["pyramidnet272"]["SWITCH_other"]["success_rate"],
-                   gdas_SWITCH_other_ASR=result["gdas"]["SWITCH_other"]["success_rate"],
-                   WRN28_SWITCH_other_ASR=result["WRN-28-10-drop"]["SWITCH_other"]["success_rate"],
-                   WRN40_SWITCH_other_ASR=result["WRN-40-10-drop"]["SWITCH_other"]["success_rate"],
-                   pyramidnet272_SWITCH_other_AVGQ=result["pyramidnet272"]["SWITCH_other"][avg_q],
-                   gdas_SWITCH_other_AVGQ=result["gdas"]["SWITCH_other"][avg_q],
-                   WRN28_SWITCH_other_AVGQ=result["WRN-28-10-drop"]["SWITCH_other"][avg_q],
-                   WRN40_SWITCH_other_AVGQ=result["WRN-40-10-drop"]["SWITCH_other"][avg_q],
-                   pyramidnet272_SWITCH_other_MEDQ=result["pyramidnet272"]["SWITCH_other"][med_q],
-                   gdas_SWITCH_other_MEDQ=result["gdas"]["SWITCH_other"][med_q],
-                   WRN28_SWITCH_other_MEDQ=result["WRN-28-10-drop"]["SWITCH_other"][med_q],
-                   WRN40_SWITCH_other_MEDQ=result["WRN-40-10-drop"]["SWITCH_other"][med_q],
-
-                   pyramidnet272_NO_SWITCH_rnd_ASR=result["pyramidnet272"]["NO_SWITCH_rnd"]["success_rate"],
-                   gdas_NO_SWITCH_rnd_ASR=result["gdas"]["NO_SWITCH_rnd"]["success_rate"],
-                   WRN28_NO_SWITCH_rnd_ASR=result["WRN-28-10-drop"]["NO_SWITCH_rnd"]["success_rate"],
-                   WRN40_NO_SWITCH_rnd_ASR=result["WRN-40-10-drop"]["NO_SWITCH_rnd"]["success_rate"],
-                   pyramidnet272_NO_SWITCH_rnd_AVGQ=result["pyramidnet272"]["NO_SWITCH_rnd"][avg_q],
-                   gdas_NO_SWITCH_rnd_AVGQ=result["gdas"]["NO_SWITCH_rnd"][avg_q],
-                   WRN28_NO_SWITCH_rnd_AVGQ=result["WRN-28-10-drop"]["NO_SWITCH_rnd"][avg_q],
-                   WRN40_NO_SWITCH_rnd_AVGQ=result["WRN-40-10-drop"]["NO_SWITCH_rnd"][avg_q],
-                   pyramidnet272_NO_SWITCH_rnd_MEDQ=result["pyramidnet272"]["NO_SWITCH_rnd"][med_q],
-                   gdas_NO_SWITCH_rnd_MEDQ=result["gdas"]["NO_SWITCH_rnd"][med_q],
-                   WRN28_NO_SWITCH_rnd_MEDQ=result["WRN-28-10-drop"]["NO_SWITCH_rnd"][med_q],
-                   WRN40_NO_SWITCH_rnd_MEDQ=result["WRN-40-10-drop"]["NO_SWITCH_rnd"][med_q],
+                   pyramidnet272_SWITCH_RGF_ASR=result["pyramidnet272"]["SWITCH_RGF"]["success_rate"],
+                   gdas_SWITCH_RGF_ASR=result["gdas"]["SWITCH_RGF"]["success_rate"],
+                   WRN28_SWITCH_RGF_ASR=result["WRN-28-10-drop"]["SWITCH_RGF"]["success_rate"],
+                   WRN40_SWITCH_RGF_ASR=result["WRN-40-10-drop"]["SWITCH_RGF"]["success_rate"],
+                   pyramidnet272_SWITCH_RGF_AVGQ=result["pyramidnet272"]["SWITCH_RGF"][avg_q],
+                   gdas_SWITCH_RGF_AVGQ=result["gdas"]["SWITCH_RGF"][avg_q],
+                   WRN28_SWITCH_RGF_AVGQ=result["WRN-28-10-drop"]["SWITCH_RGF"][avg_q],
+                   WRN40_SWITCH_RGF_AVGQ=result["WRN-40-10-drop"]["SWITCH_RGF"][avg_q],
+                   pyramidnet272_SWITCH_RGF_MEDQ=result["pyramidnet272"]["SWITCH_RGF"][med_q],
+                   gdas_SWITCH_RGF_MEDQ=result["gdas"]["SWITCH_RGF"][med_q],
+                   WRN28_SWITCH_RGF_MEDQ=result["WRN-28-10-drop"]["SWITCH_RGF"][med_q],
+                   WRN40_SWITCH_RGF_MEDQ=result["WRN-40-10-drop"]["SWITCH_RGF"][med_q],
                    )
               )
     else:
@@ -1139,8 +1093,7 @@ def draw_tables_for_CIFAR(norm, archs_result):
                         & & Square Attack \cite{{ACFH2020square}} & {pyramidnet272_Square_ASR}\% & {gdas_Square_ASR}\% & {WRN28_Square_ASR}\% & {WRN40_Square_ASR}\% & {pyramidnet272_Square_AVGQ} & {gdas_Square_AVGQ} & {WRN28_Square_AVGQ} & {WRN40_Square_AVGQ} & {pyramidnet272_Square_MEDQ} & {gdas_Square_MEDQ} & {WRN28_Square_MEDQ} & {WRN40_Square_MEDQ} \\\\
                         & & NO SWITCH & {pyramidnet272_NO_SWITCH_ASR}\% & {gdas_NO_SWITCH_ASR}\% & {WRN28_NO_SWITCH_ASR}\% & {WRN40_NO_SWITCH_ASR}\% & {pyramidnet272_NO_SWITCH_AVGQ} & {gdas_NO_SWITCH_AVGQ} & {WRN28_NO_SWITCH_AVGQ} & {WRN40_NO_SWITCH_AVGQ} & {pyramidnet272_NO_SWITCH_MEDQ} & {gdas_NO_SWITCH_MEDQ} & {WRN28_NO_SWITCH_MEDQ} & {WRN40_NO_SWITCH_MEDQ} \\\\
                         & & SWITCH & {pyramidnet272_SWITCH_neg_ASR}\% & {gdas_SWITCH_neg_ASR}\% & {WRN28_SWITCH_neg_ASR}\% & {WRN40_SWITCH_neg_ASR}\% & {pyramidnet272_SWITCH_neg_AVGQ} & {gdas_SWITCH_neg_AVGQ} & {WRN28_SWITCH_neg_AVGQ} & {WRN40_SWITCH_neg_AVGQ} & {pyramidnet272_SWITCH_neg_MEDQ} & {gdas_SWITCH_neg_MEDQ} & {WRN28_SWITCH_neg_MEDQ} & {WRN40_SWITCH_neg_MEDQ} \\\\
-                        & & NO SWITCH$_rnd$ & {pyramidnet272_NO_SWITCH_rnd_ASR}\% & {gdas_NO_SWITCH_rnd_ASR}\% & {WRN28_NO_SWITCH_rnd_ASR}\% & {WRN40_NO_SWITCH_rnd_ASR}\% & {pyramidnet272_NO_SWITCH_rnd_AVGQ} & {gdas_NO_SWITCH_rnd_AVGQ} & {WRN28_NO_SWITCH_rnd_AVGQ} & {WRN40_NO_SWITCH_rnd_AVGQ} & {pyramidnet272_NO_SWITCH_rnd_MEDQ} & {gdas_NO_SWITCH_rnd_MEDQ} & {WRN28_NO_SWITCH_rnd_MEDQ} & {WRN40_NO_SWITCH_rnd_MEDQ} \\\\
-                        & & SWITCH$_other$ & {pyramidnet272_SWITCH_other_ASR}\% & {gdas_SWITCH_other_ASR}\% & {WRN28_SWITCH_other_ASR}\% & {WRN40_SWITCH_other_ASR}\% & {pyramidnet272_SWITCH_other_AVGQ} & {gdas_SWITCH_other_AVGQ} & {WRN28_SWITCH_other_AVGQ} & {WRN40_SWITCH_other_AVGQ} & {pyramidnet272_SWITCH_other_MEDQ} & {gdas_SWITCH_other_MEDQ} & {WRN28_SWITCH_other_MEDQ} & {WRN40_SWITCH_other_MEDQ} \\\\
+                        & & SWITCH$_\\text{{RGF}}& {pyramidnet272_SWITCH_RGF_ASR}\% & {gdas_SWITCH_RGF_ASR}\% & {WRN28_SWITCH_RGF_ASR}\% & {WRN40_SWITCH_RGF_ASR}\% & {pyramidnet272_SWITCH_RGF_AVGQ} & {gdas_SWITCH_RGF_AVGQ} & {WRN28_SWITCH_RGF_AVGQ} & {WRN40_SWITCH_RGF_AVGQ} & {pyramidnet272_SWITCH_RGF_MEDQ} & {gdas_SWITCH_RGF_MEDQ} & {WRN28_SWITCH_RGF_MEDQ} & {WRN40_SWITCH_RGF_MEDQ} \\\\
                 """.format(norm_str="$\ell_\infty$" if norm == "linf" else "$\ell_2$",
                           pyramidnet272_RGF_ASR=result["pyramidnet272"]["RGF"]["success_rate"],
                            gdas_RGF_ASR=result["gdas"]["RGF"]["success_rate"],
@@ -1259,31 +1212,18 @@ def draw_tables_for_CIFAR(norm, archs_result):
                            WRN28_SWITCH_neg_MEDQ=result["WRN-28-10-drop"]["SWITCH_neg"][med_q],
                            WRN40_SWITCH_neg_MEDQ=result["WRN-40-10-drop"]["SWITCH_neg"][med_q],
 
-                           pyramidnet272_SWITCH_other_ASR=result["pyramidnet272"]["SWITCH_other"]["success_rate"],
-                           gdas_SWITCH_other_ASR=result["gdas"]["SWITCH_other"]["success_rate"],
-                           WRN28_SWITCH_other_ASR=result["WRN-28-10-drop"]["SWITCH_other"]["success_rate"],
-                           WRN40_SWITCH_other_ASR=result["WRN-40-10-drop"]["SWITCH_other"]["success_rate"],
-                           pyramidnet272_SWITCH_other_AVGQ=result["pyramidnet272"]["SWITCH_other"][avg_q],
-                           gdas_SWITCH_other_AVGQ=result["gdas"]["SWITCH_other"][avg_q],
-                           WRN28_SWITCH_other_AVGQ=result["WRN-28-10-drop"]["SWITCH_other"][avg_q],
-                           WRN40_SWITCH_other_AVGQ=result["WRN-40-10-drop"]["SWITCH_other"][avg_q],
-                           pyramidnet272_SWITCH_other_MEDQ=result["pyramidnet272"]["SWITCH_other"][med_q],
-                           gdas_SWITCH_other_MEDQ=result["gdas"]["SWITCH_other"][med_q],
-                           WRN28_SWITCH_other_MEDQ=result["WRN-28-10-drop"]["SWITCH_other"][med_q],
-                           WRN40_SWITCH_other_MEDQ=result["WRN-40-10-drop"]["SWITCH_other"][med_q],
-
-                           pyramidnet272_NO_SWITCH_rnd_ASR=result["pyramidnet272"]["NO_SWITCH_rnd"]["success_rate"],
-                           gdas_NO_SWITCH_rnd_ASR=result["gdas"]["NO_SWITCH_rnd"]["success_rate"],
-                           WRN28_NO_SWITCH_rnd_ASR=result["WRN-28-10-drop"]["NO_SWITCH_rnd"]["success_rate"],
-                           WRN40_NO_SWITCH_rnd_ASR=result["WRN-40-10-drop"]["NO_SWITCH_rnd"]["success_rate"],
-                           pyramidnet272_NO_SWITCH_rnd_AVGQ=result["pyramidnet272"]["NO_SWITCH_rnd"][avg_q],
-                           gdas_NO_SWITCH_rnd_AVGQ=result["gdas"]["NO_SWITCH_rnd"][avg_q],
-                           WRN28_NO_SWITCH_rnd_AVGQ=result["WRN-28-10-drop"]["NO_SWITCH_rnd"][avg_q],
-                           WRN40_NO_SWITCH_rnd_AVGQ=result["WRN-40-10-drop"]["NO_SWITCH_rnd"][avg_q],
-                           pyramidnet272_NO_SWITCH_rnd_MEDQ=result["pyramidnet272"]["NO_SWITCH_rnd"][med_q],
-                           gdas_NO_SWITCH_rnd_MEDQ=result["gdas"]["NO_SWITCH_rnd"][med_q],
-                           WRN28_NO_SWITCH_rnd_MEDQ=result["WRN-28-10-drop"]["NO_SWITCH_rnd"][med_q],
-                           WRN40_NO_SWITCH_rnd_MEDQ=result["WRN-40-10-drop"]["NO_SWITCH_rnd"][med_q],
+                           pyramidnet272_SWITCH_RGF_ASR=result["pyramidnet272"]["SWITCH_RGF"]["success_rate"],
+                           gdas_SWITCH_RGF_ASR=result["gdas"]["SWITCH_RGF"]["success_rate"],
+                           WRN28_SWITCH_RGF_ASR=result["WRN-28-10-drop"]["SWITCH_RGF"]["success_rate"],
+                           WRN40_SWITCH_RGF_ASR=result["WRN-40-10-drop"]["SWITCH_RGF"]["success_rate"],
+                           pyramidnet272_SWITCH_RGF_AVGQ=result["pyramidnet272"]["SWITCH_RGF"][avg_q],
+                           gdas_SWITCH_RGF_AVGQ=result["gdas"]["SWITCH_RGF"][avg_q],
+                           WRN28_SWITCH_RGF_AVGQ=result["WRN-28-10-drop"]["SWITCH_RGF"][avg_q],
+                           WRN40_SWITCH_RGF_AVGQ=result["WRN-40-10-drop"]["SWITCH_RGF"][avg_q],
+                           pyramidnet272_SWITCH_RGF_MEDQ=result["pyramidnet272"]["SWITCH_RGF"][med_q],
+                           gdas_SWITCH_RGF_MEDQ=result["gdas"]["SWITCH_RGF"][med_q],
+                           WRN28_SWITCH_RGF_MEDQ=result["WRN-28-10-drop"]["SWITCH_RGF"][med_q],
+                           WRN40_SWITCH_RGF_MEDQ=result["WRN-40-10-drop"]["SWITCH_RGF"][med_q],
                            )
               )
 
@@ -1302,8 +1242,7 @@ def draw_tables_for_CIFAR_median_avg_query(norm, archs_result):
                 & & Square Attack \cite{{ACFH2020square}} & {pyramidnet272_Square_ASR}\% & {gdas_Square_ASR}\% & {WRN28_Square_ASR}\% & {WRN40_Square_ASR}\% & {pyramidnet272_Square_MEDQ} & {gdas_Square_MEDQ} & {WRN28_Square_MEDQ} & {WRN40_Square_MEDQ} & {pyramidnet272_Square_AVGQ} & {gdas_Square_AVGQ} & {WRN28_Square_AVGQ} & {WRN40_Square_AVGQ}  \\\\
                 & & NO SWITCH & {pyramidnet272_NO_SWITCH_ASR}\% & {gdas_NO_SWITCH_ASR}\% & {WRN28_NO_SWITCH_ASR}\% & {WRN40_NO_SWITCH_ASR}\% & {pyramidnet272_NO_SWITCH_MEDQ} & {gdas_NO_SWITCH_MEDQ} & {WRN28_NO_SWITCH_MEDQ} & {WRN40_NO_SWITCH_MEDQ} & {pyramidnet272_NO_SWITCH_AVGQ} & {gdas_NO_SWITCH_AVGQ} & {WRN28_NO_SWITCH_AVGQ} & {WRN40_NO_SWITCH_AVGQ}  \\\\
                 & & SWITCH & {pyramidnet272_SWITCH_neg_ASR}\% & {gdas_SWITCH_neg_ASR}\% & {WRN28_SWITCH_neg_ASR}\% & {WRN40_SWITCH_neg_ASR}\% & {pyramidnet272_SWITCH_neg_MEDQ} & {gdas_SWITCH_neg_MEDQ} & {WRN28_SWITCH_neg_MEDQ} & {WRN40_SWITCH_neg_MEDQ} & {pyramidnet272_SWITCH_neg_AVGQ} & {gdas_SWITCH_neg_AVGQ} & {WRN28_SWITCH_neg_AVGQ} & {WRN40_SWITCH_neg_AVGQ}  \\\\
-                & & NO SWITCH$_rnd$ & {pyramidnet272_NO_SWITCH_rnd_ASR}\% & {gdas_NO_SWITCH_rnd_ASR}\% & {WRN28_NO_SWITCH_rnd_ASR}\% & {WRN40_NO_SWITCH_rnd_ASR}\% & {pyramidnet272_NO_SWITCH_rnd_MEDQ} & {gdas_NO_SWITCH_rnd_MEDQ} & {WRN28_NO_SWITCH_rnd_MEDQ} & {WRN40_NO_SWITCH_rnd_MEDQ} & {pyramidnet272_NO_SWITCH_rnd_AVGQ} & {gdas_NO_SWITCH_rnd_AVGQ} & {WRN28_NO_SWITCH_rnd_AVGQ} & {WRN40_NO_SWITCH_rnd_AVGQ}  \\\\
-                & & SWITCH$_other$ & {pyramidnet272_SWITCH_other_ASR}\% & {gdas_SWITCH_other_ASR}\% & {WRN28_SWITCH_other_ASR}\% & {WRN40_SWITCH_other_ASR}\% & {pyramidnet272_SWITCH_other_MEDQ} & {gdas_SWITCH_other_MEDQ} & {WRN28_SWITCH_other_MEDQ} & {WRN40_SWITCH_other_MEDQ} & {pyramidnet272_SWITCH_other_AVGQ} & {gdas_SWITCH_other_AVGQ} & {WRN28_SWITCH_other_AVGQ} & {WRN40_SWITCH_other_AVGQ} \\\\
+                & & SWITCH$_\\text{{RGF}}$ & {pyramidnet272_SWITCH_RGF_ASR}\% & {gdas_SWITCH_RGF_ASR}\% & {WRN28_SWITCH_RGF_ASR}\% & {WRN40_SWITCH_RGF_ASR}\% & {pyramidnet272_SWITCH_RGF_MEDQ} & {gdas_SWITCH_RGF_MEDQ} & {WRN28_SWITCH_RGF_MEDQ} & {WRN40_SWITCH_RGF_MEDQ} & {pyramidnet272_SWITCH_RGF_AVGQ} & {gdas_SWITCH_RGF_AVGQ} & {WRN28_SWITCH_RGF_AVGQ} & {WRN40_SWITCH_RGF_AVGQ}  \\\\
         """.format(norm_str="$\ell_\infty$" if norm == "linf" else "$\ell_2$",
                    # pyramidnet272_NES_ASR=result["pyramidnet272"]["NES"]["success_rate"], gdas_NES_ASR=result["gdas"]["NES"]["success_rate"],
                    # WRN28_NES_ASR=result["WRN-28-10-drop"]["NES"]["success_rate"], WRN40_NES_ASR=result["WRN-40-10-drop"]["NES"]["success_rate"],
@@ -1437,31 +1376,18 @@ def draw_tables_for_CIFAR_median_avg_query(norm, archs_result):
                    WRN28_SWITCH_neg_MEDQ=result["WRN-28-10-drop"]["SWITCH_neg"][med_q],
                    WRN40_SWITCH_neg_MEDQ=result["WRN-40-10-drop"]["SWITCH_neg"][med_q],
 
-                   pyramidnet272_SWITCH_other_ASR=result["pyramidnet272"]["SWITCH_other"]["success_rate"],
-                   gdas_SWITCH_other_ASR=result["gdas"]["SWITCH_other"]["success_rate"],
-                   WRN28_SWITCH_other_ASR=result["WRN-28-10-drop"]["SWITCH_other"]["success_rate"],
-                   WRN40_SWITCH_other_ASR=result["WRN-40-10-drop"]["SWITCH_other"]["success_rate"],
-                   pyramidnet272_SWITCH_other_AVGQ=result["pyramidnet272"]["SWITCH_other"][avg_q],
-                   gdas_SWITCH_other_AVGQ=result["gdas"]["SWITCH_other"][avg_q],
-                   WRN28_SWITCH_other_AVGQ=result["WRN-28-10-drop"]["SWITCH_other"][avg_q],
-                   WRN40_SWITCH_other_AVGQ=result["WRN-40-10-drop"]["SWITCH_other"][avg_q],
-                   pyramidnet272_SWITCH_other_MEDQ=result["pyramidnet272"]["SWITCH_other"][med_q],
-                   gdas_SWITCH_other_MEDQ=result["gdas"]["SWITCH_other"][med_q],
-                   WRN28_SWITCH_other_MEDQ=result["WRN-28-10-drop"]["SWITCH_other"][med_q],
-                   WRN40_SWITCH_other_MEDQ=result["WRN-40-10-drop"]["SWITCH_other"][med_q],
-
-                   pyramidnet272_NO_SWITCH_rnd_ASR=result["pyramidnet272"]["NO_SWITCH_rnd"]["success_rate"],
-                   gdas_NO_SWITCH_rnd_ASR=result["gdas"]["NO_SWITCH_rnd"]["success_rate"],
-                   WRN28_NO_SWITCH_rnd_ASR=result["WRN-28-10-drop"]["NO_SWITCH_rnd"]["success_rate"],
-                   WRN40_NO_SWITCH_rnd_ASR=result["WRN-40-10-drop"]["NO_SWITCH_rnd"]["success_rate"],
-                   pyramidnet272_NO_SWITCH_rnd_AVGQ=result["pyramidnet272"]["NO_SWITCH_rnd"][avg_q],
-                   gdas_NO_SWITCH_rnd_AVGQ=result["gdas"]["NO_SWITCH_rnd"][avg_q],
-                   WRN28_NO_SWITCH_rnd_AVGQ=result["WRN-28-10-drop"]["NO_SWITCH_rnd"][avg_q],
-                   WRN40_NO_SWITCH_rnd_AVGQ=result["WRN-40-10-drop"]["NO_SWITCH_rnd"][avg_q],
-                   pyramidnet272_NO_SWITCH_rnd_MEDQ=result["pyramidnet272"]["NO_SWITCH_rnd"][med_q],
-                   gdas_NO_SWITCH_rnd_MEDQ=result["gdas"]["NO_SWITCH_rnd"][med_q],
-                   WRN28_NO_SWITCH_rnd_MEDQ=result["WRN-28-10-drop"]["NO_SWITCH_rnd"][med_q],
-                   WRN40_NO_SWITCH_rnd_MEDQ=result["WRN-40-10-drop"]["NO_SWITCH_rnd"][med_q],
+                   pyramidnet272_SWITCH_RGF_ASR=result["pyramidnet272"]["SWITCH_RGF"]["success_rate"],
+                   gdas_SWITCH_RGF_ASR=result["gdas"]["SWITCH_RGF"]["success_rate"],
+                   WRN28_SWITCH_RGF_ASR=result["WRN-28-10-drop"]["SWITCH_RGF"]["success_rate"],
+                   WRN40_SWITCH_RGF_ASR=result["WRN-40-10-drop"]["SWITCH_RGF"]["success_rate"],
+                   pyramidnet272_SWITCH_RGF_AVGQ=result["pyramidnet272"]["SWITCH_RGF"][avg_q],
+                   gdas_SWITCH_RGF_AVGQ=result["gdas"]["SWITCH_RGF"][avg_q],
+                   WRN28_SWITCH_RGF_AVGQ=result["WRN-28-10-drop"]["SWITCH_RGF"][avg_q],
+                   WRN40_SWITCH_RGF_AVGQ=result["WRN-40-10-drop"]["SWITCH_RGF"][avg_q],
+                   pyramidnet272_SWITCH_RGF_MEDQ=result["pyramidnet272"]["SWITCH_RGF"][med_q],
+                   gdas_SWITCH_RGF_MEDQ=result["gdas"]["SWITCH_RGF"][med_q],
+                   WRN28_SWITCH_RGF_MEDQ=result["WRN-28-10-drop"]["SWITCH_RGF"][med_q],
+                   WRN40_SWITCH_RGF_MEDQ=result["WRN-40-10-drop"]["SWITCH_RGF"][med_q],
                    )
               )
     else:
@@ -1474,8 +1400,7 @@ def draw_tables_for_CIFAR_median_avg_query(norm, archs_result):
                 & & Square Attack \cite{{ACFH2020square}} & {pyramidnet272_Square_ASR}\% & {gdas_Square_ASR}\% & {WRN28_Square_ASR}\% & {WRN40_Square_ASR}\% & {pyramidnet272_Square_MEDQ} & {gdas_Square_MEDQ} & {WRN28_Square_MEDQ} & {WRN40_Square_MEDQ} & {pyramidnet272_Square_AVGQ} & {gdas_Square_AVGQ} & {WRN28_Square_AVGQ} & {WRN40_Square_AVGQ}  \\\\
                 & & NO SWITCH & {pyramidnet272_NO_SWITCH_ASR}\% & {gdas_NO_SWITCH_ASR}\% & {WRN28_NO_SWITCH_ASR}\% & {WRN40_NO_SWITCH_ASR}\% & {pyramidnet272_NO_SWITCH_MEDQ} & {gdas_NO_SWITCH_MEDQ} & {WRN28_NO_SWITCH_MEDQ} & {WRN40_NO_SWITCH_MEDQ} & {pyramidnet272_NO_SWITCH_AVGQ} & {gdas_NO_SWITCH_AVGQ} & {WRN28_NO_SWITCH_AVGQ} & {WRN40_NO_SWITCH_AVGQ}  \\\\
                 & & SWITCH & {pyramidnet272_SWITCH_neg_ASR}\% & {gdas_SWITCH_neg_ASR}\% & {WRN28_SWITCH_neg_ASR}\% & {WRN40_SWITCH_neg_ASR}\% & {pyramidnet272_SWITCH_neg_MEDQ} & {gdas_SWITCH_neg_MEDQ} & {WRN28_SWITCH_neg_MEDQ} & {WRN40_SWITCH_neg_MEDQ} & {pyramidnet272_SWITCH_neg_AVGQ} & {gdas_SWITCH_neg_AVGQ} & {WRN28_SWITCH_neg_AVGQ} & {WRN40_SWITCH_neg_AVGQ}  \\\\
-                & & NO SWITCH$_rnd$ & {pyramidnet272_NO_SWITCH_rnd_ASR}\% & {gdas_NO_SWITCH_rnd_ASR}\% & {WRN28_NO_SWITCH_rnd_ASR}\% & {WRN40_NO_SWITCH_rnd_ASR}\% & {pyramidnet272_NO_SWITCH_rnd_MEDQ} & {gdas_NO_SWITCH_rnd_MEDQ} & {WRN28_NO_SWITCH_rnd_MEDQ} & {WRN40_NO_SWITCH_rnd_MEDQ} & {pyramidnet272_NO_SWITCH_rnd_AVGQ} & {gdas_NO_SWITCH_rnd_AVGQ} & {WRN28_NO_SWITCH_rnd_AVGQ} & {WRN40_NO_SWITCH_rnd_AVGQ}  \\\\
-                & & SWITCH$_other$ & {pyramidnet272_SWITCH_other_ASR}\% & {gdas_SWITCH_other_ASR}\% & {WRN28_SWITCH_other_ASR}\% & {WRN40_SWITCH_other_ASR}\% & {pyramidnet272_SWITCH_other_MEDQ} & {gdas_SWITCH_other_MEDQ} & {WRN28_SWITCH_other_MEDQ} & {WRN40_SWITCH_other_MEDQ} & {pyramidnet272_SWITCH_other_AVGQ} & {gdas_SWITCH_other_AVGQ} & {WRN28_SWITCH_other_AVGQ} & {WRN40_SWITCH_other_AVGQ} \\\\
+                & & SWITCH$_\\text{{RGF}}$ & {pyramidnet272_SWITCH_RGF_ASR}\% & {gdas_SWITCH_RGF_ASR}\% & {WRN28_SWITCH_RGF_ASR}\% & {WRN40_SWITCH_RGF_ASR}\% & {pyramidnet272_SWITCH_RGF_MEDQ} & {gdas_SWITCH_RGF_MEDQ} & {WRN28_SWITCH_RGF_MEDQ} & {WRN40_SWITCH_RGF_MEDQ} & {pyramidnet272_SWITCH_RGF_AVGQ} & {gdas_SWITCH_RGF_AVGQ} & {WRN28_SWITCH_RGF_AVGQ} & {WRN40_SWITCH_RGF_AVGQ}  \\\\
                 """.format(norm_str="$\ell_\infty$" if norm == "linf" else "$\ell_2$",
                           pyramidnet272_RGF_ASR=result["pyramidnet272"]["RGF"]["success_rate"],
                            gdas_RGF_ASR=result["gdas"]["RGF"]["success_rate"],
@@ -1594,31 +1519,18 @@ def draw_tables_for_CIFAR_median_avg_query(norm, archs_result):
                            WRN28_SWITCH_neg_MEDQ=result["WRN-28-10-drop"]["SWITCH_neg"][med_q],
                            WRN40_SWITCH_neg_MEDQ=result["WRN-40-10-drop"]["SWITCH_neg"][med_q],
 
-                           pyramidnet272_SWITCH_other_ASR=result["pyramidnet272"]["SWITCH_other"]["success_rate"],
-                           gdas_SWITCH_other_ASR=result["gdas"]["SWITCH_other"]["success_rate"],
-                           WRN28_SWITCH_other_ASR=result["WRN-28-10-drop"]["SWITCH_other"]["success_rate"],
-                           WRN40_SWITCH_other_ASR=result["WRN-40-10-drop"]["SWITCH_other"]["success_rate"],
-                           pyramidnet272_SWITCH_other_AVGQ=result["pyramidnet272"]["SWITCH_other"][avg_q],
-                           gdas_SWITCH_other_AVGQ=result["gdas"]["SWITCH_other"][avg_q],
-                           WRN28_SWITCH_other_AVGQ=result["WRN-28-10-drop"]["SWITCH_other"][avg_q],
-                           WRN40_SWITCH_other_AVGQ=result["WRN-40-10-drop"]["SWITCH_other"][avg_q],
-                           pyramidnet272_SWITCH_other_MEDQ=result["pyramidnet272"]["SWITCH_other"][med_q],
-                           gdas_SWITCH_other_MEDQ=result["gdas"]["SWITCH_other"][med_q],
-                           WRN28_SWITCH_other_MEDQ=result["WRN-28-10-drop"]["SWITCH_other"][med_q],
-                           WRN40_SWITCH_other_MEDQ=result["WRN-40-10-drop"]["SWITCH_other"][med_q],
-
-                           pyramidnet272_NO_SWITCH_rnd_ASR=result["pyramidnet272"]["NO_SWITCH_rnd"]["success_rate"],
-                           gdas_NO_SWITCH_rnd_ASR=result["gdas"]["NO_SWITCH_rnd"]["success_rate"],
-                           WRN28_NO_SWITCH_rnd_ASR=result["WRN-28-10-drop"]["NO_SWITCH_rnd"]["success_rate"],
-                           WRN40_NO_SWITCH_rnd_ASR=result["WRN-40-10-drop"]["NO_SWITCH_rnd"]["success_rate"],
-                           pyramidnet272_NO_SWITCH_rnd_AVGQ=result["pyramidnet272"]["NO_SWITCH_rnd"][avg_q],
-                           gdas_NO_SWITCH_rnd_AVGQ=result["gdas"]["NO_SWITCH_rnd"][avg_q],
-                           WRN28_NO_SWITCH_rnd_AVGQ=result["WRN-28-10-drop"]["NO_SWITCH_rnd"][avg_q],
-                           WRN40_NO_SWITCH_rnd_AVGQ=result["WRN-40-10-drop"]["NO_SWITCH_rnd"][avg_q],
-                           pyramidnet272_NO_SWITCH_rnd_MEDQ=result["pyramidnet272"]["NO_SWITCH_rnd"][med_q],
-                           gdas_NO_SWITCH_rnd_MEDQ=result["gdas"]["NO_SWITCH_rnd"][med_q],
-                           WRN28_NO_SWITCH_rnd_MEDQ=result["WRN-28-10-drop"]["NO_SWITCH_rnd"][med_q],
-                           WRN40_NO_SWITCH_rnd_MEDQ=result["WRN-40-10-drop"]["NO_SWITCH_rnd"][med_q],
+                           pyramidnet272_SWITCH_RGF_ASR=result["pyramidnet272"]["SWITCH_RGF"]["success_rate"],
+                           gdas_SWITCH_RGF_ASR=result["gdas"]["SWITCH_RGF"]["success_rate"],
+                           WRN28_SWITCH_RGF_ASR=result["WRN-28-10-drop"]["SWITCH_RGF"]["success_rate"],
+                           WRN40_SWITCH_RGF_ASR=result["WRN-40-10-drop"]["SWITCH_RGF"]["success_rate"],
+                           pyramidnet272_SWITCH_RGF_AVGQ=result["pyramidnet272"]["SWITCH_RGF"][avg_q],
+                           gdas_SWITCH_RGF_AVGQ=result["gdas"]["SWITCH_RGF"][avg_q],
+                           WRN28_SWITCH_RGF_AVGQ=result["WRN-28-10-drop"]["SWITCH_RGF"][avg_q],
+                           WRN40_SWITCH_RGF_AVGQ=result["WRN-40-10-drop"]["SWITCH_RGF"][avg_q],
+                           pyramidnet272_SWITCH_RGF_MEDQ=result["pyramidnet272"]["SWITCH_RGF"][med_q],
+                           gdas_SWITCH_RGF_MEDQ=result["gdas"]["SWITCH_RGF"][med_q],
+                           WRN28_SWITCH_RGF_MEDQ=result["WRN-28-10-drop"]["SWITCH_RGF"][med_q],
+                           WRN40_SWITCH_RGF_MEDQ=result["WRN-40-10-drop"]["SWITCH_RGF"][med_q],
                            )
               )
 
@@ -2063,7 +1975,7 @@ if __name__ == "__main__":
         result = fetch_all_json_content_given_contraint(dataset, norm, targeted, arch, limited_queries_small)
         result_archs_small_queries[arch] = result
     if "CIFAR" in dataset:
-        draw_tables_for_CIFAR_median_avg_query(norm,  result_archs_small_queries)
+        draw_tables_for_CIFAR(norm,  result_archs_small_queries)
     elif "TinyImageNet" in dataset:
-        draw_tables_for_TinyImageNet_median_avg_query(norm, result_archs_small_queries)
+        draw_tables_for_TinyImageNet(norm, result_archs_small_queries)
     print("THIS IS {} {} {}".format(dataset, norm, "untargeted" if not targeted else "targeted"))

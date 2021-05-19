@@ -11,12 +11,17 @@ from scipy.interpolate import make_interp_spline
 import seaborn as sns
 from utils.statistics_toolkit import success_rate_avg_query, success_rate_and_query_coorelation, query_to_bins
 
-from matplotlib import rcParams, rc
-rcParams['xtick.direction'] = 'out'
-rcParams['ytick.direction'] = 'out'
-rcParams['pdf.fonttype'] = 42
-rcParams['ps.fonttype'] = 42
-rc('pdf', fonttype=42)
+# from matplotlib import rcParams, rc
+# rcParams['xtick.direction'] = 'out'
+# rcParams['ytick.direction'] = 'out'
+# rcParams['pdf.fonttype'] = 42
+# rcParams['ps.fonttype'] = 42
+# rc('pdf', fonttype=42)
+plt.switch_backend('agg')
+plt.rcParams['pdf.use14corefonts'] = True
+font = {'family': 'Helvetica'}
+plt.rc('font', **font)
+
 
 def read_json_data(json_path, data_key):
     # data_key can be query_success_rate_dict, query_threshold_success_rate_dict, success_rate_to_avg_query
@@ -76,6 +81,7 @@ method_name_to_paper = {"bandits_attack":"Bandits", "P-RGF_biased_attack":"P-RGF
                         "NO_SWITCH" : "NO SWITCH",
                         # "SWITCH_other":r'$\mathrm{SWITCH}_{other}$',
                         "SWITCH_neg":'SWITCH',
+                        "SWITCH_RGF": 'SWITCH$_{{RGF}}$',
                         # "NO_SWITCH_rnd":  r'NO $\mathrm{SWITCH}_{rnd}$',
                         "PPBA_attack":"PPBA",
                         "parsimonious_attack":"Parsimonious",
@@ -151,7 +157,15 @@ def from_method_to_dir_path(dataset, method, norm, targeted):
                                                                             loss="cw" if not targeted else "xent",
                                                                             norm=norm,
                                                                             target_str="untargeted" if not targeted else "targeted_increment")
-
+    elif method == "SWITCH_RGF":
+        if dataset.startswith("CIFAR"):
+            path = "SWITCH_RGF-resnet-110-{dataset}-{loss}-loss-{norm}-{target_str}".format(dataset=dataset, loss="cw" if not targeted else "xent",
+                                                                                            norm=norm, target_str="untargeted" if not targeted else "targeted_increment")
+        elif dataset == "TinyImageNet":
+            path = "SWITCH_RGF-resnet101-{dataset}-{loss}-loss-{norm}-{target_str}".format(dataset=dataset,
+                                                                                            loss="cw" if not targeted else "xent",
+                                                                                            norm=norm,
+                                                                                            target_str="untargeted" if not targeted else "targeted_increment")
     return path
 
 def get_all_exists_folder(dataset, methods, norm, targeted):
@@ -180,7 +194,7 @@ def draw_query_success_rate_figure(dataset, norm, targeted, arch, fig_type, dump
     # markers = [".",",","o","^","s","p","x"]
     # max_x = 0
     # min_x = 0
-    our_method = 'SWITCH'
+    our_method = 'SWITCH$_{{RGF}}$'
 
     xtick = np.array([0, 1000, 2000, 3000, 4000, 5000, 6000, 7000, 8000, 9000, 10000])
     for idx, ((dataset, norm, targeted, method), (x,y)) in enumerate(data_info.items()):
@@ -222,14 +236,14 @@ def draw_query_success_rate_figure(dataset, norm, targeted, arch, fig_type, dump
     plt.gcf().subplots_adjust(bottom=0.15)
 
     # xtick = [0, 5000, 10000]
-    plt.xticks(xtick, fontsize=15)
-    plt.yticks([0, 10, 20, 30, 40, 50, 60, 70, 80, 90,100], fontsize=15)
-    plt.xlabel(xlabel, fontsize=18)
-    plt.ylabel(ylabel, fontsize=18)
-    plt.legend(loc='lower right', prop={'size': 18})
+    plt.xticks(xtick,  ["0"] + ["{}K".format(int(xtick_each//1000)) for xtick_each in xtick[1:]], fontsize=22)
+    plt.yticks([0, 10, 20, 30, 40, 50, 60, 70, 80, 90,100], fontsize=22)
+    plt.xlabel(xlabel, fontsize=25)
+    plt.ylabel(ylabel, fontsize=25)
+    plt.legend(loc='lower right', prop={'size': 22})
+    print("save to {}".format(dump_file_path))
     plt.savefig(dump_file_path, dpi=200)
     plt.close()
-    print("save to {}".format(dump_file_path))
 
 def draw_success_rate_avg_query_fig(dataset, norm, targeted, arch, fig_type, dump_file_path):
     xlabel = "Attack Success Rate (%)"
@@ -245,7 +259,7 @@ def draw_success_rate_avg_query_fig(dataset, norm, targeted, arch, fig_type, dum
     # max_x = 0
     # min_x = 0
     max_y = 0
-    our_method = 'SWITCH'
+    our_method = 'SWITCH$_\\text{RGF}$'
 
     for idx, ((dataset, norm, targeted, method), (x, y)) in enumerate(data_info.items()):
         color = colors[idx % len(colors)]
@@ -338,7 +352,7 @@ def draw_histogram_fig(dataset, norm, targeted, arch, dump_folder):
     data_info = get_success_queries(dataset_path_dict, arch)
     data_dict = OrderedDict()
     colors = []
-    our_method = "SWITCH"
+    our_method = 'SWITCH$_{{RGF}}$'
     for idx, ((dataset, norm, targeted, method), query_all) in enumerate(data_info.items()):
         color = predefined_colors[idx % len(predefined_colors)]
         if method == our_method:
@@ -360,10 +374,10 @@ def draw_histogram_fig(dataset, norm, targeted, arch, dump_folder):
     #     bins = 10
     plt.hist(datasets, bins=bins, range=(0,max_value),histtype='bar', color=colors,label=labels)
     plt.xticks(np.arange(0,max_value+1,max_value//bins), fontsize=10)
-    plt.xlabel(x_label, fontsize=10)
-    plt.ylabel(y_label, fontsize=10)
+    plt.xlabel(x_label, fontsize=13)
+    plt.ylabel(y_label, fontsize=13)
     plt.xlim(0,max_value)
-    plt.legend(loc='upper right', prop={'size': 10})
+    plt.legend(loc='upper right', prop={'size': 15})
     plt.grid(True, linewidth=0.5) #,axis="y")
     dump_file_path = dump_folder + "/{dataset}_{norm}_{targeted}_attack_on_{arch}.pdf".format(dataset=dataset,
                                                                                               norm=norm,
@@ -387,7 +401,7 @@ def parse_args():
 
 if __name__ == "__main__":
     args = parse_args()
-    dump_folder = "/home1/machen/query_based_black_box_attack/SWITCH_figures/{}/".format(args.fig_type)
+    dump_folder = "/home1/machen/query_based_black_box_attack/SWITCH_small_figures/{}/".format(args.fig_type)
     os.makedirs(dump_folder, exist_ok=True)
 
     if "CIFAR" in args.dataset:
@@ -396,8 +410,7 @@ if __name__ == "__main__":
         archs = ["densenet121", "resnext32_4", "resnext64_4"]
 
     for model in archs:
-        file_path = dump_folder + "{dataset}_{model}_{norm}_{target_str}_attack_{fig_type}.pdf".format(dataset=args.dataset,
-                    model=model, norm=args.norm, target_str="untargeted" if not args.targeted else "targeted", fig_type=args.fig_type)
+
         if args.fig_type == "query_threshold_success_rate_dict":
             x_label = "Maximum Query Number Threshold"
             y_label = "Attack Success Rate (%)"
@@ -416,7 +429,18 @@ if __name__ == "__main__":
                 #             dataset=dataset,
                 #             model=model, norm=norm, target_str="untargeted" if not args.targeted else "targeted",
                 #             fig_type=args.fig_type)
-            draw_query_success_rate_figure(args.dataset, args.norm, args.targeted, model, args.fig_type, file_path, x_label, y_label)
+            for dataset in ["CIFAR-10","CIFAR-100", "TinyImageNet"]:
+                if "CIFAR" in dataset:
+                    archs = ['pyramidnet272', "gdas", "WRN-28-10-drop", "WRN-40-10-drop"]
+                else:
+                    archs = ["densenet121", "resnext32_4", "resnext64_4"]
+                for norm in ["l2","linf"]:
+                    for model in archs:
+                        file_path = dump_folder + "{dataset}_{model}_{norm}_{target_str}_attack_{fig_type}.pdf".format(
+                            dataset=dataset,
+                            model=model, norm=norm, target_str="untargeted" if not args.targeted else "targeted",
+                            fig_type=args.fig_type)
+                        draw_query_success_rate_figure(dataset, norm, args.targeted, model, args.fig_type, file_path, x_label, y_label)
         elif args.fig_type == "success_rate_to_avg_query":
             draw_success_rate_avg_query_fig(args.dataset, args.norm, args.targeted, model, args.fig_type, file_path)
         elif args.fig_type == "query_hist":

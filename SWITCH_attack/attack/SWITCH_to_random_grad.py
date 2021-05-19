@@ -211,7 +211,7 @@ class SwitchAttack(object):
             grad = idx_positive_improved * surrogate_gradients  + \
                    (1 - idx_positive_improved) * idx_negative_improved * (-surrogate_gradients) + \
                   (1 - idx_positive_improved) * (1 - idx_negative_improved) * idx_positive_improved_random_grad * random_grad + \
-                  (1 - idx_positive_improved) * (1 - idx_negative_improved) * idx_negative_improved_random_grad * (-random_grad) + \
+                  (1 - idx_positive_improved) * (1 - idx_negative_improved) * (1- idx_positive_improved_random_grad) * idx_negative_improved_random_grad * (-random_grad) + \
                    (1 - idx_positive_improved) * (1 - idx_negative_improved) * (1-idx_positive_improved_random_grad) * (1-idx_negative_improved_random_grad) * idx_positive_larger_than_negative*random_grad + \
                    (1 - idx_positive_improved) * (1 - idx_negative_improved) * (1 - idx_positive_improved_random_grad) *\
                    (1 - idx_negative_improved_random_grad) * (1-idx_positive_larger_than_negative) * (-random_grad)
@@ -409,10 +409,10 @@ if __name__ == "__main__":
     parser.add_argument('--max-queries', type=int, default=10000)
     parser.add_argument('--image-lr', type=float, help='Learning rate for the image (iterative attack)')
     parser.add_argument('--random-lr', type=float, default=0.01)
-    parser.add_argument('--norm', type=str, required=True, help='Which lp constraint to run bandits [linf|l2]')
+    parser.add_argument('--norm', type=str, required=True, help='Which lp constraint to run attack [linf|l2]')
     parser.add_argument("--loss", type=str, required=True, choices=["xent", "cw"])
     parser.add_argument('--epsilon', type=float, help='the lp perturbation bound')
-    parser.add_argument('--batch-size', type=int, default=200, help='The mini-batch size')
+    parser.add_argument('--batch-size', type=int, default=250, help='The mini-batch size')
     parser.add_argument('--dataset', type=str, required=True,
                         choices=['CIFAR-10', 'CIFAR-100', 'ImageNet', "FashionMNIST", "MNIST", "TinyImageNet"],
                         help='which dataset to use')

@@ -443,7 +443,7 @@ class SwitchAttack(object):
                 query = query + not_done
                 query = query + (1-idx_positive_improved).view(-1) * not_done
                 idx_positive_larger_negative = (attempt_positive_loss>=attempt_negative_loss).float().view(-1,1,1,1)
-                if not args.SWITCH_RGF and not args.SWITCH_Bandits and not args.SWITCH_Square:
+                if not args.SWITCH_RGF and not args.SWITCH_Square:
                     grad = idx_positive_improved * surrogate_gradients  + \
                            (1 - idx_positive_improved) * idx_negative_improved * (-surrogate_gradients) + \
                            (1 - idx_positive_improved) * (1 - idx_negative_improved) * idx_positive_larger_negative * surrogate_gradients + \
@@ -483,14 +483,6 @@ class SwitchAttack(object):
                                                     self.epsilon, args.square_sub_iter, args.p, x_last_iter=None if first_iter else square_adv_images)
                         query[need_square_image_indexes] += torch.from_numpy(n_queries).to(query.device)
 
-
-                elif args.SWITCH_Bandits:
-                    est_grad, prior = self.get_bandits_grad(adv_images, true_labels, target_labels, target_model, criterion, prior, args)
-                    grad = idx_positive_improved * surrogate_gradients + \
-                           (1 - idx_positive_improved) * idx_negative_improved * (-surrogate_gradients) + \
-                           (1 - idx_positive_improved) * (1 - idx_negative_improved) * est_grad
-                    query = query + ((1 - idx_positive_improved) * (1 - idx_negative_improved)).view(
-                        -1) * 2 * not_done
             adv_images = image_step(adv_images, grad, args.image_lr)
             adv_images = proj_step(images, args.epsilon, adv_images)
             if args.SWITCH_Square and need_square_image_indexes.size(0) > 0:
@@ -598,40 +590,6 @@ class SwitchAttack(object):
         grad = torch.mean(grad, dim=0, keepdim=False)
         return grad
 
-    def get_bandits_grad(self, adv_images, true_labels, target_labels, target_model, criterion, prior, args):
-        '''
-        The attack process for generating adversarial examples with priors.
-        '''
-        assert args.tiling == (args.dataset == "ImageNet")
-        if args.tiling:
-            upsampler = Upsample(size=(target_model.input_size[-2], target_model.input_size[-1]))
-        else:
-            upsampler = lambda x: x
-        dim = prior.nelement() / args.batch_size               # nelement() --> total number of elements
-        prior_step = self.gd_prior_step if args.norm == 'l2' else self.eg_prior_step
-        # Loss function
-        # Create noise for exporation, estimate the gradient, and take a PGD step
-        exp_noise = args.exploration * torch.randn_like(prior) / (dim ** 0.5)  # parameterizes the exploration to be done around the prior
-        # Query deltas for finite difference estimator
-        exp_noise = exp_noise.cuda()
-        q1 = upsampler(prior + exp_noise)  # 这就是Finite Difference算法， prior相当于论文里的v，这个prior也会更新，把梯度累积上去
-        q2 = upsampler(prior - exp_noise)   # prior 相当于累积的更新量，用这个更新量，再去修改image，就会变得非常准
-        # Loss points for finite difference estimator
-        q1_images = adv_images + args.fd_eta * q1 / self.normalize(q1)
-        q2_images = adv_images + args.fd_eta * q2 / self.normalize(q2)
-        with torch.no_grad():
-            q1_logits = target_model(q1_images)
-            q2_logits = target_model(q2_images)
-        l1 = criterion(q1_logits, true_labels, target_labels)
-        l2 = criterion(q2_logits, true_labels, target_labels)
-        # Finite differences estimate of directional derivative
-        est_deriv = (l1 - l2) / (args.fd_eta * args.exploration)  # 方向导数 , l1和l2是loss
-        # 2-query gradient estimate
-        est_grad = est_deriv.view(-1, 1, 1, 1) * exp_noise  # B, C, H, W,
-        # Update the prior with the estimated gradient
-        prior = prior_step(prior, est_grad, args.online_lr)  # 注意，修正的是prior,这就是bandit算法的精髓
-        grad = upsampler(prior)
-        return grad, prior
 
     def attack_all_images(self, args, arch_name, target_model, surrogate_model, result_dump_path):
         for batch_idx, data_tuple in enumerate(self.dataset_loader):
@@ -717,10 +675,11 @@ def get_exp_dir_name(dataset, surrogate_arch, loss, norm, targeted, target_type,
         method_name = "SWITCH_random_grad"
     elif args.SWITCH_RGF:
         method_name = "SWITCH_RGF"
+        if args.RGF_q != 50:
+            method_name += "_Q_{}".format(args.RGF_q)
     elif args.SWITCH_Square:
         method_name = "SWITCH_Square"
-    elif args.SWITCH_Bandits:
-        method_name = "SWITCH_Bandits"
+
     if args.NO_SWITCH:
         method_name = "NO_{}".format(method_name)
     if args.cosine_grad:
@@ -757,7 +716,7 @@ if __name__ == "__main__":
     parser.add_argument("--gpu",type=int, required=True)
     parser.add_argument('--max-queries', type=int, default=10000)
     parser.add_argument('--image-lr', type=float, help='Learning rate for the image (iterative attack)')
-    parser.add_argument('--norm', type=str, required=True, help='Which lp constraint to run bandits [linf|l2]')
+    parser.add_argument('--norm', type=str, required=True, help='Which lp constraint to run attack [linf|l2]')
     parser.add_argument("--loss", type=str, required=True, choices=["xent", "cw"])
     parser.add_argument('--epsilon', type=float, help='the lp perturbation bound')
     parser.add_argument('--batch-size', type=int, default=100, help='The mini-batch size')
@@ -770,7 +729,7 @@ if __name__ == "__main__":
     parser.add_argument("--surrogate_arch", type=str, default="resnet-110", help="The architecture of surrogate model,"
                                                                                  " in original paper it is resnet152")
     parser.add_argument('--json-config', type=str,
-                        default=osp.join(os.getcwd(), 'configures/SWITCH.json'),
+                        default=osp.join(os.getcwd(), 'configures/SWITCH_attack_conf.json'),
                         help='a configuration file to be passed in instead of arguments')
     parser.add_argument('--arch', default=None, type=str, help='network architecture')
     parser.add_argument('--test_archs', action="store_true")
@@ -783,24 +742,16 @@ if __name__ == "__main__":
     parser.add_argument('--NO_SWITCH',action="store_true")
     parser.add_argument('--SWITCH_RGF',action='store_true')
     parser.add_argument('--SWITCH_Square',action='store_true')
-    parser.add_argument('--SWITCH_Bandits', action='store_true')
     parser.add_argument('--square_sub_iter', type=int,default=100)
     parser.add_argument('--random_grad', action='store_true')
 
-    # parameters for Switch Bandits
-    parser.add_argument('--fd-eta', type=float, help='\eta, used to estimate the derivative via finite differences')
-    parser.add_argument('--online-lr', type=float, help='Learning rate for the prior')
-    parser.add_argument('--exploration', type=float,
-                        help='\delta, parameterizes the exploration to be done around the prior')
-    parser.add_argument('--tile-size', type=int, help='the side length of each tile (for the tiling prior)')
-    parser.add_argument('--tiling', action='store_true')
+
     # parameters for Switch RGF
     parser.add_argument("--sigma", type=float, default=1e-4, help="Sampling variance.")
     parser.add_argument("--RGF_q", type=int, default=50, help="Number of samples to estimate the gradient.")
     parser.add_argument('--cosine_grad',action='store_true',help='record the cosine similarity of gradient')
 
     args = parser.parse_args()
-    assert not (args.SWITCH_RGF and args.SWITCH_Bandits)
     os.environ["CUDA_DEVICE_ORDER"] = "PCI_BUS_ID"
     os.environ['CUDA_VISIBLE_DEVICES'] = str(args.gpu)
     os.environ["TORCH_HOME"] = "/home1/machen/.cache/torch/pretrainedmodels"

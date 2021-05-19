@@ -10,6 +10,10 @@ from PIL import Image
 from torchvision import transforms
 from torchvision.datasets.utils import download_url, check_integrity
 from bidict import bidict
+import torchvision.datasets as datasets
+
+from dataset_loader_maker import pil_loader
+
 
 class ImageNetDataset(torch.utils.data.Dataset):
     def __init__(self, root_dirname, target_class_label, phase):
@@ -171,3 +175,37 @@ class CIFAR100Dataset(CIFAR10Dataset):
     test_list = [
         ['test', 'f0ef6b0ae62326f3e7ffdfab6717acfc'],
     ]
+
+class TinyImageNetDataset(torch.utils.data.Dataset):
+    def __init__(self, root, target_class_label, phase):
+        self.is_train = phase == "train"
+        self.category_names = sorted(os.listdir(root + "/train/"))
+        self.transform = transforms.ToTensor()
+        if phase == "train":
+            self.dataset = datasets.ImageFolder(root + "/train/", transform=self.transform)
+        else:
+            self.file_name_to_category_id = {}
+            with open(root + "/val/val_annotations.txt", "r") as file_obj:
+                for line in file_obj:
+                    image_file_name, category_name, *_ = line.split()
+                    self.file_name_to_category_id[root + "/val/images/{}".format(image_file_name)] \
+                        = self.category_names.index(category_name)
+        self.del_image_index_list = [key for key, label in self.file_name_to_category_id.items() if label != target_class_label]
+        for image_index in self.del_image_index_list:
+            del self.file_name_to_category_id[image_index]
+
+    def __len__(self):
+        if self.is_train:
+            return len(self.dataset)
+        else:
+            return len(self.file_name_to_category_id)
+
+    def __getitem__(self, item):
+        if self.is_train:
+            img, label = self.dataset[item]
+        else:
+            file_path = list(self.file_name_to_category_id.keys())[item]
+            img = pil_loader(file_path)
+            img = self.transform(img)
+            label = self.file_name_to_category_id[file_path]
+        return img, label

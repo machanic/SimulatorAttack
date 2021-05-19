@@ -329,10 +329,10 @@ if __name__ == "__main__":
                 model=model, norm=args.norm, target_str="untargeted" if not args.targeted else "targeted",
                 fig_type=args.fig_type)
             if args.fig_type == "query_hist":
-                draw_histogram_fig(dataset, "linf", args.targeted, model, dump_folder)
+                draw_histogram_fig(dataset, args.norm, args.targeted, model, dump_folder)
             elif args.fig_type == 'query_threshold_success_rate_dict':
-                draw_query_success_rate_figure(dataset, "linf", args.targeted, model, args.fig_type, file_path, x_label,
+                draw_query_success_rate_figure(dataset, args.norm, args.targeted, model, args.fig_type, file_path, x_label,
                                            y_label)
             elif args.fig_type == "success_rate_to_avg_query":
-                draw_success_rate_avg_query_fig(dataset, "linf", args.targeted, model,
+                draw_success_rate_avg_query_fig(dataset, args.norm, args.targeted, model,
                                         args.fig_type, file_path)

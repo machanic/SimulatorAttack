@@ -405,7 +405,7 @@ if __name__ == "__main__":
                         help='Methods used in the attack. uniform: RGF, biased: P-RGF (\lambda^*), fixed_biased: P-RGF (\lambda=0.5)')
     parser.add_argument("--dataprior", default=None, action="store_true", help="Whether to use data prior in the attack.")
     parser.add_argument('--json-config', type=str,
-                        default='/home1/machen/meta_perturbations_black_box_attack/configures/prior_RGF_attack_conf.json',
+                        default='./configures/prior_RGF_attack_conf.json',
                         help='a configures file to be passed in instead of arguments')
     parser.add_argument("--show_loss", action="store_true", help="Whether to print loss in some given step sizes.")
     parser.add_argument("--samples_per_draw",type=int, default=50, help="Number of samples to estimate the gradient.")
